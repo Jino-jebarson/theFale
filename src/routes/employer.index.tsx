@@ -9,6 +9,9 @@ import {
   HiPlus,
   HiOutlineShieldCheck,
   HiOutlineClock,
+  HiOutlineEnvelope,
+  HiOutlinePhone,
+  HiOutlineQuestionMarkCircle,
 } from "react-icons/hi2";
 import { AppShell, StatusBadge, initials } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
@@ -298,6 +301,47 @@ function Employer() {
                 Review all applicants <HiArrowRight className="h-3.5 w-3.5" />
               </Link>
             </div>
+          </div>
+        </div>
+
+        {/* Hospital Institutional Support & Escrow Assistance Banner */}
+        <div className="rounded-3xl border border-primary/20 bg-gradient-to-r from-primary/5 via-card to-emerald-500/5 p-5 sm:p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary-soft text-primary shadow-2xs">
+                <HiOutlineQuestionMarkCircle className="h-5 w-5" />
+              </span>
+              <h3 className="text-sm font-bold text-foreground">Hospital Concierge & Clinical Support</h3>
+              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                24/7 Available
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Direct assistance with custom hospital shift broadcasts, credential audits, and escrow settlements.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <Button asChild variant="outline" size="sm" className="rounded-xl text-xs font-semibold gap-1.5 h-9">
+              <a href="mailto:contact@thefale.com">
+                <HiOutlineEnvelope className="h-4 w-4 text-primary" />
+                <span>contact@thefale.com</span>
+              </a>
+            </Button>
+
+            <Button asChild variant="outline" size="sm" className="rounded-xl text-xs font-semibold gap-1.5 h-9">
+              <a href="tel:+917338367726">
+                <HiOutlinePhone className="h-4 w-4 text-emerald-600" />
+                <span>+91 73383 67726</span>
+              </a>
+            </Button>
+
+            <Button asChild size="sm" className="rounded-xl text-xs font-bold gap-1.5 h-9 bg-primary hover:bg-primary-hover shadow-xs">
+              <Link to="/support">
+                <span>Open Support Center</span>
+                <HiArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </Button>
           </div>
         </div>
       </div>

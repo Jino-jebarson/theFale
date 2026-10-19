@@ -17,6 +17,7 @@ import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ShiftsRouteImport } from './routes/shifts'
+import { Route as SupportRouteImport } from './routes/support'
 import { Route as VerifyRouteImport } from './routes/verify'
 import { Route as EmployerIndexRouteImport } from './routes/employer.index'
 import { Route as EmployerApplicantsRouteImport } from './routes/employer.applicants'
@@ -67,6 +68,11 @@ const ProfileRoute = ProfileRouteImport.update({
 const ShiftsRoute = ShiftsRouteImport.update({
   id: '/shifts',
   path: '/shifts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SupportRoute = SupportRouteImport.update({
+  id: '/support',
+  path: '/support',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VerifyRoute = VerifyRouteImport.update({
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
   '/shifts': typeof ShiftsRoute
+  '/support': typeof SupportRoute
   '/verify': typeof VerifyRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
   '/shifts': typeof ShiftsRoute
+  '/support': typeof SupportRoute
   '/verify': typeof VerifyRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/onboarding': typeof OnboardingRoute
   '/profile': typeof ProfileRoute
   '/shifts': typeof ShiftsRoute
+  '/support': typeof SupportRoute
   '/verify': typeof VerifyRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/profile'
     | '/shifts'
+    | '/support'
     | '/verify'
     | '/employer/applicants'
     | '/employer/candidates'
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/profile'
     | '/shifts'
+    | '/support'
     | '/verify'
     | '/employer/applicants'
     | '/employer/candidates'
@@ -242,6 +253,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/profile'
     | '/shifts'
+    | '/support'
     | '/verify'
     | '/employer/applicants'
     | '/employer/candidates'
@@ -264,6 +276,7 @@ export interface RootRouteChildren {
   OnboardingRoute: typeof OnboardingRoute
   ProfileRoute: typeof ProfileRoute
   ShiftsRoute: typeof ShiftsRoute
+  SupportRoute: typeof SupportRoute
   VerifyRoute: typeof VerifyRoute
   EmployerApplicantsRoute: typeof EmployerApplicantsRoute
   EmployerCandidatesRoute: typeof EmployerCandidatesRoute
@@ -333,6 +346,13 @@ declare module '@tanstack/react-router' {
       path: '/shifts'
       fullPath: '/shifts'
       preLoaderRoute: typeof ShiftsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/support': {
+      id: '/support'
+      path: '/support'
+      fullPath: '/support'
+      preLoaderRoute: typeof SupportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/verify': {
@@ -424,6 +444,7 @@ const rootRouteChildren: RootRouteChildren = {
   OnboardingRoute: OnboardingRoute,
   ProfileRoute: ProfileRoute,
   ShiftsRoute: ShiftsRoute,
+  SupportRoute: SupportRoute,
   VerifyRoute: VerifyRoute,
   EmployerApplicantsRoute: EmployerApplicantsRoute,
   EmployerCandidatesRoute: EmployerCandidatesRoute,

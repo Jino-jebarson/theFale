@@ -5,7 +5,7 @@ import {
   HiOutlineClipboardDocumentList, HiClipboardDocumentList, HiOutlineAcademicCap, HiAcademicCap,
   HiOutlineBell, HiOutlineMagnifyingGlass, HiMagnifyingGlass, HiOutlineSquares2X2, HiSquares2X2, HiOutlinePlusCircle,
   HiPlusCircle, HiOutlineUserGroup, HiUserGroup, HiOutlineArrowRightOnRectangle,
-  HiOutlineSun, HiOutlineMoon, HiOutlineComputerDesktop, HiCheck,
+  HiOutlineSun, HiOutlineMoon, HiOutlineComputerDesktop, HiCheck, HiOutlineQuestionMarkCircle,
 } from "react-icons/hi2";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
@@ -96,6 +96,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               {s.portal === "candidate" && <DropdownMenuItem onClick={() => navigate({ to: "/profile" })}>View profile</DropdownMenuItem>}
               {s.portal === "facility" && <DropdownMenuItem onClick={() => navigate({ to: "/employer/profile" })}>Hospital Profile</DropdownMenuItem>}
               <DropdownMenuItem onClick={() => navigate({ to: "/onboarding" })}>Edit onboarding details</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate({ to: "/support" })} className="cursor-pointer">
+                <HiOutlineQuestionMarkCircle className="h-4 w-4 text-primary" />
+                <span>Help & Support</span>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 Appearance

@@ -17,6 +17,7 @@ import {
   HiOutlineCheckCircle,
   HiOutlineBuildingOffice2,
   HiOutlineArrowTopRightOnSquare,
+  HiOutlineQuestionMarkCircle,
 } from "react-icons/hi2";
 import { RiShieldKeyholeFill, RiVerifiedBadgeFill } from "react-icons/ri";
 import { toast } from "sonner";
@@ -552,6 +553,46 @@ function Home() {
               </div>
               <span className="text-[10px] font-semibold text-muted-foreground whitespace-nowrap">+13 more hospitals</span>
             </div>
+          </div>
+
+          {/* FALE Healthcare Support & Concierge Widget */}
+          <div className="surface p-4 rounded-3xl border border-primary/20 bg-primary/5 shadow-2xs w-full min-w-0 overflow-hidden space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-primary">
+                <HiOutlineQuestionMarkCircle className="h-4 w-4" />
+                <span>Need Support?</span>
+              </span>
+              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                24/7 Active
+              </span>
+            </div>
+
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Assistance with DigiLocker verification, 24-hr shift payouts, or timesheets:
+            </p>
+
+            <div className="space-y-1.5 text-xs">
+              <a
+                href="mailto:contact@thefale.com"
+                className="flex items-center gap-2 font-medium text-foreground hover:text-primary transition-colors"
+              >
+                <span className="font-mono text-[11px] font-bold text-primary">contact@thefale.com</span>
+              </a>
+              <a
+                href="tel:+917338367726"
+                className="flex items-center gap-2 font-mono text-[11px] font-bold text-foreground hover:text-primary transition-colors"
+              >
+                <span>+91 73383 67726</span>
+              </a>
+            </div>
+
+            <Link
+              to="/support"
+              className="mt-1 flex items-center justify-center gap-1.5 rounded-xl bg-card border border-border/80 py-2 text-xs font-bold text-foreground hover:bg-muted/40 transition-colors shadow-2xs"
+            >
+              <span>Visit Help Center & FAQs</span>
+              <HiArrowRight className="h-3.5 w-3.5 text-primary shrink-0" />
+            </Link>
           </div>
         </aside>
       </div>
