@@ -19,6 +19,11 @@ import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ShiftsRouteImport } from './routes/shifts'
 import { Route as SupportRouteImport } from './routes/support'
 import { Route as VerifyRouteImport } from './routes/verify'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
+import { Route as AdminApplicationsRouteImport } from './routes/admin.applications'
+import { Route as AdminCandidatesRouteImport } from './routes/admin.candidates'
+import { Route as AdminFacilitiesRouteImport } from './routes/admin.facilities'
+import { Route as AdminPostingsRouteImport } from './routes/admin.postings'
 import { Route as EmployerIndexRouteImport } from './routes/employer.index'
 import { Route as EmployerApplicantsRouteImport } from './routes/employer.applicants'
 import { Route as EmployerCandidatesRouteImport } from './routes/employer.candidates'
@@ -78,6 +83,31 @@ const SupportRoute = SupportRouteImport.update({
 const VerifyRoute = VerifyRouteImport.update({
   id: '/verify',
   path: '/verify',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminApplicationsRoute = AdminApplicationsRouteImport.update({
+  id: '/admin/applications',
+  path: '/admin/applications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminCandidatesRoute = AdminCandidatesRouteImport.update({
+  id: '/admin/candidates',
+  path: '/admin/candidates',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminFacilitiesRoute = AdminFacilitiesRouteImport.update({
+  id: '/admin/facilities',
+  path: '/admin/facilities',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminPostingsRoute = AdminPostingsRouteImport.update({
+  id: '/admin/postings',
+  path: '/admin/postings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EmployerIndexRoute = EmployerIndexRouteImport.update({
@@ -142,6 +172,10 @@ export interface FileRoutesByFullPath {
   '/shifts': typeof ShiftsRoute
   '/support': typeof SupportRoute
   '/verify': typeof VerifyRoute
+  '/admin/applications': typeof AdminApplicationsRoute
+  '/admin/candidates': typeof AdminCandidatesRoute
+  '/admin/facilities': typeof AdminFacilitiesRoute
+  '/admin/postings': typeof AdminPostingsRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
   '/employer/post': typeof EmployerPostRoute
@@ -149,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/employer/profile': typeof EmployerProfileRoute
   '/jobs/$id': typeof JobsIdRoute
   '/learning/$id': typeof LearningIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/employer/': typeof EmployerIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/learning/': typeof LearningIndexRoute
@@ -164,6 +199,10 @@ export interface FileRoutesByTo {
   '/shifts': typeof ShiftsRoute
   '/support': typeof SupportRoute
   '/verify': typeof VerifyRoute
+  '/admin/applications': typeof AdminApplicationsRoute
+  '/admin/candidates': typeof AdminCandidatesRoute
+  '/admin/facilities': typeof AdminFacilitiesRoute
+  '/admin/postings': typeof AdminPostingsRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
   '/employer/post': typeof EmployerPostRoute
@@ -171,6 +210,7 @@ export interface FileRoutesByTo {
   '/employer/profile': typeof EmployerProfileRoute
   '/jobs/$id': typeof JobsIdRoute
   '/learning/$id': typeof LearningIdRoute
+  '/admin': typeof AdminIndexRoute
   '/employer': typeof EmployerIndexRoute
   '/jobs': typeof JobsIndexRoute
   '/learning': typeof LearningIndexRoute
@@ -187,6 +227,10 @@ export interface FileRoutesById {
   '/shifts': typeof ShiftsRoute
   '/support': typeof SupportRoute
   '/verify': typeof VerifyRoute
+  '/admin/applications': typeof AdminApplicationsRoute
+  '/admin/candidates': typeof AdminCandidatesRoute
+  '/admin/facilities': typeof AdminFacilitiesRoute
+  '/admin/postings': typeof AdminPostingsRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
   '/employer/post': typeof EmployerPostRoute
@@ -194,6 +238,7 @@ export interface FileRoutesById {
   '/employer/profile': typeof EmployerProfileRoute
   '/jobs/$id': typeof JobsIdRoute
   '/learning/$id': typeof LearningIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/employer/': typeof EmployerIndexRoute
   '/jobs/': typeof JobsIndexRoute
   '/learning/': typeof LearningIndexRoute
@@ -211,6 +256,10 @@ export interface FileRouteTypes {
     | '/shifts'
     | '/support'
     | '/verify'
+    | '/admin/applications'
+    | '/admin/candidates'
+    | '/admin/facilities'
+    | '/admin/postings'
     | '/employer/applicants'
     | '/employer/candidates'
     | '/employer/post'
@@ -218,6 +267,7 @@ export interface FileRouteTypes {
     | '/employer/profile'
     | '/jobs/$id'
     | '/learning/$id'
+    | '/admin/'
     | '/employer/'
     | '/jobs/'
     | '/learning/'
@@ -233,6 +283,10 @@ export interface FileRouteTypes {
     | '/shifts'
     | '/support'
     | '/verify'
+    | '/admin/applications'
+    | '/admin/candidates'
+    | '/admin/facilities'
+    | '/admin/postings'
     | '/employer/applicants'
     | '/employer/candidates'
     | '/employer/post'
@@ -240,6 +294,7 @@ export interface FileRouteTypes {
     | '/employer/profile'
     | '/jobs/$id'
     | '/learning/$id'
+    | '/admin'
     | '/employer'
     | '/jobs'
     | '/learning'
@@ -255,6 +310,10 @@ export interface FileRouteTypes {
     | '/shifts'
     | '/support'
     | '/verify'
+    | '/admin/applications'
+    | '/admin/candidates'
+    | '/admin/facilities'
+    | '/admin/postings'
     | '/employer/applicants'
     | '/employer/candidates'
     | '/employer/post'
@@ -262,6 +321,7 @@ export interface FileRouteTypes {
     | '/employer/profile'
     | '/jobs/$id'
     | '/learning/$id'
+    | '/admin/'
     | '/employer/'
     | '/jobs/'
     | '/learning/'
@@ -278,6 +338,10 @@ export interface RootRouteChildren {
   ShiftsRoute: typeof ShiftsRoute
   SupportRoute: typeof SupportRoute
   VerifyRoute: typeof VerifyRoute
+  AdminApplicationsRoute: typeof AdminApplicationsRoute
+  AdminCandidatesRoute: typeof AdminCandidatesRoute
+  AdminFacilitiesRoute: typeof AdminFacilitiesRoute
+  AdminPostingsRoute: typeof AdminPostingsRoute
   EmployerApplicantsRoute: typeof EmployerApplicantsRoute
   EmployerCandidatesRoute: typeof EmployerCandidatesRoute
   EmployerPostRoute: typeof EmployerPostRoute
@@ -285,6 +349,7 @@ export interface RootRouteChildren {
   EmployerProfileRoute: typeof EmployerProfileRoute
   JobsIdRoute: typeof JobsIdRoute
   LearningIdRoute: typeof LearningIdRoute
+  AdminIndexRoute: typeof AdminIndexRoute
   EmployerIndexRoute: typeof EmployerIndexRoute
   JobsIndexRoute: typeof JobsIndexRoute
   LearningIndexRoute: typeof LearningIndexRoute
@@ -360,6 +425,41 @@ declare module '@tanstack/react-router' {
       path: '/verify'
       fullPath: '/verify'
       preLoaderRoute: typeof VerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/': {
+      id: '/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/applications': {
+      id: '/admin/applications'
+      path: '/admin/applications'
+      fullPath: '/admin/applications'
+      preLoaderRoute: typeof AdminApplicationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/candidates': {
+      id: '/admin/candidates'
+      path: '/admin/candidates'
+      fullPath: '/admin/candidates'
+      preLoaderRoute: typeof AdminCandidatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/facilities': {
+      id: '/admin/facilities'
+      path: '/admin/facilities'
+      fullPath: '/admin/facilities'
+      preLoaderRoute: typeof AdminFacilitiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/postings': {
+      id: '/admin/postings'
+      path: '/admin/postings'
+      fullPath: '/admin/postings'
+      preLoaderRoute: typeof AdminPostingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/employer/': {
@@ -446,6 +546,10 @@ const rootRouteChildren: RootRouteChildren = {
   ShiftsRoute: ShiftsRoute,
   SupportRoute: SupportRoute,
   VerifyRoute: VerifyRoute,
+  AdminApplicationsRoute: AdminApplicationsRoute,
+  AdminCandidatesRoute: AdminCandidatesRoute,
+  AdminFacilitiesRoute: AdminFacilitiesRoute,
+  AdminPostingsRoute: AdminPostingsRoute,
   EmployerApplicantsRoute: EmployerApplicantsRoute,
   EmployerCandidatesRoute: EmployerCandidatesRoute,
   EmployerPostRoute: EmployerPostRoute,
@@ -453,6 +557,7 @@ const rootRouteChildren: RootRouteChildren = {
   EmployerProfileRoute: EmployerProfileRoute,
   JobsIdRoute: JobsIdRoute,
   LearningIdRoute: LearningIdRoute,
+  AdminIndexRoute: AdminIndexRoute,
   EmployerIndexRoute: EmployerIndexRoute,
   JobsIndexRoute: JobsIndexRoute,
   LearningIndexRoute: LearningIndexRoute,

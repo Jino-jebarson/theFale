@@ -31,8 +31,41 @@ function Post() {
   const submit = (status: string) => (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!val("title")) { toast.error("Add a job title first"); return; }
-    setState((s) => ({ postedJobs: [{ id: crypto.randomUUID(), title: val("title"), dept: val("dept") || "General", openings: Number(val("openings")) || 1, status }, ...s.postedJobs] }));
-    toast.success(status === "Open" ? "Job published" : "Draft saved");
+    const newId = crypto.randomUUID();
+    const isPublishing = status === "Open";
+    const postingStatus = isPublishing ? "Pending Admin Approval" : "Draft";
+
+    setState((s) => ({
+      postedJobs: [{ id: newId, title: val("title"), dept: val("dept") || "General", openings: Number(val("openings")) || 1, status: postingStatus }, ...s.postedJobs],
+      jobApprovals: isPublishing
+        ? [
+            {
+              id: newId,
+              title: val("title"),
+              org: String(s.profile["org"] || "Hospital Network"),
+              type: "job" as const,
+              dept: val("dept") || "General",
+              city: String(s.profile["city"] || "Bengaluru"),
+              compensation: val("min") && val("max") ? `₹${val("min")} – ₹${val("max")} / mo` : "₹40,000 – ₹55,000 / mo",
+              expOrHours: String(d["exp"] || "2–5 yrs"),
+              status: "pending" as const,
+              submittedDate: "Just now",
+              openings: Number(val("openings")) || 1,
+              postedBy: String(s.profile["recruiter"] || "Facility HR"),
+              urgent: Boolean(d["urgent"]),
+            },
+            ...s.jobApprovals,
+          ]
+        : s.jobApprovals,
+    }));
+
+    if (isPublishing) {
+      toast.success("Submitted for Admin Verification!", {
+        description: "Your requirement has been sent to FALE Admin. Once verified, it will reflect in the Candidate Portal.",
+      });
+    } else {
+      toast.success("Draft saved");
+    }
     navigate({ to: "/employer" });
   };
 

@@ -219,7 +219,7 @@
     -webkit-font-smoothing: antialiased;
     max-width: 100%;
     overflow-x: hidden;
-    scrollbar-gutter: stable;
+    scrollbar-gutter: auto !important;
   }
   body {
     background-color: var(--color-background);
@@ -233,7 +233,6 @@
   body[data-scroll-locked] {
     margin-right: 0 !important;
     padding-right: 0 !important;
-    overflow-y: scroll !important;
   }
 }
 
@@ -340,5 +339,56 @@
 .no-scrollbar {
   -ms-overflow-style: none !important;
   scrollbar-width: none !important;
+}
+
+/* Fluid hardware-accelerated transitions for admin donut charts */
+.recharts-pie-sector,
+.recharts-sector {
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), filter 0.25s ease !important;
+  outline: none !important;
+}
+
+/* Modern sleek custom scrollbar for sheets, drawers, and modals */
+@utility custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted-foreground);
+  }
+}
+
+/* Ensure background window doesn't show duplicate scrollbars when Sheet/Dialog is open */
+html:has([data-state="open"]),
+body:has([data-state="open"]),
+body[data-scroll-locked] {
+  overflow: hidden !important;
+}
+
+/* Eliminate unwanted Radix / react-remove-scroll right gap on Sheet content and body */
+html,
+html[data-scroll-locked],
+html[style*="padding-right"],
+html[style*="margin-right"],
+body[data-scroll-locked],
+body[style*="padding-right"],
+body[style*="margin-right"],
+[data-radix-portal] [data-radix-dialog-content],
+[data-radix-dialog-content],
+[data-radix-dialog-content][style] {
+  padding-right: 0px !important;
+  margin-right: 0px !important;
+  right: 0px !important;
+  scrollbar-gutter: auto !important;
 }
 

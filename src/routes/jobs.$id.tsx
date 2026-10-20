@@ -54,10 +54,38 @@ function JobDetail() {
 
   const apply = () => {
     const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    const candidateName = String(s.profile["name"] || "Candidate Professional");
+    const candidateRole = String(s.profile["role"] || "Healthcare Professional");
+    const candidateCity = String(s.profile["city"] || "Chennai");
+    const regNumber = String(s.profile["regNo"] || "TNC/RN/89421");
+
     setState((x) => ({
-      applied: [{ jobId: job.id, status: "Applied", date: now }, ...x.applied.filter((a) => a.jobId !== job.id)],
+      applied: [{ jobId: job.id, status: "Under Admin Screening", date: now }, ...x.applied.filter((a) => a.jobId !== job.id)],
+      adminApplications: [
+        {
+          id: crypto.randomUUID(),
+          candidateName,
+          candidateRole,
+          candidateCity,
+          jobId: job.id,
+          jobTitle: job.title,
+          hospitalName: job.org,
+          matchScore: job.match || 92,
+          councilVerified: true,
+          regNumber,
+          exp: "2–4 yrs clinical experience",
+          status: "pending_admin" as const,
+          appliedDate: "Just now",
+          summary: `Applicant submitted credential profile for ${job.title} at ${job.org}. Awaiting Admin shortlisting.`,
+          phone: s.contact || "+91 98401 23456",
+          email: "candidate@fale.in",
+        },
+        ...x.adminApplications,
+      ],
     }));
-    toast.success("Application sent!", { description: `Your FALE profile was shared with ${job.org}.` });
+    toast.success("Application Submitted for Admin Screening!", {
+      description: `Your profile has arrived at FALE Admin. Once shortlisted, it will be forwarded to ${job.org}.`,
+    });
   };
 
   const handleWithdrawConfirm = (reason: string, notes: string) => {
