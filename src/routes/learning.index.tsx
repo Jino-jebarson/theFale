@@ -92,74 +92,76 @@ function Learning() {
       />
 
       {/* Mode Switcher & Search Bar */}
-      <div className="space-y-4 mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          {/* Catalog vs My Learning Toggle */}
-          <div className="inline-flex rounded-2xl bg-muted p-1 border border-border/70">
-            <button
-              type="button"
-              onClick={() => setViewMode("catalog")}
-              className={cn(
-                "rounded-xl px-4 py-2 text-xs font-bold transition-all",
-                viewMode === "catalog"
-                  ? "bg-card text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              Explore Catalog ({courses.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("my-learning")}
-              className={cn(
-                "rounded-xl px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5",
-                viewMode === "my-learning"
-                  ? "bg-card text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              My Learning
-              {enrolledCourses.length > 0 && (
-                <span className="rounded-full bg-primary px-1.5 py-0.2 text-[10px] font-black text-white">
-                  {enrolledCourses.length}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Search Box */}
-          <div className="relative w-full sm:w-80">
-            <HiOutlineMagnifyingGlass className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Search courses, skills, or topics..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-10 rounded-2xl border-border/80 text-xs bg-card"
-            />
-          </div>
-        </div>
-
-        {/* Category Pills (Catalog view only) */}
-        {viewMode === "catalog" && (
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {CATEGORIES.map((cat) => (
+      <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2.5 pb-2.5 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
+        <div className="surface rounded-3xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            {/* Catalog vs My Learning Toggle */}
+            <div className="inline-flex rounded-2xl bg-muted/60 p-1 border border-border/50 shrink-0">
               <button
-                key={cat}
                 type="button"
-                onClick={() => setSelectedCategory(cat)}
+                onClick={() => setViewMode("catalog")}
                 className={cn(
-                  "rounded-full px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-all border",
-                  selectedCategory === cat
-                    ? "bg-primary text-primary-foreground border-primary shadow-2xs font-bold"
-                    : "bg-card text-muted-foreground border-border/70 hover:bg-muted/50 hover:text-foreground"
+                  "rounded-xl px-4 py-2 text-xs font-bold transition-all cursor-pointer",
+                  viewMode === "catalog"
+                    ? "bg-card text-primary shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {cat}
+                Explore Catalog ({courses.length})
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={() => setViewMode("my-learning")}
+                className={cn(
+                  "rounded-xl px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                  viewMode === "my-learning"
+                    ? "bg-card text-primary shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <span>My Learning</span>
+                {enrolledCourses.length > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 py-0.2 text-[10px] font-black text-white">
+                    {enrolledCourses.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Search Box */}
+            <div className="relative w-full sm:w-80">
+              <HiOutlineMagnifyingGlass className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search courses, skills, or topics..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-10 rounded-2xl border-border/80 text-xs bg-muted/30 focus-within:bg-card"
+              />
+            </div>
           </div>
-        )}
+
+          {/* Category Pills (Catalog view only) */}
+          {viewMode === "catalog" && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none border-t border-border/60 pt-2.5">
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setSelectedCategory(cat)}
+                  className={cn(
+                    "rounded-full px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer",
+                    selectedCategory === cat
+                      ? "bg-primary text-primary-foreground border-primary shadow-2xs font-bold"
+                      : "bg-muted/40 text-muted-foreground border-border/70 hover:bg-muted/70 hover:text-foreground"
+                  )}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Content Rendering: MY LEARNING VIEW */}

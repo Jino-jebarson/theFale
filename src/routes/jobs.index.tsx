@@ -695,86 +695,88 @@ function Jobs() {
   return (
     <AppShell>
       {/* ================= SEARCH HERO DOCK ================= */}
-      <div className="surface mb-5 sm:mb-7 rounded-3xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            navigate({ search: { q: q.trim() || undefined } });
-          }}
-          className="flex flex-col gap-2 sm:flex-row sm:items-center"
-        >
-          {/* Main search query */}
-          <div className="flex flex-1 items-center gap-3 rounded-2xl bg-muted/40 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all">
-            <HiOutlineMagnifyingGlass className="h-5 w-5 text-primary shrink-0" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Role, medical specialty, hospital or qualification"
-              className="h-11 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none font-medium"
-            />
-            {q && (
+      <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-3 pb-3 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
+        <div className="surface rounded-3xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              navigate({ search: { q: q.trim() || undefined } });
+            }}
+            className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          >
+            {/* Main search query */}
+            <div className="flex flex-1 items-center gap-3 rounded-2xl bg-muted/40 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+              <HiOutlineMagnifyingGlass className="h-5 w-5 text-primary shrink-0" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Role, medical specialty, hospital or qualification"
+                className="h-11 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none font-medium"
+              />
+              {q && (
+                <button
+                  type="button"
+                  onClick={() => setQ("")}
+                  className="rounded-full p-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <HiXMark className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            <span className="hidden h-8 w-px bg-border/80 sm:block" />
+
+            {/* City input */}
+            <div className="flex flex-1 sm:max-w-xs items-center gap-3 rounded-2xl bg-muted/40 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+              <HiOutlineMapPin className="h-5 w-5 text-primary shrink-0" />
+              <input
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="City or state"
+                className="h-11 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none font-medium"
+              />
+              {city && (
+                <button
+                  type="button"
+                  onClick={() => setCity("")}
+                  className="rounded-full p-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <HiXMark className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            <Button size="lg" className="h-12 rounded-2xl font-bold px-7 shadow-md">
+              Search jobs
+            </Button>
+          </form>
+
+          {/* Quick Keyword Chips */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 px-1 pt-1 text-xs">
+            <span className="font-bold text-muted-foreground">Popular:</span>
+            {popularSearches.map((term) => (
               <button
+                key={term}
                 type="button"
-                onClick={() => setQ("")}
-                className="rounded-full p-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                onClick={() => {
+                  setQ(term);
+                  navigate({ search: { q: term } });
+                }}
+                className="rounded-lg bg-muted/50 px-2 py-1 font-semibold text-muted-foreground hover:bg-primary-soft hover:text-primary transition-colors cursor-pointer"
               >
-                <HiXMark className="h-4 w-4" />
+                {term}
               </button>
-            )}
+            ))}
           </div>
-
-          <span className="hidden h-8 w-px bg-border/80 sm:block" />
-
-          {/* City input */}
-          <div className="flex flex-1 sm:max-w-xs items-center gap-3 rounded-2xl bg-muted/40 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all">
-            <HiOutlineMapPin className="h-5 w-5 text-primary shrink-0" />
-            <input
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              placeholder="City or state"
-              className="h-11 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none font-medium"
-            />
-            {city && (
-              <button
-                type="button"
-                onClick={() => setCity("")}
-                className="rounded-full p-1 text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <HiXMark className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-
-          <Button size="lg" className="h-12 rounded-2xl font-bold px-7 shadow-md">
-            Search jobs
-          </Button>
-        </form>
-
-        {/* Quick Keyword Chips */}
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 px-1 pt-1 text-xs">
-          <span className="font-bold text-muted-foreground">Popular:</span>
-          {popularSearches.map((term) => (
-            <button
-              key={term}
-              type="button"
-              onClick={() => {
-                setQ(term);
-                navigate({ search: { q: term } });
-              }}
-              className="rounded-lg bg-muted/50 px-2 py-1 font-semibold text-muted-foreground hover:bg-primary-soft hover:text-primary transition-colors cursor-pointer"
-            >
-              {term}
-            </button>
-          ))}
         </div>
       </div>
 
       {/* ================= MAIN CONTENT LAYOUT ================= */}
       <div className="grid gap-6 lg:grid-cols-[290px_1fr]">
         {/* Left Filters Sidebar (Only visible on desktop screens >= lg) */}
-        <aside className="hidden lg:block surface h-fit rounded-3xl border border-border/80 bg-card p-5 shadow-xs space-y-5">
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-border/60 pb-3">
+        <aside className="hidden lg:flex flex-col surface sticky top-[calc(var(--header-offset,4rem)+8.5rem)] z-20 max-h-[calc(100vh-var(--header-offset,4rem)-9.5rem)] rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all duration-300 ease-in-out">
+          {/* Header (Pinned at top of card) */}
+          <div className="flex items-center justify-between border-b border-border/60 pb-3 shrink-0">
             <h3 className="flex items-center gap-2 font-black text-sm text-foreground">
               <HiOutlineAdjustmentsHorizontal className="h-4.5 w-4.5 text-primary" />
               <span>Filters</span>
@@ -796,7 +798,10 @@ function Jobs() {
             )}
           </div>
 
-          {renderFilterSections()}
+          {/* Internal Scrollable Filter Sections */}
+          <div className="mt-4 flex-1 overflow-y-auto pr-1 space-y-5 overscroll-contain">
+            {renderFilterSections()}
+          </div>
         </aside>
 
         {/* Right Jobs Feed */}

@@ -588,7 +588,7 @@ function Onboarding() {
                 <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-primary">
                   {f ? "Facility Setup" : "Your Profile"}
                 </span>
-                <span className="inline-flex items-center rounded-full bg-blue-50 border border-blue-200/60 px-2.5 py-0.5 text-xs font-bold text-primary">
+                <span className="inline-flex items-center rounded-full bg-primary-soft border border-primary/20 px-2.5 py-0.5 text-xs font-bold text-primary">
                   {pct}% complete
                 </span>
               </div>
@@ -596,7 +596,7 @@ function Onboarding() {
               {/* Progress Bar */}
               <div className="mt-3.5 h-2 w-full overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-primary to-blue-500 transition-all duration-500 shadow-sm"
+                  className="h-full rounded-full bg-gradient-to-r from-primary to-orange-400 transition-all duration-500 shadow-sm shadow-primary/25"
                   style={{ width: `${pct}%` }}
                 />
               </div>
@@ -618,7 +618,7 @@ function Onboarding() {
                         onClick={() => setStep(i)}
                         className={cn(
                           "group flex w-full items-start gap-3 rounded-2xl p-2.5 text-left transition-all",
-                          isCurrent && "bg-blue-50/80 border border-blue-200/80 shadow-sm",
+                          isCurrent && "bg-primary-soft/60 border border-primary/25 shadow-sm",
                           isCompleted && "hover:bg-slate-50 cursor-pointer",
                           isPending && "cursor-not-allowed",
                         )}
@@ -628,7 +628,7 @@ function Onboarding() {
                           className={cn(
                             "relative z-20 grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold transition-transform group-hover:scale-105",
                             isCompleted && "bg-emerald-600 text-white shadow-sm ring-4 ring-white",
-                            isCurrent && "bg-primary text-white shadow-md shadow-primary/30 ring-4 ring-blue-100",
+                            isCurrent && "bg-primary text-white shadow-md shadow-primary/30 ring-4 ring-primary/15",
                             isPending && "border border-slate-300 bg-white text-slate-400 ring-4 ring-white",
                           )}
                         >
@@ -682,7 +682,7 @@ function Onboarding() {
             {/* Card Header */}
             <div className="border-b border-slate-100 pb-6 mb-7">
               <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 border border-blue-200/60 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-primary">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-soft border border-primary/20 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-primary">
                   Step {step + 1} of {steps.length}
                 </span>
                 <span className="text-xs font-semibold text-slate-400">
@@ -755,8 +755,8 @@ function Onboarding() {
               <HiOutlineXMark className="h-5 w-5" />
             </button>
 
-            {/* Blue Icon Badge */}
-            <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-primary">
+            {/* Brand Icon Badge */}
+            <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-soft text-primary">
               <LogOut className="h-6 w-6 stroke-[2.2] text-primary" />
             </div>
 
@@ -834,7 +834,7 @@ function FormSection({
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
         <div className="flex items-start gap-2.5 min-w-0">
           {icon && (
-            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-blue-50 text-primary border border-blue-200/60 shadow-2xs [&_svg]:h-[18px] [&_svg]:w-[18px] mt-0.5">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary-soft text-primary border border-primary/20 shadow-2xs [&_svg]:h-[18px] [&_svg]:w-[18px] mt-0.5">
               {icon}
             </span>
           )}
@@ -858,7 +858,7 @@ function FormSection({
 
 function Note({ children }: { children: ReactNode }) {
   return (
-    <div className="flex gap-3 rounded-2xl border border-primary/20 bg-blue-50/70 p-4 text-sm text-slate-700">
+    <div className="flex gap-3 rounded-2xl border border-primary/20 bg-primary-soft/60 p-4 text-sm text-slate-700">
       <HiOutlineInformationCircle className="h-5 w-5 shrink-0 text-primary mt-0.5" />
       <span className="text-xs leading-relaxed">{children}</span>
     </div>

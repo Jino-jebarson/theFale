@@ -9,29 +9,28 @@ export function Logo({
 }) {
   return (
     <span className={cn("inline-flex items-center gap-2.5 select-none", className)}>
-      {/* Icon: Tilted squircle badge in project blue with white stylized 'f' */}
+      {/* Icon: Tilted squircle badge in Saffron with white stylized 'f' */}
       <span
         className={cn(
-          "relative grid h-10 w-10 shrink-0 place-items-center rounded-[12px] rotate-[-4deg] transition-transform shadow-sm",
+          "relative grid h-10 w-10 shrink-0 place-items-center rounded-[12px] rotate-[-4deg] transition-transform",
           inverted
-            ? "bg-[#1d63d2] text-white ring-1 ring-white/25"
-            : "bg-[#1d63d2] text-white shadow-brand",
+            ? "bg-primary text-white ring-1 ring-white/25"
+            : "bg-primary text-white",
         )}
       >
         <span
-          className="text-[26px] font-black italic leading-none select-none pl-0.5"
+          className="text-[26px] font-black italic leading-none select-none pl-0.5 text-white"
           style={{ fontFamily: "'Fraunces', Georgia, serif" }}
         >
           f
         </span>
       </span>
 
-      {/* Wordmark: Stacked 'the' on top and 'fale' below in project colors */}
+      {/* Wordmark: Stacked 'the' on top and 'fale' below */}
       <span className="flex flex-col -space-y-1 leading-none">
         <span
           className={cn(
-            "text-[12px] font-extrabold italic pl-0.5 tracking-wide",
-            inverted ? "text-[#60a5fa]" : "text-[#1d63d2] dark:text-[#60a5fa]",
+            "text-[12px] font-extrabold italic pl-0.5 tracking-wide text-primary",
           )}
           style={{ fontFamily: "'Fraunces', Georgia, serif" }}
         >
@@ -39,8 +38,8 @@ export function Logo({
         </span>
         <span
           className={cn(
-            "text-[28px] font-black italic tracking-tight",
-            inverted ? "text-white" : "text-[#0d1e3a] dark:text-white",
+            "text-[28px] font-black italic tracking-tight flex items-baseline",
+            inverted ? "text-white" : "text-foreground",
           )}
           style={{ fontFamily: "'Fraunces', Georgia, serif" }}
         >

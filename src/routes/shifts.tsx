@@ -83,11 +83,11 @@ function Shifts() {
           return false;
         }
         if (timingF === "day") {
-          const startHour = Number.parseInt(sh.time.split(":")[0], 10);
+          const startHour = Number.parseInt(sh.time.split(":")[0] ?? "0", 10);
           if (startHour >= 18 || startHour < 6) return false;
         }
         if (timingF === "night") {
-          const startHour = Number.parseInt(sh.time.split(":")[0], 10);
+          const startHour = Number.parseInt(sh.time.split(":")[0] ?? "0", 10);
           if (startHour < 18 && startHour >= 6) return false;
         }
         return true;
@@ -157,7 +157,7 @@ function Shifts() {
             <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               Applied shifts
             </span>
-            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
+            <div className="grid h-9 w-9 place-items-center rounded-2xl bg-primary-soft text-primary">
               <HiOutlineCalendarDays className="h-5 w-5" />
             </div>
           </div>
@@ -212,109 +212,111 @@ function Shifts() {
       </div>
 
       {/* ================= SEARCH & SMART FILTER DOCK ================= */}
-      <div className="surface mb-7 rounded-3xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm space-y-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          {/* Main search bar */}
-          <div className="flex flex-1 items-center gap-3 rounded-2xl bg-muted/40 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all">
-            <HiOutlineMagnifyingGlass className="h-5 w-5 text-primary shrink-0" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search shifts by title, specialty, hospital or department"
-              className="h-11 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none font-medium"
-            />
-            {q && (
-              <button
-                type="button"
-                onClick={() => setQ("")}
-                className="rounded-full p-1 text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <HiXMark className="h-4 w-4" />
-              </button>
-            )}
+      <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-3 pb-3 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
+        <div className="surface rounded-3xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm space-y-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            {/* Main search bar */}
+            <div className="flex flex-1 items-center gap-3 rounded-2xl bg-muted/40 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+              <HiOutlineMagnifyingGlass className="h-5 w-5 text-primary shrink-0" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search shifts by title, specialty, hospital or department"
+                className="h-11 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none font-medium"
+              />
+              {q && (
+                <button
+                  type="button"
+                  onClick={() => setQ("")}
+                  className="rounded-full p-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <HiXMark className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            <span className="hidden h-8 w-px bg-border/80 sm:block" />
+
+            {/* Custom City Select Filter */}
+            <div className="w-full sm:w-[210px] shrink-0">
+              <Select value={cityF} onValueChange={(val) => setCityF(val)}>
+                <SelectTrigger
+                  aria-label="Filter shifts by city"
+                  className="h-11 w-full rounded-2xl border-none bg-muted/40 px-3.5 text-sm font-bold text-foreground shadow-none hover:bg-muted/60 focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0" />
+                    <SelectValue placeholder="All Cities" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent className="rounded-2xl border-border/80 bg-card/95 backdrop-blur-md p-1 shadow-lg">
+                  {cityOpts.map((c) => (
+                    <SelectItem
+                      key={c}
+                      value={c}
+                      className="rounded-xl font-semibold cursor-pointer py-2 focus:bg-primary/10 focus:text-primary"
+                    >
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          <span className="hidden h-8 w-px bg-border/80 sm:block" />
+          {/* Filter Pills & Sort Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3">
+            {/* Timing Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 min-w-0">
+              {timingOpts.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTimingF(t.id)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition-all cursor-pointer",
+                    timingF === t.id
+                      ? "bg-primary text-white shadow-2xs"
+                      : "bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                  )}
+                >
+                  {"withIcon" in t && t.withIcon && (
+                    <HiOutlineBolt
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0",
+                        timingF === t.id ? "text-white" : "text-amber-500"
+                      )}
+                    />
+                  )}
+                  <span>{t.label}</span>
+                </button>
+              ))}
+            </div>
 
-          {/* Custom City Select Filter */}
-          <div className="w-full sm:w-[210px] shrink-0">
-            <Select value={cityF} onValueChange={(val) => setCityF(val)}>
-              <SelectTrigger
-                aria-label="Filter shifts by city"
-                className="h-11 w-full rounded-2xl border-none bg-muted/40 px-3.5 text-sm font-bold text-foreground shadow-none hover:bg-muted/60 focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
-              >
-                <div className="flex items-center gap-2 truncate">
-                  <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0" />
-                  <SelectValue placeholder="All Cities" />
-                </div>
-              </SelectTrigger>
-              <SelectContent className="rounded-2xl border-border/80 bg-card/95 backdrop-blur-md p-1 shadow-lg">
-                {cityOpts.map((c) => (
-                  <SelectItem
-                    key={c}
-                    value={c}
-                    className="rounded-xl font-semibold cursor-pointer py-2 focus:bg-primary/10 focus:text-primary"
-                  >
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* Filter Pills & Sort Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3">
-          {/* Timing Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 min-w-0">
-            {timingOpts.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTimingF(t.id)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition-all cursor-pointer",
-                  timingF === t.id
-                    ? "bg-primary text-white shadow-2xs"
-                    : "bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground"
-                )}
-              >
-                {"withIcon" in t && t.withIcon && (
-                  <HiOutlineBolt
-                    className={cn(
-                      "h-3.5 w-3.5 shrink-0",
-                      timingF === t.id ? "text-white" : "text-amber-500"
-                    )}
-                  />
-                )}
-                <span>{t.label}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* Segmented Sort (Apple style) */}
-          <div className="flex items-center rounded-2xl bg-muted/60 p-1 text-xs font-semibold border border-border/50">
-            {(
-              [
-                ["pay", "Highest pay"],
-                ["rate", "Hourly rate"],
-                ["earliest", "Earliest date"],
-              ] as const
-            ).map(([k, l]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setSort(k)}
-                className={cn(
-                  "rounded-xl px-3 py-1.5 transition-all cursor-pointer font-bold",
-                  sort === k
-                    ? "bg-card text-primary shadow-xs"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {l}
-              </button>
-            ))}
+            {/* Segmented Sort (Apple style) */}
+            <div className="flex items-center rounded-2xl bg-muted/60 p-1 text-xs font-semibold border border-border/50">
+              {(
+                [
+                  ["pay", "Highest pay"],
+                  ["rate", "Hourly rate"],
+                  ["earliest", "Earliest date"],
+                ] as const
+              ).map(([k, l]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setSort(k)}
+                  className={cn(
+                    "rounded-xl px-3 py-1.5 transition-all cursor-pointer font-bold",
+                    sort === k
+                      ? "bg-card text-primary shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

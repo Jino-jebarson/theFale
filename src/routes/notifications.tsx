@@ -260,7 +260,7 @@ function NotificationsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/80 pb-4 min-w-0">
           <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-              <span className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl sm:rounded-2xl bg-gradient-to-br from-primary to-blue-600 text-white shadow-xs">
+              <span className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl sm:rounded-2xl bg-gradient-to-br from-primary to-primary-hover text-white shadow-brand">
                 <HiBell className="h-4 w-4 sm:h-5 sm:w-5" />
               </span>
               <h1 className="text-lg sm:text-2xl font-black text-foreground tracking-tight truncate min-w-0 flex-1">
@@ -368,7 +368,7 @@ function NotificationsPage() {
             </div>
 
             {/* Naukri-Style Recruiter Pulse Widget */}
-            <div className="surface p-4 rounded-3xl border border-border/80 space-y-3 shadow-card bg-gradient-to-br from-card via-card to-blue-50/40 dark:to-blue-950/20 min-w-0">
+            <div className="surface p-4 rounded-3xl border border-border/80 space-y-3 shadow-card bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20 min-w-0">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-extrabold text-foreground flex items-center gap-1.5">
                   <HiOutlineBolt className="h-4 w-4 text-amber-500" /> Recruiter Reach

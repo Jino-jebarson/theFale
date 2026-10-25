@@ -419,37 +419,39 @@ function HospitalProfileScreen() {
         </div>
 
         {/* ================= NAVIGATION TABS (Apple-style Segmented) ================= */}
-        <div className="flex border-b border-border/80 overflow-x-auto scrollbar-none gap-2">
-          {[
-            { id: "overview", label: "Overview & Infrastructure", icon: HiOutlineBuildingOffice2 },
-            { id: "departments", label: "Clinical Departments", icon: HiOutlineShieldCheck },
-            {
-              id: "jobs",
-              label: `Active Jobs & Shifts (${hospitalJobs.length + hospitalShifts.length})`,
-              icon: HiOutlineBriefcase,
-            },
-            { id: "benefits", label: "Staff Benefits & Culture", icon: HiOutlineHeart },
-            { id: "accreditations", label: "Accreditations & Quality", icon: HiOutlineDocumentCheck },
-          ].map((tab) => {
-            const isActive = activeTab === tab.id;
-            const TabIcon = tab.icon;
-            return (
-              <button
-                type="button"
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-3 text-xs font-bold transition-all border-b-2 -mb-px whitespace-nowrap cursor-pointer",
-                  isActive
-                    ? "border-primary text-primary font-black"
-                    : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
-                )}
-              >
-                <TabIcon className="h-4 w-4 shrink-0" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+        <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 bg-background/95 backdrop-blur-md border-b border-border/80 transition-all duration-300 ease-in-out">
+          <div className="flex overflow-x-auto scrollbar-none gap-2">
+            {[
+              { id: "overview", label: "Overview & Infrastructure", icon: HiOutlineBuildingOffice2 },
+              { id: "departments", label: "Clinical Departments", icon: HiOutlineShieldCheck },
+              {
+                id: "jobs",
+                label: `Active Jobs & Shifts (${hospitalJobs.length + hospitalShifts.length})`,
+                icon: HiOutlineBriefcase,
+              },
+              { id: "benefits", label: "Staff Benefits & Culture", icon: HiOutlineHeart },
+              { id: "accreditations", label: "Accreditations & Quality", icon: HiOutlineDocumentCheck },
+            ].map((tab) => {
+              const isActive = activeTab === tab.id;
+              const TabIcon = tab.icon;
+              return (
+                <button
+                  type="button"
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-3 text-xs font-bold transition-all border-b-2 -mb-px whitespace-nowrap cursor-pointer",
+                    isActive
+                      ? "border-primary text-primary font-black"
+                      : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+                  )}
+                >
+                  <TabIcon className="h-4 w-4 shrink-0" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* ================= TAB CONTENT 1: OVERVIEW & INFRASTRUCTURE ================= */}

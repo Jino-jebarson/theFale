@@ -152,12 +152,12 @@ function Profile() {
         {/* HERO COVER & IDENTITY CARD                                 */}
         {/* ========================================================= */}
         <div className="surface overflow-hidden rounded-2xl sm:rounded-3xl border border-border/80 shadow-card w-full min-w-0">
-          {/* Cover Banner with Medical Gradient & Tech Grid */}
-          <div className="relative h-28 sm:h-44 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-800 p-3 sm:p-6 flex flex-col justify-between overflow-hidden">
+          {/* Cover Banner with Sleek Matte Charcoal & Saffron Tech Grid */}
+          <div className="relative h-28 sm:h-44 bg-[#1C1B1A] dark:bg-[#151413] p-3 sm:p-6 flex flex-col justify-between overflow-hidden">
             {/* Subtle background tech / grid overlay */}
             <div className="absolute inset-0 opacity-15 pointer-events-none bg-[radial-gradient(#ffffff_1.2px,transparent_1.2px)] [background-size:16px_16px]" />
-            <div className="absolute -right-16 -top-16 h-48 w-48 sm:h-64 sm:w-64 rounded-full bg-white/10 blur-2xl pointer-events-none" />
-            <div className="absolute -left-12 -bottom-12 h-36 w-36 sm:h-48 sm:w-48 rounded-full bg-cyan-400/20 blur-xl pointer-events-none" />
+            <div className="absolute -right-16 -top-16 h-48 w-48 sm:h-64 sm:w-64 rounded-full bg-primary/25 blur-3xl pointer-events-none" />
+            <div className="absolute -left-12 -bottom-12 h-36 w-36 sm:h-48 sm:w-48 rounded-full bg-primary/15 blur-2xl pointer-events-none" />
 
             {/* Top row inside cover: Badges & Quick Actions */}
             <div className="relative z-10 flex items-center justify-between gap-1.5 sm:gap-2 min-w-0">
@@ -192,8 +192,8 @@ function Profile() {
             </div>
 
             {/* Bottom row inside cover: Hospital Affiliation tag */}
-            <div className="relative z-10 hidden sm:flex items-center gap-2 text-xs text-blue-100 font-medium">
-              <HiOutlineBuildingOffice2 className="h-4 w-4 text-blue-200" />
+            <div className="relative z-10 hidden sm:flex items-center gap-2 text-xs text-white/75 font-medium">
+              <HiOutlineBuildingOffice2 className="h-4 w-4 text-primary" />
               <span className="truncate">{employer}</span>
             </div>
           </div>
@@ -203,7 +203,7 @@ function Profile() {
             <div className="-mt-10 sm:-mt-16 flex items-end justify-between gap-3">
               {/* Avatar with Verified Shield */}
               <div className="relative">
-                <div className="relative grid h-20 w-20 sm:h-28 sm:w-28 place-items-center rounded-2xl sm:rounded-3xl border-4 border-card bg-gradient-to-tr from-primary to-blue-500 text-2xl sm:text-4xl font-black text-white shadow-lg">
+                <div className="relative grid h-20 w-20 sm:h-28 sm:w-28 place-items-center rounded-2xl sm:rounded-3xl border-4 border-card bg-primary-soft text-2xl sm:text-4xl font-black text-primary shadow-lg">
                   {initials(name)}
                   <span className="absolute -bottom-1 -right-1 grid h-6 w-6 sm:h-7 sm:w-7 place-items-center rounded-full bg-emerald-500 text-white border-2 border-card shadow-xs">
                     <HiCheckCircle className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -588,7 +588,7 @@ function Profile() {
               </div>
 
               {/* Council License Showcase Card */}
-              <div className="rounded-2xl border-2 border-primary/20 bg-gradient-to-br from-card via-card to-blue-50/40 dark:to-blue-950/20 p-4 sm:p-6 space-y-4 min-w-0">
+              <div className="rounded-2xl border-2 border-primary/20 bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20 p-4 sm:p-6 space-y-4 min-w-0">
                 <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 text-xs">
                   <div className="space-y-1 min-w-0">
                     <span className="text-muted-foreground font-semibold text-[11px]">Registered Council</span>
@@ -746,7 +746,7 @@ function Profile() {
                 {earnedCmeCourses.map((c) => (
                   <div
                     key={c.id}
-                    className="rounded-2xl border border-border/80 bg-gradient-to-br from-card via-card to-blue-50/30 dark:to-blue-950/20 p-4 sm:p-5 space-y-3 shadow-2xs min-w-0"
+                    className="rounded-2xl border border-border/80 bg-gradient-to-br from-card via-card to-primary-soft/30 dark:to-primary-soft/20 p-4 sm:p-5 space-y-3 shadow-2xs min-w-0"
                   >
                     <div className="flex items-center justify-between gap-2 text-xs">
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 font-bold text-primary text-[10px] truncate max-w-[150px]">

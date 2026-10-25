@@ -110,9 +110,9 @@ export function AdminLayout({
   };
 
   return (
-    <div className="min-h-screen pb-20 md:pb-0 w-full max-w-full overflow-x-hidden bg-background text-foreground">
+    <div className="min-h-screen pb-20 md:pb-0 w-full max-w-full overflow-x-clip bg-background text-foreground">
       {/* Top Header Navigation (Identical to Candidate & Hospital Portals) */}
-      <header className="sticky top-0 z-40 border-b border-border/80 bg-card/95 backdrop-blur">
+      <header className="sticky top-0 z-50 w-full border-b border-border/80 bg-card/95 backdrop-blur-md supports-[backdrop-filter]:bg-card/85 shadow-xs">
         <div className="flex h-16 w-full items-center gap-4 px-4 sm:px-6 lg:px-8">
           {/* Brand Logo */}
           <div className="flex items-center gap-2.5 shrink-0">

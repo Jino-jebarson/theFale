@@ -241,7 +241,7 @@ export function DigiLockerModal({
                     <button
                       type="button"
                       onClick={() => setResendTimer(30)}
-                      className="font-bold text-[#0047AB] hover:underline cursor-pointer"
+                      className="font-bold text-primary hover:underline cursor-pointer"
                     >
                       Resend OTP
                     </button>
@@ -250,18 +250,18 @@ export function DigiLockerModal({
               </div>
 
               {/* Bottom Actions Bar */}
-              <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-border">
+              <div className="pt-2 flex items-center justify-end gap-3 border-t border-border">
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={() => setStep("aadhaar")}
-                  className="h-11 px-4 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
+                  className="h-11 px-4 rounded-xl text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer"
                 >
                   Back
                 </Button>
                 <Button
                   type="submit"
-                  className="h-11 px-6 rounded-xl bg-[#0047AB] text-xs font-bold text-white shadow-md shadow-blue-900/15 hover:bg-[#00388A] active:scale-[0.98] transition-all cursor-pointer"
+                  className="h-11 px-6 rounded-xl bg-primary text-xs font-bold text-white shadow-brand hover:bg-primary-hover active:scale-[0.98] transition-all cursor-pointer"
                 >
                   Verify & Fetch Aadhaar
                 </Button>
@@ -272,8 +272,8 @@ export function DigiLockerModal({
           {step === "loading" && (
             <div className="py-10 text-center space-y-4">
               <div className="relative mx-auto h-16 w-16">
-                <div className="absolute inset-0 rounded-full border-4 border-[#0047AB]/20 animate-ping" />
-                <div className="grid h-16 w-16 place-items-center rounded-2xl bg-blue-50 text-[#0047AB] dark:bg-primary-soft shadow-inner">
+                <div className="absolute inset-0 rounded-full border-4 border-primary/20 animate-ping" />
+                <div className="grid h-16 w-16 place-items-center rounded-2xl bg-primary-soft text-primary dark:bg-primary-soft shadow-inner">
                   <ImSpinner2 className="h-8 w-8 animate-spin" />
                 </div>
               </div>

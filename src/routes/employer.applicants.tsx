@@ -142,76 +142,78 @@ function Applicants() {
         </div>
 
         {/* Clean Filter & Search Bar */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {/* Status Tabs */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
-            {(["All", "New", "Shortlisted", "Interview"] as const).map((f) => {
-              const active = filter === f;
-              const count = counts[f];
-              return (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setFilter(f)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-all cursor-pointer shrink-0",
-                    active
-                      ? "bg-primary text-primary-foreground shadow-xs"
-                      : "border border-input bg-card text-muted-foreground hover:border-ring hover:text-foreground"
-                  )}
-                >
-                  <span>{f}</span>
-                  <span
+        <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2.5 pb-2.5 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
+          <div className="surface rounded-2xl border border-border bg-card p-3 sm:p-3.5 shadow-xs flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {/* Status Tabs */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+              {(["All", "New", "Shortlisted", "Interview"] as const).map((f) => {
+                const active = filter === f;
+                const count = counts[f];
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFilter(f)}
                     className={cn(
-                      "rounded-full px-1.5 py-0.2 text-[10px] font-bold",
+                      "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-all cursor-pointer shrink-0",
                       active
-                        ? "bg-primary-foreground/20 text-primary-foreground"
-                        : "bg-muted text-muted-foreground"
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "border border-input bg-card text-muted-foreground hover:border-ring hover:text-foreground"
                     )}
                   >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Search + Custom Select */}
-          <div className="flex items-center gap-2.5">
-            <div className="relative flex-1 sm:w-64">
-              <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search candidates…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-9 w-full rounded-xl border border-input bg-card pl-9 pr-7 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
-                >
-                  <HiXMark className="h-3.5 w-3.5" />
-                </button>
-              )}
+                    <span>{f}</span>
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.2 text-[10px] font-bold",
+                        active
+                          ? "bg-primary-foreground/20 text-primary-foreground"
+                          : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Custom Select Component */}
-            <div className="w-44 sm:w-48 shrink-0">
-              <Select value={selectedRole} onValueChange={setSelectedRole}>
-                <SelectTrigger className="h-9 rounded-xl border-input bg-card text-xs font-medium">
-                  <SelectValue placeholder="All Roles" />
-                </SelectTrigger>
-                <SelectContent align="end">
-                  {roles.map((r) => (
-                    <SelectItem key={r} value={r} className="text-xs">
-                      {r === "All" ? "All Roles" : r}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Search + Custom Select */}
+            <div className="flex items-center gap-2.5">
+              <div className="relative flex-1 sm:w-64">
+                <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search candidates…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-9 w-full rounded-xl border border-input bg-card pl-9 pr-7 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                  >
+                    <HiXMark className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Custom Select Component */}
+              <div className="w-44 sm:w-48 shrink-0">
+                <Select value={selectedRole} onValueChange={setSelectedRole}>
+                  <SelectTrigger className="h-9 rounded-xl border-input bg-card text-xs font-medium">
+                    <SelectValue placeholder="All Roles" />
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    {roles.map((r) => (
+                      <SelectItem key={r} value={r} className="text-xs">
+                        {r === "All" ? "All Roles" : r}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         </div>

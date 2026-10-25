@@ -53,19 +53,19 @@ export function AuthLayout({
           height={1344}
         />
 
-        {/* Subtle, soft blue gradient specifically behind the text area */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0e2246]/70 via-[#122c59]/40 via-50% to-transparent pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#0e2246]/45 via-transparent to-transparent pointer-events-none" />
+        {/* Clean presentation without dark charcoal or orange tint overlays */}
 
         {/* Content Container */}
         <div className="relative flex h-full flex-col justify-between p-8 sm:p-10 xl:p-12 text-white">
-          {/* Top Logo */}
+          {/* Top Logo - exact logo from candidate portal navbar */}
           <div className="shrink-0 pt-1">
-            <Logo inverted />
+            <Link to="/" className="inline-block">
+              <Logo />
+            </Link>
           </div>
 
           {/* Bottom Content positioned slightly lower */}
-          <div className="mt-auto max-w-xl pb-6 sm:pb-8 xl:pb-10">
+          <div className="mt-auto max-w-xl pb-6 sm:pb-8 xl:pb-10 drop-shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
             {/* Eyebrow */}
             {showEyebrow && (
               <p className="text-[12px] font-bold uppercase tracking-[0.2em] text-white/90">

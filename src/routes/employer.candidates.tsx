@@ -287,103 +287,105 @@ function FindCandidates() {
         </div>
 
         {/* Clean Filter Toolbar with Perfect Alignment */}
-        <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-4 shadow-xs space-y-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            {/* Search Input */}
-            <div className="relative flex-1">
-              <HiOutlineMagnifyingGlass className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search by candidate name, skill (ICU, OT, Dialysis), or hospital…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-10 w-full rounded-xl border border-input bg-card pl-10 pr-8 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all"
-              />
-              {search && (
+        <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2.5 pb-2.5 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
+          <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-4 shadow-xs space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {/* Search Input */}
+              <div className="relative flex-1">
+                <HiOutlineMagnifyingGlass className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search by candidate name, skill (ICU, OT, Dialysis), or hospital…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-input bg-card pl-10 pr-8 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                  >
+                    <HiXMark className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Controls: Custom Selects & Verified Toggle */}
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* Role Select */}
+                <div className="w-36 shrink-0">
+                  <Select value={selectedRole} onValueChange={setSelectedRole}>
+                    <SelectTrigger className="h-10 rounded-xl border-input bg-card text-xs font-medium">
+                      <SelectValue placeholder="All Roles" />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {roles.map((r) => (
+                        <SelectItem key={r} value={r} className="text-xs">
+                          {r === "All" ? "All Roles" : r}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* City Select */}
+                <div className="w-32 shrink-0">
+                  <Select value={selectedCity} onValueChange={setSelectedCity}>
+                    <SelectTrigger className="h-10 rounded-xl border-input bg-card text-xs font-medium">
+                      <SelectValue placeholder="All Cities" />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {cities.map((c) => (
+                        <SelectItem key={c} value={c} className="text-xs">
+                          {c === "All" ? "All Cities" : c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Verified Only Filter */}
                 <button
                   type="button"
-                  onClick={() => setSearch("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                  onClick={() => setVerifiedOnly((v) => !v)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-xl border px-3 h-10 text-xs font-semibold transition-all shrink-0 cursor-pointer",
+                    verifiedOnly
+                      ? "border-primary bg-primary text-primary-foreground shadow-xs"
+                      : "border-input bg-card text-muted-foreground hover:border-ring hover:text-foreground"
+                  )}
                 >
-                  <HiXMark className="h-4 w-4" />
+                  <HiOutlineShieldCheck className="h-4 w-4" />
+                  Verified
+                  {verifiedOnly && <HiCheck className="h-3 w-3 stroke-[3]" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Results Count Line */}
+            <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border/60">
+              <span>
+                Showing <strong className="text-foreground">{filteredCandidates.length}</strong> candidates
+                {selectedRole !== "All" && ` · ${selectedRole}`}
+                {selectedCity !== "All" && ` · ${selectedCity}`}
+              </span>
+
+              {(selectedRole !== "All" || selectedCity !== "All" || verifiedOnly || search) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole("All");
+                    setSelectedCity("All");
+                    setVerifiedOnly(false);
+                    setSearch("");
+                  }}
+                  className="font-semibold text-primary hover:underline cursor-pointer"
+                >
+                  Reset filters
                 </button>
               )}
             </div>
-
-            {/* Filter Controls: Custom Selects & Verified Toggle */}
-            <div className="flex flex-wrap items-center gap-2.5">
-              {/* Role Select */}
-              <div className="w-36 shrink-0">
-                <Select value={selectedRole} onValueChange={setSelectedRole}>
-                  <SelectTrigger className="h-10 rounded-xl border-input bg-card text-xs font-medium">
-                    <SelectValue placeholder="All Roles" />
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    {roles.map((r) => (
-                      <SelectItem key={r} value={r} className="text-xs">
-                        {r === "All" ? "All Roles" : r}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* City Select */}
-              <div className="w-32 shrink-0">
-                <Select value={selectedCity} onValueChange={setSelectedCity}>
-                  <SelectTrigger className="h-10 rounded-xl border-input bg-card text-xs font-medium">
-                    <SelectValue placeholder="All Cities" />
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    {cities.map((c) => (
-                      <SelectItem key={c} value={c} className="text-xs">
-                        {c === "All" ? "All Cities" : c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Verified Only Filter */}
-              <button
-                type="button"
-                onClick={() => setVerifiedOnly((v) => !v)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-xl border px-3 h-10 text-xs font-semibold transition-all shrink-0 cursor-pointer",
-                  verifiedOnly
-                    ? "border-primary bg-primary text-primary-foreground shadow-xs"
-                    : "border-input bg-card text-muted-foreground hover:border-ring hover:text-foreground"
-                )}
-              >
-                <HiOutlineShieldCheck className="h-4 w-4" />
-                Verified
-                {verifiedOnly && <HiCheck className="h-3 w-3 stroke-[3]" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Results Count Line */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border/60">
-            <span>
-              Showing <strong className="text-foreground">{filteredCandidates.length}</strong> candidates
-              {selectedRole !== "All" && ` · ${selectedRole}`}
-              {selectedCity !== "All" && ` · ${selectedCity}`}
-            </span>
-
-            {(selectedRole !== "All" || selectedCity !== "All" || verifiedOnly || search) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedRole("All");
-                  setSelectedCity("All");
-                  setVerifiedOnly(false);
-                  setSearch("");
-                }}
-                className="font-semibold text-primary hover:underline cursor-pointer"
-              >
-                Reset filters
-              </button>
-            )}
           </div>
         </div>
 

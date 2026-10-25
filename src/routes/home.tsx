@@ -95,8 +95,15 @@ function Home() {
         {/* ================= LEFT RAIL: LINKEDIN/APPLE PROFILE CARD ================= */}
         <aside className="w-full min-w-0 max-w-full space-y-4">
           <div className="surface w-full min-w-0 max-w-full overflow-hidden rounded-3xl border border-border/80 bg-card shadow-sm transition-shadow hover:shadow-md">
-            {/* Cover photo banner */}
-            <div className="relative h-20 w-full bg-gradient-to-r from-[#004182] via-[#0A66C2] to-[#0073B1]" />
+            {/* Cover photo banner — Nothing × DailyObjects matte charcoal with saffron glyph glow */}
+            <div className="relative h-20 w-full bg-[#1C1B1A] dark:bg-[#151413] overflow-hidden">
+              <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:12px_12px]" />
+              <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-primary/30 blur-2xl pointer-events-none" />
+              <div className="absolute left-3.5 top-2.5 flex items-center gap-1.5 font-mono text-[9px] font-semibold uppercase tracking-widest text-white/60">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                <span>NCAHP · Tier 1</span>
+              </div>
+            </div>
 
             {/* Avatar & Profile Identity */}
             <div className="-mt-10 px-4 sm:px-5 pb-5 text-center min-w-0">
@@ -130,11 +137,11 @@ function Home() {
                   <HiOutlineSparkles className="h-4 w-4 shrink-0 text-primary" />
                   <span className="truncate">Profile Strength</span>
                 </span>
-                <span className="shrink-0 font-extrabold text-emerald-600 dark:text-emerald-400">{completeness}% · All-Star</span>
+                <span className="shrink-0 font-extrabold text-primary">{completeness}% · All-Star</span>
               </div>
               <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-primary to-sky-400 transition-all duration-500"
+                  className="h-full rounded-full bg-gradient-to-r from-primary to-orange-400 shadow-sm shadow-primary/25 transition-all duration-500"
                   style={{ width: `${completeness}%` }}
                 />
               </div>
@@ -217,7 +224,7 @@ function Home() {
           </div>
 
           {/* FALE Clinical Academy Card */}
-          <div className="surface p-4 rounded-3xl border border-border/80 bg-gradient-to-br from-card via-card to-blue-50/40 dark:to-blue-950/20 shadow-xs w-full min-w-0 overflow-hidden">
+          <div className="surface p-4 rounded-3xl border border-border/80 bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20 shadow-xs w-full min-w-0 overflow-hidden">
             <div className="flex items-start gap-3">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary-soft text-primary shadow-2xs">
                 <HiOutlineAcademicCap className="h-5 w-5" />
@@ -242,7 +249,7 @@ function Home() {
           </div>
 
           {/* Institutional Trust Badge */}
-          <div className="surface p-4 rounded-3xl border border-border/80 bg-gradient-to-br from-blue-50/70 via-card to-card dark:from-blue-950/20 shadow-xs w-full min-w-0 overflow-hidden">
+          <div className="surface p-4 rounded-3xl border border-border/80 bg-gradient-to-br from-primary-soft/60 via-card to-card dark:from-primary-soft/20 shadow-xs w-full min-w-0 overflow-hidden">
             <div className="flex items-start gap-3">
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-primary text-white shadow-xs">
                 <HiOutlineBolt className="h-5 w-5" />
@@ -555,9 +562,15 @@ function Home() {
             </div>
           </div>
 
-          {/* FALE Healthcare Support & Concierge Widget */}
-          <div className="surface p-4 rounded-3xl border border-primary/20 bg-primary/5 shadow-2xs w-full min-w-0 overflow-hidden space-y-3">
-            <div className="flex items-center justify-between">
+        </aside>
+      </div>
+
+      {/* ================= BOTTOM FULL-WIDTH SUPPORT BANNER ================= */}
+      <div className="mt-6 surface p-4 sm:p-5 rounded-3xl border border-primary/20 bg-primary/5 dark:bg-primary/10 shadow-xs w-full min-w-0">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          {/* Left: Support Info */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
               <span className="inline-flex items-center gap-1.5 text-xs font-bold text-primary">
                 <HiOutlineQuestionMarkCircle className="h-4 w-4" />
                 <span>Need Support?</span>
@@ -566,35 +579,38 @@ function Home() {
                 24/7 Active
               </span>
             </div>
-
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               Assistance with DigiLocker verification, 24-hr shift payouts, or timesheets:
             </p>
+          </div>
 
-            <div className="space-y-1.5 text-xs">
+          {/* Right: Contact Links & CTA Button */}
+          <div className="flex flex-wrap items-center gap-3 sm:gap-5">
+            <div className="flex items-center gap-3 text-xs">
               <a
                 href="mailto:contact@thefale.com"
-                className="flex items-center gap-2 font-medium text-foreground hover:text-primary transition-colors"
+                className="font-mono text-[11px] font-bold text-primary hover:underline"
               >
-                <span className="font-mono text-[11px] font-bold text-primary">contact@thefale.com</span>
+                contact@thefale.com
               </a>
+              <span className="h-3.5 w-px bg-border/80" />
               <a
                 href="tel:+917338367726"
-                className="flex items-center gap-2 font-mono text-[11px] font-bold text-foreground hover:text-primary transition-colors"
+                className="font-mono text-[11px] font-bold text-foreground hover:text-primary transition-colors"
               >
-                <span>+91 73383 67726</span>
+                +91 73383 67726
               </a>
             </div>
 
             <Link
               to="/support"
-              className="mt-1 flex items-center justify-center gap-1.5 rounded-xl bg-card border border-border/80 py-2 text-xs font-bold text-foreground hover:bg-muted/40 transition-colors shadow-2xs"
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-card border border-border/80 px-4 py-2 text-xs font-bold text-foreground hover:bg-muted/40 transition-colors shadow-2xs whitespace-nowrap"
             >
               <span>Visit Help Center & FAQs</span>
               <HiArrowRight className="h-3.5 w-3.5 text-primary shrink-0" />
             </Link>
           </div>
-        </aside>
+        </div>
       </div>
     </AppShell>
   );

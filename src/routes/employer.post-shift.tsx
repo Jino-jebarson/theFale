@@ -278,8 +278,8 @@ function PostShiftScreen() {
       dateOption === "Today · Urgent"
         ? "Tonight"
         : dateOption === "Tomorrow"
-        ? "Tomorrow"
-        : customDate;
+          ? "Tomorrow"
+          : customDate;
 
     const newShift = {
       id: newShiftId,
@@ -784,7 +784,7 @@ function PostShiftScreen() {
                   <input
                     type="checkbox"
                     checked={requireCouncilReg}
-                    onChange={() => {}}
+                    onChange={() => { }}
                     className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
                   />
                   <div>
@@ -804,7 +804,7 @@ function PostShiftScreen() {
                   <input
                     type="checkbox"
                     checked={requireBLS}
-                    onChange={() => {}}
+                    onChange={() => { }}
                     className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
                   />
                   <div>
@@ -942,7 +942,7 @@ function PostShiftScreen() {
           </div>
 
           {/* RIGHT COLUMN: Live Candidate Preview & Escrow Economics (5 cols on lg) */}
-          <div className="space-y-5 lg:col-span-5 lg:sticky lg:top-20">
+          <div className="space-y-5 lg:col-span-5 lg:sticky lg:top-[calc(var(--header-offset,4rem)+1.5rem)] transition-all duration-300 ease-in-out">
             {/* Live Candidate View Card Container */}
             <div className="rounded-2xl border border-border bg-card p-5 shadow-xs space-y-4">
               <div className="flex items-center justify-between">
@@ -1111,7 +1111,7 @@ function PostShiftScreen() {
               </div>
 
               <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-primary to-emerald-500 rounded-full w-[82%]" />
+                <div className="h-full bg-gradient-to-r from-primary to-orange-400 rounded-full w-[82%]" />
               </div>
 
               <p className="text-[11px] text-muted-foreground leading-relaxed">

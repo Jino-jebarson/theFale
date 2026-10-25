@@ -152,55 +152,57 @@ function Applications() {
       </div>
 
       {/* ================= CLEAN NAVIGATION BAR (APPLE STYLE) ================= */}
-      <div className="surface mb-6 rounded-3xl border border-border/80 bg-card p-2 sm:p-2.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-        {/* Segmented Tabs */}
-        <div className="flex items-center rounded-2xl bg-muted/60 p-1 text-xs font-semibold border border-border/50 shrink-0">
-          {(["Active", "Closed"] as const).map((t) => {
-            const count = t === "Active" ? activeApps.length : closedApps.length;
-            return (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                className={cn(
-                  "flex items-center gap-2 rounded-xl px-4 py-2 transition-all cursor-pointer font-bold",
-                  tab === t
-                    ? "bg-card text-primary shadow-xs"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <span>{t === "Active" ? "Active" : "Closed"}</span>
-                <span
+      <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2.5 pb-2.5 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
+        <div className="surface rounded-3xl border border-border/80 bg-card p-2 sm:p-2.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          {/* Segmented Tabs */}
+          <div className="flex items-center rounded-2xl bg-muted/60 p-1 text-xs font-semibold border border-border/50 shrink-0">
+            {(["Active", "Closed"] as const).map((t) => {
+              const count = t === "Active" ? activeApps.length : closedApps.length;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTab(t)}
                   className={cn(
-                    "rounded-full px-2 py-0.5 text-[10px] font-black",
-                    tab === t ? "bg-primary text-white" : "bg-muted text-muted-foreground"
+                    "flex items-center gap-2 rounded-xl px-4 py-2 transition-all cursor-pointer font-bold",
+                    tab === t
+                      ? "bg-card text-primary shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+                  <span>{t === "Active" ? "Active" : "Closed"}</span>
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px] font-black",
+                      tab === t ? "bg-primary text-white" : "bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-        {/* Search */}
-        <div className="flex flex-1 items-center gap-2 rounded-2xl bg-muted/40 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all sm:max-w-xs w-full">
-          <HiOutlineMagnifyingGlass className="h-4 w-4 text-primary shrink-0" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by role or hospital..."
-            className="h-9 w-full bg-transparent text-xs sm:text-sm text-foreground placeholder:text-muted-foreground outline-none font-medium"
-          />
-          {q && (
-            <button
-              type="button"
-              onClick={() => setQ("")}
-              className="rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
-            >
-              <HiXMark className="h-4 w-4" />
-            </button>
-          )}
+          {/* Search */}
+          <div className="flex flex-1 items-center gap-2 rounded-2xl bg-muted/40 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all sm:max-w-xs w-full">
+            <HiOutlineMagnifyingGlass className="h-4 w-4 text-primary shrink-0" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search by role or hospital..."
+              className="h-9 w-full bg-transparent text-xs sm:text-sm text-foreground placeholder:text-muted-foreground outline-none font-medium"
+            />
+            {q && (
+              <button
+                type="button"
+                onClick={() => setQ("")}
+                className="rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <HiXMark className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

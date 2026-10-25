@@ -40,7 +40,7 @@ function Verify() {
   };
 
   return (
-    <AuthLayout variant={s.portal}>
+    <AuthLayout variant={s.portal === "facility" ? "facility" : "candidate"}>
       <Link to="/login" className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-primary">
         <HiArrowLeft className="h-4 w-4" /> Back
       </Link>
