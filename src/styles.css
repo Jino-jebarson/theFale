@@ -61,66 +61,66 @@
 
 :root {
   --radius: 0.625rem;
-  /* 60% White / Tactile porcelain base */
-  --background: oklch(0.985 0.005 80);
-  --foreground: oklch(0.18 0.005 60);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.005 60);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.005 60);
+  /* 60%–85% Pure White Base (#FFFFFF) as specified in Brand Palette */
+  --background: #FFFFFF;
+  --foreground: #1A1A1A;
+  --card: #FFFFFF;
+  --card-foreground: #1A1A1A;
+  --popover: #FFFFFF;
+  --popover-foreground: #1A1A1A;
 
-  /* 10% Saffron — High-voltage Nothing glyph / DailyObjects orange (#FF5A1F) */
-  --primary: oklch(0.64 0.22 41);
-  --primary-hover: oklch(0.58 0.22 40);
-  --primary-deep: oklch(0.18 0.005 60);
-  --primary-soft: oklch(0.965 0.035 48);
-  --primary-foreground: oklch(1 0 0);
+  /* 10% Saffron — Highlight / Accent (#FF5A1F) */
+  --primary: #FF5A1F;
+  --primary-hover: #E04E19;
+  --primary-deep: #1A1A1A;
+  --primary-soft: #FFEDE5;
+  --primary-foreground: #FFFFFF;
 
   /* 30% Charcoal structure & controls (#1A1A1A) */
-  --secondary: oklch(0.20 0.005 60);
-  --secondary-foreground: oklch(1 0 0);
+  --secondary: #1A1A1A;
+  --secondary-foreground: #FFFFFF;
 
-  /* Tactile warm neutrals (Prevents cold Black & White look) */
-  --muted: oklch(0.96 0.006 80);
-  --muted-foreground: oklch(0.52 0.01 60);
-  --accent: oklch(0.965 0.035 48);
-  --accent-foreground: oklch(0.55 0.22 41);
-  --linkedin: oklch(0.5 0.15 252);
+  /* Clean neutrals matching the reference (#FAFAFA, #5F5F5F, #8A8A8A) */
+  --muted: #FAFAFA;
+  --muted-foreground: #5F5F5F;
+  --accent: #FFEDE5;
+  --accent-foreground: #FF5A1F;
+  --linkedin: #0A66C2;
 
-  /* Organic life accents: Nordic Sage (Verified) & Warm Amber (Urgent) */
-  --success: oklch(0.56 0.13 155);
-  --success-soft: oklch(0.96 0.03 155);
-  --warning: oklch(0.68 0.16 65);
-  --warning-soft: oklch(0.965 0.04 70);
-  --destructive: oklch(0.577 0.22 27);
-  --destructive-foreground: oklch(1 0 0);
+  /* Organic life accents */
+  --success: #1A8633;
+  --success-soft: #EBF8EE;
+  --warning: #F59E0B;
+  --warning-soft: #FEF3C7;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
 
-  /* Warm hairline borders */
-  --border: oklch(0.925 0.008 75);
-  --input: oklch(0.89 0.01 75);
-  --ring: oklch(0.64 0.22 41);
+  /* Exact hairline borders from reference (#EEEEEE / #E6E6E6) */
+  --border: #EEEEEE;
+  --input: #E6E6E6;
+  --ring: #FF5A1F;
 
-  --chart-1: oklch(0.64 0.22 41);
-  --chart-2: oklch(0.20 0.005 60);
-  --chart-3: oklch(0.56 0.13 155);
-  --chart-4: oklch(0.68 0.16 65);
-  --chart-5: oklch(0.78 0.09 50);
+  --chart-1: #FF5A1F;
+  --chart-2: #1A1A1A;
+  --chart-3: #1A8633;
+  --chart-4: #F59E0B;
+  --chart-5: #8A8A8A;
 
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.18 0.005 60);
-  --sidebar-primary: oklch(0.64 0.22 41);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.965 0.035 48);
-  --sidebar-accent-foreground: oklch(0.55 0.22 41);
-  --sidebar-border: oklch(0.925 0.008 75);
-  --sidebar-ring: oklch(0.64 0.22 41);
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #1A1A1A;
+  --sidebar-primary: #FF5A1F;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #FFEDE5;
+  --sidebar-accent-foreground: #FF5A1F;
+  --sidebar-border: #EEEEEE;
+  --sidebar-ring: #FF5A1F;
 
-  --gradient-brand: linear-gradient(135deg, oklch(0.64 0.22 41), oklch(0.58 0.22 36));
-  --gradient-overlay: linear-gradient(180deg, oklch(0.64 0.22 41 / 0.06) 0%, oklch(0.18 0.005 60 / 0.95) 100%);
-  --gradient-soft: linear-gradient(180deg, oklch(0.97 0.025 48), oklch(1 0 0));
-  --shadow-brand-v: 0 10px 25px -6px oklch(0.64 0.22 41 / 0.38);
-  --shadow-card-v: 0 1px 3px oklch(0.18 0.005 60 / 0.04), 0 8px 24px -6px oklch(0.18 0.005 60 / 0.06);
-  --field-focus-shadow: 0 0 0 3px oklch(0.64 0.22 41 / 0.2);
+  --gradient-brand: linear-gradient(135deg, #FF5A1F, #E04E19);
+  --gradient-overlay: linear-gradient(180deg, rgba(255, 90, 31, 0.06) 0%, rgba(26, 26, 26, 0.95) 100%);
+  --gradient-soft: linear-gradient(180deg, #FFEDE5, #FFFFFF);
+  --shadow-brand-v: 0 10px 25px -6px rgba(255, 90, 31, 0.35);
+  --shadow-card-v: 0 1px 3px rgba(0, 0, 0, 0.04), 0 8px 24px -6px rgba(0, 0, 0, 0.06);
+  --field-focus-shadow: 0 0 0 3px rgba(255, 90, 31, 0.2);
 }
 
 .dark {
