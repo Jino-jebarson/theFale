@@ -132,6 +132,10 @@ function RootComponent() {
 
   useEffect(() => {
     applyTheme(resolvedTheme);
+    // Clean up any lingering scroll locks left by Radix modals/drawers when changing routes
+    document.body.removeAttribute("data-scroll-locked");
+    document.body.style.removeProperty("overflow");
+    document.documentElement.style.removeProperty("overflow");
   }, [pathname, resolvedTheme]);
 
   return (

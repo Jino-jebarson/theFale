@@ -243,24 +243,30 @@
     letter-spacing: 0;
     -webkit-font-smoothing: antialiased;
     max-width: 100%;
-    overflow-x: clip;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
     scrollbar-gutter: stable;
+    scroll-behavior: smooth;
+    scroll-padding-top: 84px;
   }
 
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     max-width: 100%;
-    overflow-x: clip;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: visible;
     position: relative;
   }
 
-  /* Prevent page horizontal jump when Radix UI dropdowns lock scroll */
-  body[data-scroll-locked] {
-    margin-right: 0 !important;
-    padding-right: 0 !important;
-    overflow-y: scroll !important;
-
+  #root {
+    min-height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
   }
 }
 
@@ -412,10 +418,10 @@
 }
 
 /* Ensure background window doesn't show duplicate scrollbars when Sheet/Dialog is open */
-html:has([data-state="open"]),
-body:has([data-state="open"]),
-body[data-scroll-locked] {
-  overflow: hidden !important;
+html:has([role="dialog"][data-state="open"]),
+body:has([role="dialog"][data-state="open"]),
+body[data-scroll-locked]:not(:has(.fale-signin-root)) {
+  overflow: hidden;
 }
 
 /* Eliminate unwanted Radix / react-remove-scroll right gap on Sheet content and body */

@@ -49,7 +49,18 @@ import {
 } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
+interface OnboardingSearch {
+  role?: string;
+  portal?: string;
+}
+
 export const Route = createFileRoute("/onboarding")({
+  validateSearch: (search: Record<string, unknown>): OnboardingSearch => {
+    return {
+      role: typeof search.role === "string" ? search.role : undefined,
+      portal: typeof search.portal === "string" ? search.portal : undefined,
+    };
+  },
   head: () => ({
     meta: [
       { title: "Set up your profile — FALE" },
@@ -86,7 +97,20 @@ type P = Record<string, string | boolean | string[]>;
 function Onboarding() {
   const s = useApp();
   const navigate = useNavigate();
-  const f = s.portal === "facility";
+  const search = Route.useSearch();
+  const roleParam = (search?.role || search?.portal || "").toLowerCase();
+  const isFacilityParam = roleParam === "facility" || roleParam === "employer" || roleParam === "hire" || roleParam === "employ";
+  const isCandidateParam = roleParam === "candidate" || roleParam === "pro";
+
+  useEffect(() => {
+    if (isFacilityParam && s.portal !== "facility") {
+      setState({ portal: "facility" });
+    } else if (isCandidateParam && s.portal !== "candidate") {
+      setState({ portal: "candidate" });
+    }
+  }, [isFacilityParam, isCandidateParam, s.portal]);
+
+  const f = isFacilityParam ? true : isCandidateParam ? false : s.portal === "facility";
   const steps = f ? facilitySteps : candidateSteps;
   const [step, setStep] = useState(0);
   const [showExitModal, setShowExitModal] = useState(false);
@@ -709,7 +733,7 @@ function Onboarding() {
                 variant="outline"
                 size="lg"
                 className="w-full sm:w-auto gap-2 rounded-xl border-slate-300 font-semibold text-slate-700 hover:bg-slate-50"
-                onClick={() => (step ? setStep(step - 1) : navigate({ to: "/login" }))}
+                onClick={() => (step ? setStep(step - 1) : navigate({ to: "/" }))}
               >
                 <HiArrowLeft className="h-4 w-4" /> Back
               </Button>
@@ -792,7 +816,7 @@ function Onboarding() {
                 onClick={() => {
                   save();
                   setShowExitModal(false);
-                  navigate({ to: "/login" });
+                  navigate({ to: "/" });
                 }}
               >
                 Exit to Login
