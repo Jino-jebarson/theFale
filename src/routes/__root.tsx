@@ -14,6 +14,7 @@ import {
 } from "react-icons/hi2";
 
 import { Toaster } from "@/components/ui/sonner";
+import { CookieConsent } from "@/components/fale/CookieConsent";
 import { applyTheme, initTheme, useTheme } from "@/lib/theme";
 
 const LazyLottieError = lazy(() =>
@@ -149,6 +150,7 @@ function RootComponent() {
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       <Toaster position="top-center" theme={pathname.startsWith("/onboarding") ? "light" : resolvedTheme} />
+      <CookieConsent />
     </QueryClientProvider>
   );
 }

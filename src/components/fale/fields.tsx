@@ -15,6 +15,7 @@ import {
   HiOutlineCalendar,
   HiOutlineXMark,
   HiOutlineShieldCheck,
+  HiPlus,
 } from "react-icons/hi2";
 import { MdMyLocation } from "react-icons/md";
 import { ImSpinner2 } from "react-icons/im";
@@ -23,7 +24,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { RiShieldKeyholeFill } from "react-icons/ri";
 
-export function Label({ children, required, optional }: { children: ReactNode; required?: boolean | undefined; optional?: boolean | undefined }) {
+export function Label({ children, required, optional }: { children?: ReactNode | undefined; required?: boolean | undefined; optional?: boolean | undefined }) {
+  if (!children) return null;
   return (
     <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
       {children}
@@ -109,16 +111,18 @@ export function SelectField({
   placeholder = "Select an option",
   searchable,
   className,
+  icon,
 }: {
-  label: string;
+  label?: string | undefined;
   options: string[];
-  value?: string;
+  value?: string | undefined;
   onChange: (v: string) => void;
   required?: boolean | undefined;
   optional?: boolean | undefined;
-  placeholder?: string;
-  searchable?: boolean;
-  className?: string;
+  placeholder?: string | undefined;
+  searchable?: boolean | undefined;
+  className?: string | undefined;
+  icon?: ReactNode | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -170,7 +174,7 @@ export function SelectField({
 
   return (
     <div className={cn("block relative", className)} ref={containerRef}>
-      <Label required={required} optional={optional}>{label}</Label>
+      {label && <Label required={required} optional={optional}>{label}</Label>}
 
       {/* Accessible hidden input to participate in HTML5 form validation */}
       <input
@@ -206,7 +210,10 @@ export function SelectField({
           value && "text-foreground font-medium",
         )}
       >
-        <span className="truncate">{value || placeholder}</span>
+        <div className="flex items-center gap-2.5 min-w-0">
+          {icon && <span className="text-muted-foreground shrink-0 [&_svg]:h-[18px] [&_svg]:w-[18px]">{icon}</span>}
+          <span className="truncate">{value || placeholder}</span>
+        </div>
         <HiChevronDown
           className={cn(
             "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
@@ -796,17 +803,50 @@ export function DateField({
 }
 
 export function ChipGroup({
-  label, options, value, onChange, multi, required,
+  label,
+  options,
+  value,
+  onChange,
+  multi,
+  required,
+  allowCustom,
+  customPlaceholder,
 }: {
-  label: string; options: string[]; value: string | string[]; onChange: (v: string | string[]) => void; multi?: boolean; required?: boolean;
+  label: string;
+  options: string[];
+  value: string | string[];
+  onChange: (v: string | string[]) => void;
+  multi?: boolean;
+  required?: boolean;
+  allowCustom?: boolean;
+  customPlaceholder?: string;
 }) {
+  const [customInput, setCustomInput] = useState("");
   const arr = Array.isArray(value) ? value : value ? [value] : [];
+
+  // Combine predefined options with any custom skills/options already in value
+  const allOptions = Array.from(new Set([...options, ...arr]));
+
+  const handleAddCustom = () => {
+    const trimmed = customInput.trim();
+    if (!trimmed) return;
+    if (!arr.includes(trimmed)) {
+      if (multi) {
+        onChange([...arr, trimmed]);
+      } else {
+        onChange(trimmed);
+      }
+    }
+    setCustomInput("");
+  };
+
   return (
-    <div>
+    <div className="space-y-2.5">
       <Label required={required}>{label}</Label>
       <div className="flex flex-wrap gap-2 pt-0.5">
-        {options.map((o) => {
+        {allOptions.map((o) => {
           const on = arr.includes(o);
+          const isCustom = !options.includes(o);
           return (
             <Button
               type="button"
@@ -816,7 +856,7 @@ export function ChipGroup({
               key={o}
               onClick={() => (multi ? onChange(on ? arr.filter((x) => x !== o) : [...arr, o]) : onChange(o))}
               className={cn(
-                "rounded-xl border h-10 px-4 text-[13px] font-medium transition-all shadow-none",
+                "rounded-xl border h-10 px-3.5 text-[13px] font-medium transition-all shadow-none group",
                 on
                   ? "border-primary bg-primary text-primary-foreground font-semibold shadow-sm hover:bg-primary/95 hover:text-white"
                   : "border-input bg-card text-foreground hover:border-primary/50 hover:bg-accent/40",
@@ -824,10 +864,59 @@ export function ChipGroup({
             >
               {on && <HiCheck className="mr-1 h-3.5 w-3.5 stroke-[2.5]" />}
               {o}
+              {isCustom && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title="Remove custom skill"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChange(arr.filter((x) => x !== o));
+                  }}
+                  className={cn(
+                    "ml-1.5 -mr-1 rounded-full p-0.5 transition-colors cursor-pointer",
+                    on
+                      ? "hover:bg-black/20 text-white/80 hover:text-white"
+                      : "hover:bg-slate-200 text-slate-400 hover:text-slate-600"
+                  )}
+                >
+                  <HiOutlineXMark className="h-3 w-3" />
+                </span>
+              )}
             </Button>
           );
         })}
       </div>
+
+      {allowCustom && (
+        <div className="flex items-center gap-2 pt-1 max-w-md">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={customInput}
+              onChange={(e) => setCustomInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAddCustom();
+                }
+              }}
+              placeholder={customPlaceholder || "Add a skill that's not listed"}
+              className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10 transition-all"
+            />
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleAddCustom}
+            disabled={!customInput.trim()}
+            className="h-10 px-4 rounded-xl bg-primary text-white font-bold hover:bg-primary-hover transition-all cursor-pointer shadow-sm shadow-primary/25 shrink-0 disabled:opacity-50"
+          >
+            <HiPlus className="mr-1 h-3.5 w-3.5 stroke-[2.5]" />
+            Add
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1094,14 +1183,40 @@ export function UploadBox({
   );
 }
 
-export function Toggle({ checked, onChange, label, desc }: { checked: boolean; onChange: (v: boolean) => void; label: string; desc?: string }) {
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  desc,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  desc?: string;
+}) {
   return (
-    <label className="flex w-full cursor-pointer items-center justify-between gap-4 border-b border-input py-4 text-left">
-      <span>
-        <span className="block text-sm font-semibold">{label}</span>
-        {desc && <span className="block text-xs text-muted-foreground">{desc}</span>}
-      </span>
-      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
-    </label>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onChange(!checked)}
+      onKeyDown={(e) => {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          onChange(!checked);
+        }
+      }}
+      className="flex w-full cursor-pointer items-center justify-between gap-4 border-b border-input py-4 text-left select-none outline-none"
+    >
+      <div>
+        <span className="block text-sm font-semibold text-foreground">{label}</span>
+        {desc && <span className="block text-xs text-muted-foreground mt-0.5">{desc}</span>}
+      </div>
+      <Switch
+        checked={checked}
+        onCheckedChange={onChange}
+        onClick={(e) => e.stopPropagation()}
+        aria-label={label}
+      />
+    </div>
   );
 }

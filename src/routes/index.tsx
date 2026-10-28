@@ -1,5 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { HiArrowLeft } from "react-icons/hi2";
+import { FaLinkedin } from "react-icons/fa6";
+import { openCookieSettings } from "@/components/fale/CookieConsent";
 import { setState, useApp } from "@/lib/store";
 import heroHandsVideo from "@/assets/hero-hands.mp4";
 import "@/styles/fale-signin.css";
@@ -150,11 +153,11 @@ function SignInPage() {
     setDoneText(
       isSignUp
         ? (isHire
-            ? "Mobile verified. Redirecting to employer onboarding…"
-            : "Mobile verified. Redirecting to candidate onboarding…")
+          ? "Mobile verified. Redirecting to employer onboarding…"
+          : "Mobile verified. Redirecting to candidate onboarding…")
         : (isHire
-            ? "Welcome to The Fale. Let's find your next hire."
-            : "Welcome to The Fale. Let's find your next opportunity.")
+          ? "Welcome to The Fale. Let's find your next hire."
+          : "Welcome to The Fale. Let's find your next opportunity.")
     );
     setView("done");
 
@@ -467,7 +470,16 @@ function SignInPage() {
                   <path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z" />
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z" />
                 </svg>
-                Continue with Google
+                <span>Continue with Google</span>
+              </button>
+
+              <button
+                type="button"
+                className="s-btn"
+                onClick={() => handleSocial("LinkedIn")}
+              >
+                <FaLinkedin className="h-[18px] w-[18px] text-[#0A66C2] shrink-0" />
+                <span>Continue with LinkedIn</span>
               </button>
 
               {mode === "pro" && (
@@ -622,13 +634,14 @@ function SignInPage() {
           {view !== "choices" && view !== "done" && (
             <button
               type="button"
-              className="back-btn"
+              className="back-btn group inline-flex items-center justify-center gap-1.5 cursor-pointer"
               onClick={() => {
                 setView("choices");
                 setIsSignUp(false);
               }}
             >
-              {isSignUp ? "← Back to options" : "← Other ways to sign in"}
+              <HiArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
+              <span>{isSignUp ? "Back to options" : "Other ways to sign in"}</span>
             </button>
           )}
         </div>
@@ -664,7 +677,14 @@ function SignInPage() {
 
         <p className="legal">
           By continuing, you agree to The Fale's <Link to="/landing">Terms</Link> and{" "}
-          <Link to="/landing">Privacy Policy</Link>.
+          <Link to="/landing">Privacy Policy</Link> ·{" "}
+          <button
+            type="button"
+            onClick={openCookieSettings}
+            className="cursor-pointer bg-transparent border-0 p-0 text-inherit font-inherit underline hover:text-[var(--text)] transition-colors"
+          >
+            Cookie Preferences
+          </button>
         </p>
       </main>
     </div>

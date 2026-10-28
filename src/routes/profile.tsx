@@ -83,14 +83,14 @@ function Profile() {
   const skills = Array.isArray(p["skills"]) && (p["skills"] as string[]).length > 0
     ? (p["skills"] as string[])
     : [
-        "ECG Interpretation",
-        "Bedside Echocardiography",
-        "ACLS & BLS Protocols",
-        "Central Venous Access",
-        "Telemetry Monitoring",
-        "Emergency Cardiac Resuscitation",
-        "Arterial Blood Gas Analysis",
-      ];
+      "ECG Interpretation",
+      "Bedside Echocardiography",
+      "ACLS & BLS Protocols",
+      "Central Venous Access",
+      "Telemetry Monitoring",
+      "Emergency Cardiac Resuscitation",
+      "Arterial Blood Gas Analysis",
+    ];
 
   const languages = Array.isArray(p["languages"]) && (p["languages"] as string[]).length > 0
     ? (p["languages"] as string[])
@@ -100,11 +100,11 @@ function Profile() {
   const userDocs = Object.keys(s.docs).length > 0
     ? s.docs
     : {
-        "MBBS Degree Certificate": "mbbs_degree_verified.pdf",
-        "State Medical Council Registration": "tnmc_license_2023.pdf",
-        "Government Identity (Aadhaar/Passport)": "gov_identity_verified.pdf",
-        "AHA ACLS & BLS Provider Credential": "acls_provider_card.pdf",
-      };
+      "MBBS Degree Certificate": "mbbs_degree_verified.pdf",
+      "State Medical Council Registration": "tnmc_license_2023.pdf",
+      "Government Identity (Aadhaar/Passport)": "gov_identity_verified.pdf",
+      "AHA ACLS & BLS Provider Credential": "acls_provider_card.pdf",
+    };
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard?.writeText(text);

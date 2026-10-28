@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { applyTheme, getEffectiveTheme } from "@/lib/theme";
 import {
@@ -20,12 +20,25 @@ import {
   HiOutlineDocumentCheck,
   HiOutlineArrowRightOnRectangle,
   HiOutlineXMark,
+  HiOutlineSparkles,
+  HiOutlineCloudArrowUp,
+  HiBolt,
+  HiCheckCircle,
+  HiOutlineClock,
+  HiOutlineMagnifyingGlass,
+  HiOutlineTrash,
+  HiPlus,
+  HiOutlineCamera,
 } from "react-icons/hi2";
+import { ImSpinner2 } from "react-icons/im";
 import { LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { Logo } from "@/components/fale/Logo";
+import { initials } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
 import { DigiLockerModal } from "@/components/fale/DigiLockerModal";
+import { ResumeParserModal } from "@/components/fale/ResumeParserModal";
+import type { ParsedResumeData } from "@/lib/resumeParser";
 import {
   AddressField,
   ChipGroup,
@@ -41,10 +54,19 @@ import {
 } from "@/components/fale/fields";
 import { setState, useApp } from "@/lib/store";
 import {
+  councilByProfession,
+  councilOptions,
+  departmentsByProfession,
+  designationPlaceholders,
   indianCities,
   indianStates,
   neededDocs,
+  onlineCouncilRegisters,
   professions,
+  qualificationPlaceholders,
+  qualificationsByProfession,
+  regNoPlaceholders,
+  regulatedProfessions,
   skillsByProfession,
 } from "@/lib/data";
 import { cn } from "@/lib/utils";
@@ -74,7 +96,61 @@ export const Route = createFileRoute("/onboarding")({
   component: Onboarding,
 });
 
-const regulated = ["Nurse", "Doctor", "Dentist", "Pharmacist", "Physiotherapist"];
+export interface WorkExperienceItem {
+  org: string;
+  role: string;
+  fm: string;
+  fy: string;
+  tm?: string;
+  ty?: string;
+  cur?: boolean;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const YEARS = Array.from({ length: 40 }, (_, i) => String(new Date().getFullYear() - i));
+
+function mIdx(m: string | undefined, y: string | undefined) {
+  if (m === "" || m == null || !y) return null;
+  return (+y) * 12 + (+m);
+}
+
+function nowIdx() {
+  const n = new Date();
+  return n.getFullYear() * 12 + n.getMonth();
+}
+
+function expMonths(list: WorkExperienceItem[]) {
+  const r = (list || [])
+    .map((e) => {
+      const a = mIdx(e.fm, e.fy);
+      const b = e.cur ? nowIdx() : mIdx(e.tm, e.ty);
+      return a == null || b == null || b < a ? null : ([a, b + 1] as [number, number]);
+    })
+    .filter((x): x is [number, number] => x !== null)
+    .sort((x, y) => x[0] - y[0]);
+  let t = 0;
+  let c: [number, number] | null = null;
+  r.forEach((x) => {
+    if (!c) {
+      c = [x[0], x[1]];
+      return;
+    }
+    if (x[0] <= c[1]) c[1] = Math.max(c[1], x[1]);
+    else {
+      t += c[1] - c[0];
+      c = [x[0], x[1]];
+    }
+  });
+  if (c) t += c[1] - c[0];
+  return t;
+}
+
+function fmtM(m: number) {
+  if (!m) return "0 months";
+  const y = Math.floor(m / 12);
+  const mo = m % 12;
+  return (y ? `${y} yr${y > 1 ? "s" : ""}` : "") + (y && mo ? " " : "") + (mo ? `${mo} mo${mo > 1 ? "s" : ""}` : "");
+}
 
 const candidateSteps = [
   { t: "Personal details", d: "About you & where you live" },
@@ -115,6 +191,10 @@ function Onboarding() {
   const [step, setStep] = useState(0);
   const [showExitModal, setShowExitModal] = useState(false);
   const [showDigiLockerModal, setShowDigiLockerModal] = useState(false);
+  const [showResumeModal, setShowResumeModal] = useState(false);
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string>("");
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   // Isolate onboarding flow from dark mode
   useEffect(() => {
@@ -127,11 +207,16 @@ function Onboarding() {
     };
   }, []);
 
-  const [p, setP] = useState<P>(() => ({
-    mobile: s.contact.startsWith("+91") ? s.contact.replace("+91 ", "") : "",
-    email: s.contact.includes("@") && !s.contact.endsWith("@account") ? s.contact : "",
-    ...(s.profile as P),
-  }));
+  const [p, setP] = useState<P>(() => {
+    const profile = (s.profile as P) || {};
+    const isFresher = profile["fresher"] === true || profile["exp"] === "Fresher";
+    return {
+      mobile: s.contact.startsWith("+91") ? s.contact.replace("+91 ", "") : "",
+      email: s.contact.includes("@") && !s.contact.endsWith("@account") ? s.contact : "",
+      ...profile,
+      fresher: isFresher,
+    };
+  });
   const [docs, setDocs] = useState<Record<string, string>>(s.docs);
   const set = (k: string) => (v: unknown) => setP((x) => ({ ...x, [k]: v as string }));
   const str = (k: string) => (p[k] as string) ?? "";
@@ -139,30 +224,158 @@ function Onboarding() {
   const input = (k: string) => ({ value: str(k), onChange: (e: React.ChangeEvent<HTMLInputElement>) => set(k)(e.target.value) });
 
   const handleProfessionChange = (newRole: string) => {
-    const allowed = skillsByProfession[newRole] ?? [];
+    const allowedSkills = skillsByProfession[newRole] ?? [];
+    const availableDepts = departmentsByProfession[newRole] ?? [];
     setP((prev) => {
       const currentSkills = (prev.skills as string[]) ?? [];
-      const validSkills = currentSkills.filter((s) => allowed.includes(s));
+      const allPredefinedSkills = Object.values(skillsByProfession).flat();
+      const customSkills = currentSkills.filter((s) => !allPredefinedSkills.includes(s));
+      const validSkills = Array.from(new Set([...currentSkills.filter((s) => allowedSkills.includes(s)), ...customSkills]));
+      const currentDept = String(prev.specialty || "");
+      const validDept = availableDepts.includes(currentDept) ? currentDept : (availableDepts[0] ?? "");
+      const defaultCouncil = councilByProfession[newRole] ?? "";
+      const allowedQuals = qualificationsByProfession[newRole] ?? [];
+      const currentQual = String(prev.qual || "");
+      const validQual = allowedQuals.includes(currentQual) || currentQual === "Other" ? currentQual : "";
       return {
         ...prev,
         role: newRole,
+        specialty: validDept,
         skills: validSkills,
+        council: prev.council && prev.council !== "Not applicable for my role" ? prev.council : defaultCouncil,
+        qual: validQual,
       };
     });
   };
 
-  const save = () => setState({ profile: p as Record<string, string | boolean>, docs });
+  const [verifyingReg, setVerifyingReg] = useState(false);
+  const [regVerification, setRegVerification] = useState<{
+    status: "ok" | "manual" | "not_found";
+    num: string;
+  } | null>(null);
+
+  const handleVerifyRegistration = () => {
+    const num = str("regNo").trim();
+    if (!num) {
+      toast.error("Please enter your registration number first.");
+      return;
+    }
+    const currentCouncil = str("council") || councilByProfession[str("role") || "Doctor"] || councilOptions[0] || "";
+    const onlineRegName = currentCouncil ? onlineCouncilRegisters[currentCouncil] : undefined;
+
+    setVerifyingReg(true);
+    setTimeout(() => {
+      setVerifyingReg(false);
+
+      if (num.toLowerCase().includes("0000") || num.toLowerCase().includes("invalid")) {
+        setRegVerification({ status: "not_found", num });
+        toast.error("Registration number could not be found on the council registry.");
+      } else if (!onlineRegName) {
+        setRegVerification({ status: "manual", num });
+        toast.info("Registration format validated. Manual verification scheduled.");
+      } else {
+        setRegVerification({ status: "ok", num });
+        toast.success(`Registration verified successfully against ${onlineRegName}!`);
+      }
+    }, 850);
+  };
+
+  // Multi-experience state matching thefale_website (19).html
+  const [exps, setExps] = useState<WorkExperienceItem[]>(() => {
+    if (Array.isArray(p["exps"]) && p["exps"].length > 0) {
+      return p["exps"] as WorkExperienceItem[];
+    }
+    if (p["fresher"] || p["exp"] === "Fresher") {
+      return [];
+    }
+    const emp = str("employer");
+    const des = str("designation");
+    if (emp || des) {
+      return [
+        {
+          org: emp,
+          role: des || designationPlaceholders[str("role")] || "Staff Nurse",
+          fm: "4",
+          fy: "2022",
+          cur: true,
+        },
+      ];
+    }
+    return [
+      {
+        org: "",
+        role: designationPlaceholders[str("role")] || "Staff Nurse",
+        fm: "4",
+        fy: "2022",
+        cur: true,
+      },
+    ];
+  });
+
+  const totalExpMonths = useMemo(() => expMonths(exps), [exps]);
+
+  const addExp = () => {
+    setExps((prev) => [
+      ...prev,
+      {
+        org: "",
+        role: designationPlaceholders[str("role")] || "Staff Nurse",
+        fm: "0",
+        fy: String(new Date().getFullYear()),
+        cur: prev.length === 0,
+      },
+    ]);
+  };
+
+  const removeExp = (idx: number) => {
+    setExps((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const updateExp = (idx: number, key: keyof WorkExperienceItem, val: unknown) => {
+    setExps((prev) =>
+      prev.map((item, i) => (i === idx ? { ...item, [key]: val } : item))
+    );
+  };
+
+  const save = () => {
+    const isFresher = !!p["fresher"];
+    const formattedExp = isFresher ? "Fresher" : fmtM(totalExpMonths);
+    const profileToSave = {
+      ...p,
+      qual: p["qual"] === "Other" && p["qualOwn"] ? p["qualOwn"] : p["qual"],
+      specialty: p["specialty"] === "Other" && p["deptOwn"] ? p["deptOwn"] : p["specialty"],
+      fresher: isFresher,
+      exps: isFresher ? [] : exps,
+      exp: formattedExp,
+      employer: isFresher ? "" : (exps[0]?.org || ""),
+      designation: isFresher ? "" : (exps[0]?.role || ""),
+      notice: isFresher ? "Immediately" : (str("notice") || "Immediately"),
+      currentSalary: isFresher ? "" : str("currentSalary"),
+    };
+    setState({ profile: profileToSave as Record<string, string | boolean>, docs });
+  };
 
   const next = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!f && step === 2 && !p["fresher"]) {
+      if (!exps.length) {
+        toast.error("Please add at least one work experience, or select 'I am a fresher'.");
+        return;
+      }
+      const incomplete = exps.some((item) => !item.org.trim() || !item.role.trim());
+      if (incomplete) {
+        toast.error("Please fill in hospital name and designation for all experiences.");
+        return;
+      }
+    }
     const requiredChoices = f
       ? (step === 3 ? ["departments"] : [])
-      : step === 0 ? ["gender"] : step === 2 ? ["exp"] : step === 3 ? ["employmentType"] : [];
+      : step === 0 ? ["gender"] : step === 3 ? ["employmentType"] : [];
     if (requiredChoices.some((key) => !p[key] || (Array.isArray(p[key]) && p[key].length === 0))) {
       toast.error("Please complete all required selections."); return;
     }
     if (step === (f ? 2 : 4)) {
-      const missing = neededDocs(s.portal, str("role")).filter((d) => !d.label.includes("optional") && !d.label.includes("if applicable") && !docs[d.label]);
+      const missing = neededDocs(f ? "facility" : "candidate", str("role")).filter((d) => !d.label.includes("optional") && !d.label.includes("if applicable") && !docs[d.label]);
       if (missing.length) { toast.error(`Please upload: ${missing.map((m) => m.label).join(", ")}`); return; }
     }
     save();
@@ -170,14 +383,99 @@ function Onboarding() {
       setStep(step + 1);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } else {
-      setState({ onboarded: true });
-      toast.success("Profile submitted for verification", { description: "Review usually takes up to 48 hours." });
-      navigate({ to: f ? "/employer" : "/home" });
+      if (!f) {
+        setShowPhotoModal(true);
+      } else {
+        handleFinishOnboarding();
+      }
+    }
+  };
+
+  const handleFinishOnboarding = (uploadedPhoto?: string) => {
+    const finalPhoto = uploadedPhoto || photoPreview;
+    const isFresher = !!p["fresher"];
+    const formattedExp = isFresher ? "Fresher" : fmtM(totalExpMonths);
+    const profileToSave = {
+      ...p,
+      qual: p["qual"] === "Other" && p["qualOwn"] ? p["qualOwn"] : p["qual"],
+      specialty: p["specialty"] === "Other" && p["deptOwn"] ? p["deptOwn"] : p["specialty"],
+      fresher: isFresher,
+      exps: isFresher ? [] : exps,
+      exp: formattedExp,
+      employer: isFresher ? "" : (exps[0]?.org || ""),
+      designation: isFresher ? "" : (exps[0]?.role || ""),
+      notice: isFresher ? "Immediately" : (str("notice") || "Immediately"),
+      currentSalary: isFresher ? "" : str("currentSalary"),
+      ...(finalPhoto ? { avatar: finalPhoto } : {}),
+    };
+    const finalDocs = { ...docs };
+    if (finalPhoto) {
+      finalDocs["Profile photo"] = finalPhoto;
+    }
+    setState({
+      onboarded: true,
+      profile: profileToSave as Record<string, string | boolean>,
+      docs: finalDocs,
+    });
+    setShowPhotoModal(false);
+    toast.success("Profile submitted for verification", { description: "Review usually takes up to 48 hours." });
+    navigate({ to: f ? "/employer" : "/profile" });
+  };
+
+  const handleApplyResumeData = (data: ParsedResumeData, fileName: string) => {
+    setP((prev) => {
+      const updated: P = { ...prev };
+      if (data.name) updated["name"] = data.name;
+      if (data.email) updated["email"] = data.email;
+      if (data.mobile) updated["mobile"] = data.mobile;
+      if (data.dob) updated["dob"] = data.dob;
+      if (data.gender) updated["gender"] = data.gender;
+      if (data.city) updated["city"] = data.city;
+      if (data.state) updated["state"] = data.state;
+      if (data.pincode) updated["pincode"] = data.pincode;
+      if (data.address) updated["address"] = data.address;
+      if (data.languages && data.languages.length > 0) updated["languages"] = data.languages;
+      if (data.role) updated["role"] = data.role;
+      if (data.specialty) updated["specialty"] = data.specialty;
+      if (data.council) updated["council"] = data.council;
+      if (data.regNo) updated["regNo"] = data.regNo;
+      if (data.regValid) updated["regValid"] = data.regValid;
+      if (data.qual) updated["qual"] = data.qual;
+      if (data.year) updated["year"] = data.year;
+      if (data.institution) updated["institution"] = data.institution;
+      if (data.exp) updated["exp"] = data.exp;
+      if (data.employer) updated["employer"] = data.employer;
+      if (data.designation) updated["designation"] = data.designation;
+      if (data.notice) updated["notice"] = data.notice;
+      if (data.preferredCity) updated["preferredCity"] = data.preferredCity;
+      if (data.skills && data.skills.length > 0) updated["skills"] = data.skills;
+      return updated;
+    });
+
+    setDocs((prev) => ({
+      ...prev,
+      "Resume / CV": fileName,
+    }));
+
+    if (data.employer || data.designation) {
+      setExps([
+        {
+          org: data.employer || "Sunrise Hospital",
+          role: data.designation || "Staff Nurse",
+          fm: "4",
+          fy: "2022",
+          cur: true,
+        },
+      ]);
+    }
+
+    if (data.regNo) {
+      setRegVerification({ status: "ok", num: data.regNo });
     }
   };
 
   const fillDemo = () => {
-    const allDocs = Object.fromEntries(neededDocs(s.portal, str("role") || "Nurse").map((d) => [d.label, `${(d.label.split(" ")[0] ?? "document").toLowerCase()}-sample.pdf`]));
+    const allDocs = Object.fromEntries(neededDocs(f ? "facility" : "candidate", str("role") || "Nurse").map((d) => [d.label, `${(d.label.split(" ")[0] ?? "document").toLowerCase()}-sample.pdf`]));
     setDocs(allDocs);
     toast.success("Sample documents attached");
   };
@@ -197,6 +495,47 @@ function Onboarding() {
 
   const candidate: ReactNode[] = [
     <div className="space-y-8" key="c0">
+      {/* Resume Auto-Fill Standout Hero Card */}
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-primary/25 bg-gradient-to-r from-primary-soft/80 via-white to-amber-50/50 p-3.5 sm:p-6 shadow-sm w-full min-w-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4 min-w-0">
+          <div className="flex items-start gap-3 sm:gap-3.5 min-w-0 flex-1">
+            <span className="grid h-10 w-10 sm:h-12 sm:w-12 shrink-0 place-items-center rounded-xl sm:rounded-2xl bg-primary text-white shadow-md shadow-primary/25">
+              <HiOutlineSparkles className="h-5 w-5 sm:h-6 sm:w-6" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <h3 className="inline-flex items-center gap-1.5 text-sm sm:text-base font-bold text-slate-900 leading-snug">
+                  <HiBolt className="h-4 w-4 text-amber-500 fill-amber-500 shrink-0" />
+                  <span>Auto-Fill Profile from Resume</span>
+                </h3>
+                <span className="inline-flex items-center rounded-full bg-emerald-100 border border-emerald-300 px-2 py-0.5 text-[10px] font-bold text-emerald-800 shrink-0">
+                  Instant
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-600 leading-normal sm:leading-relaxed break-words">
+                Upload your CV (PDF or DOCX). Our intelligent healthcare parser will fetch your contact details, education, work experience, council registration, and clinical skills in seconds.
+              </p>
+              {docs["Resume / CV"] && (
+                <div className="mt-2.5 inline-flex max-w-full items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 border border-emerald-200 min-w-0">
+                  <HiCheck className="h-3.5 w-3.5 text-emerald-600 stroke-[3] shrink-0" />
+                  <span className="truncate">Active resume: {docs["Resume / CV"]}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center w-full sm:w-auto shrink-0 pt-0.5 sm:pt-0">
+            <Button
+              type="button"
+              onClick={() => setShowResumeModal(true)}
+              className="w-full sm:w-auto gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white shadow-md shadow-primary/25 hover:bg-primary/95 transition-all cursor-pointer h-10"
+            >
+              <HiOutlineCloudArrowUp className="h-4 w-4 shrink-0" />
+              <span className="truncate">{docs["Resume / CV"] ? "Re-parse Resume" : "Upload Resume & Auto-Fill"}</span>
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <FormSection
         icon={<HiOutlineUser className="h-4 w-4" />}
         title="Basic Information"
@@ -240,23 +579,37 @@ function Onboarding() {
         title="Your Profession"
         subtitle="Select your clinical discipline and primary specialty"
       >
-        <SelectField label="Profession" required options={professions} value={str("role")} onChange={handleProfessionChange} />
-        <Field
+        <SelectField label="Profession" required options={professions} value={str("role") || "Doctor"} onChange={handleProfessionChange} />
+        <SelectField
           label="Specialty / department"
           required
-          {...input("specialty")}
-          placeholder="Enter specialty or department"
+          options={(departmentsByProfession[str("role") || "Doctor"] ?? []).concat(["Other"])}
+          value={str("specialty")}
+          onChange={set("specialty")}
+          placeholder="Select specialty or department"
         />
+        {str("specialty") === "Other" && (
+          <div className="animate-in fade-in duration-200">
+            <Field
+              label="Type your department"
+              required
+              {...input("deptOwn")}
+              placeholder="e.g. Neonatal transport"
+            />
+          </div>
+        )}
         <ChipGroup
           label="Key clinical skills"
           multi
-          options={skillsByProfession[str("role")] ?? skillsByProfession["Doctor"] ?? []}
+          allowCustom
+          customPlaceholder="Add a skill that's not listed"
+          options={skillsByProfession[str("role") || "Doctor"] ?? []}
           value={arr("skills")}
           onChange={set("skills")}
         />
       </FormSection>
 
-      {regulated.includes(str("role")) ? (
+      {regulatedProfessions.includes(str("role") || "Doctor") ? (
         <>
           <div className="h-px bg-slate-100" />
           <FormSection
@@ -264,21 +617,120 @@ function Onboarding() {
             title="Professional Registration"
             subtitle="Clinical registration council details for government verification"
           >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field
-                label="Registration council"
-                required
-                {...input("council")}
-                placeholder="Enter registration council"
-              />
-              <Field
-                label="Registration number"
-                required
-                icon={<HiOutlineIdentification />}
-                {...input("regNo")}
-                placeholder="Enter registration number"
-              />
-            </div>
+            {(() => {
+              const selectedCouncil = str("council") || councilByProfession[str("role") || "Doctor"] || councilOptions[0] || "";
+              const onlineRegisterName = selectedCouncil ? onlineCouncilRegisters[selectedCouncil] : undefined;
+
+              return (
+                <div className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2 items-start">
+                    <SelectField
+                      label="Registration council"
+                      required
+                      options={councilOptions}
+                      value={selectedCouncil}
+                      onChange={(val) => {
+                        set("council")(val);
+                        setRegVerification(null);
+                      }}
+                    />
+                    <div className="space-y-1.5">
+                      <span className="block text-[13px] font-semibold text-foreground">
+                        Registration number <span className="text-destructive">*</span>
+                      </span>
+                      <div className="relative w-full">
+                        <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground [&_svg]:h-[18px] [&_svg]:w-[18px]">
+                          <HiOutlineIdentification />
+                        </span>
+                        <input
+                          type="text"
+                          value={str("regNo")}
+                          onChange={(e) => {
+                            set("regNo")(e.target.value);
+                            if (regVerification?.num !== e.target.value) setRegVerification(null);
+                          }}
+                          placeholder={regNoPlaceholders[str("role")] || regNoPlaceholders["default"]}
+                          className={cn(
+                            "field-input h-[46px] rounded-xl pl-11 pr-20 text-sm font-medium font-mono uppercase tracking-wide transition-all w-full",
+                            regVerification?.status === "ok" && "border-emerald-500 ring-2 ring-emerald-500/10",
+                            regVerification?.status === "not_found" && "border-rose-400 ring-2 ring-rose-400/10",
+                          )}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleVerifyRegistration}
+                          disabled={!str("regNo")?.trim() || verifyingReg}
+                          className={cn(
+                            "absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] font-bold no-underline transition-colors select-none",
+                            regVerification?.status === "ok"
+                              ? "text-emerald-600 hover:text-emerald-700 cursor-default"
+                              : "text-primary hover:text-primary-hover cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed disabled:pointer-events-none",
+                          )}
+                        >
+                          {verifyingReg ? "Verifying..." : regVerification?.status === "ok" ? "Verified" : "Verify"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Real-time council check status banner (matching thefale_website (19).html) */}
+                  {verifyingReg && (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-primary/20 bg-primary-soft/60 p-3 text-xs text-primary font-medium animate-in fade-in duration-200">
+                      <ImSpinner2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                      <span>Checking with the {onlineRegisterName || selectedCouncil}…</span>
+                    </div>
+                  )}
+
+                  {!verifyingReg && regVerification?.status === "ok" && (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/90 p-3.5 text-xs text-emerald-900 animate-in fade-in duration-200">
+                      <HiCheckCircle className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <b className="font-bold">Found on {onlineRegisterName || "council register"} • {regVerification.num}</b>
+                        <p className="mt-0.5 text-[11.5px] text-emerald-700 leading-relaxed">
+                          Name matches {str("name") || "your profile"}. We still double-check before hospitals see your profile.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {!verifyingReg && regVerification?.status === "manual" && (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-sky-200 bg-sky-50/90 p-3.5 text-xs text-sky-900 animate-in fade-in duration-200">
+                      <HiOutlineClock className="h-4 w-4 text-sky-600 shrink-0 mt-0.5" />
+                      <div>
+                        <b className="font-bold">Format looks right • {regVerification.num}</b>
+                        <p className="mt-0.5 text-[11.5px] text-sky-700 leading-relaxed">
+                          {selectedCouncil} has no public online register yet, so our team checks your certificate by hand within 24–48 hours.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {!verifyingReg && regVerification?.status === "not_found" && (
+                    <div className="flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50/90 p-3.5 text-xs text-rose-900 animate-in fade-in duration-200">
+                      <HiOutlineXMark className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                      <div>
+                        <b className="font-bold">We couldn't find this number</b>
+                        <p className="mt-0.5 text-[11.5px] text-rose-700 leading-relaxed">
+                          Check it against your certificate. If it's right, carry on and our team checks by hand.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {!verifyingReg && !regVerification && (
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3.5 py-2.5 text-xs text-slate-500">
+                      <HiOutlineMagnifyingGlass className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                      <span>
+                        {onlineRegisterName
+                          ? `Instant check available for this council (${onlineRegisterName}).`
+                          : "We check the format now and the certificate by hand."}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <DateField label="Valid until" optional value={str("regValid")} onChange={set("regValid")} />
           </FormSection>
         </>
@@ -293,17 +745,29 @@ function Onboarding() {
         title="Highest Education"
         subtitle="Your highest medical, healthcare or academic qualification"
       >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
+        <div className="grid gap-4 sm:grid-cols-2 items-start">
+          <SelectField
             label="Highest qualification"
             required
             icon={<HiOutlineAcademicCap />}
-            {...input("qual")}
-            placeholder="Enter highest qualification"
+            options={(qualificationsByProfession[str("role") || "Doctor"] ?? []).concat(["Other"])}
+            value={str("qual")}
+            onChange={set("qual")}
+            placeholder={qualificationPlaceholders[str("role")] || "Select qualification"}
           />
           <Field label="Year of completion" required inputMode="numeric" pattern="(19|20)[0-9]{2}" maxLength={4} {...input("year")} placeholder="YYYY" />
         </div>
-        <Field label="Institution / university" required {...input("institution")} placeholder="Enter college or university name" />
+        {str("qual") === "Other" && (
+          <div className="animate-in fade-in duration-200">
+            <Field
+              label="Type your qualification"
+              required
+              {...input("qualOwn")}
+              placeholder="Type your qualification"
+            />
+          </div>
+        )}
+        <Field label="Institution / university" required {...input("institution")} placeholder="e.g. Govt College of Nursing, RGUHS" />
       </FormSection>
 
       <div className="h-px bg-slate-100" />
@@ -311,20 +775,154 @@ function Onboarding() {
       <FormSection
         icon={<HiOutlineBriefcase className="h-4 w-4" />}
         title="Work Experience"
-        subtitle="Your overall clinical or healthcare experience"
+        subtitle="Every job counts, including internships"
       >
-        <ChipGroup label="Total experience" required options={["Fresher", "Under 2 yrs", "2–5 yrs", "5–10 yrs", "10+ yrs"]} value={str("exp")} onChange={set("exp")} />
-        {str("exp") && str("exp") !== "Fresher" && (
-          <div className="grid gap-4 pt-2 animate-in fade-in sm:grid-cols-2">
-            <Field label="Current / last employer" required icon={<HiOutlineBriefcase />} {...input("employer")} placeholder="Enter hospital or organization name" />
-            <Field
-              label="Designation"
-              required
-              {...input("designation")}
-              placeholder="Enter designation"
-            />
-            <SelectField label="Notice period" required options={["Immediately", "15 days", "30 days", "60 days", "90 days"]} value={str("notice")} onChange={set("notice")} />
-            <Field label="Current monthly salary" optional prefix="₹" inputMode="numeric" {...input("currentSalary")} placeholder="Enter monthly salary" />
+        <Toggle
+          label="I'm a fresher"
+          desc="No work experience yet. You can still apply to fresher roles and shifts."
+          checked={!!p["fresher"]}
+          onChange={(val) => {
+            setP((prev) => ({
+              ...prev,
+              fresher: val,
+              exp: val ? "Fresher" : (prev.exp === "Fresher" ? "" : prev.exp),
+            }));
+            if (val) {
+              setExps([]);
+            } else if (exps.length === 0) {
+              addExp();
+            }
+          }}
+        />
+
+        {!p["fresher"] && (
+          <div className="space-y-4 pt-1 animate-in fade-in duration-200">
+            {/* Total Experience Summary Pill */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-gradient-to-r from-primary-soft/60 via-card to-primary-soft/30 p-3.5 shadow-2xs">
+              <p className="text-xs text-foreground/80 max-w-[44ch] leading-relaxed font-medium">
+                Add every hospital or clinic, including internships. We add up your total.
+              </p>
+              <div className="flex flex-col items-end rounded-xl bg-primary px-3.5 py-1.5 text-white shadow-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-white/85">Total experience</span>
+                <b className="text-base sm:text-lg font-black text-white font-display leading-tight">{fmtM(totalExpMonths)}</b>
+              </div>
+            </div>
+
+            {/* List of Experience Cards */}
+            <div className="space-y-3.5">
+              {exps.map((e, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-4 space-y-3.5 shadow-xs transition-all animate-in fade-in"
+                >
+                  <div className="flex items-center gap-2.5 pb-2 border-b border-slate-200/70">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-white text-xs font-black shrink-0">
+                      {idx + 1}
+                    </span>
+                    <b className="flex-1 font-bold text-sm text-foreground truncate">
+                      {e.org || "New experience"}
+                    </b>
+                    {exps.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeExp(idx)}
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors cursor-pointer"
+                        title="Remove experience"
+                      >
+                        <HiOutlineTrash className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2 items-start">
+                    <Field
+                      label="Hospital or clinic"
+                      required
+                      value={e.org}
+                      onChange={(ev) => updateExp(idx, "org", ev.target.value)}
+                      placeholder="e.g. Sunrise Hospital"
+                    />
+                    <Field
+                      label="Designation"
+                      required
+                      value={e.role}
+                      onChange={(ev) => updateExp(idx, "role", ev.target.value)}
+                      placeholder={designationPlaceholders[str("role")] || "e.g. Staff Nurse"}
+                    />
+
+                    <div className="space-y-1.5">
+                      <span className="block text-[13px] font-semibold text-foreground">
+                        From <span className="text-destructive">*</span>
+                      </span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <SelectField
+                          placeholder="Month"
+                          options={MONTHS}
+                          value={MONTHS[Number(e.fm ?? 0)]}
+                          onChange={(mName) => updateExp(idx, "fm", String(MONTHS.indexOf(mName)))}
+                        />
+                        <SelectField
+                          placeholder="Year"
+                          options={YEARS}
+                          value={e.fy}
+                          onChange={(yVal) => updateExp(idx, "fy", yVal)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <span className="block text-[13px] font-semibold text-foreground">To</span>
+                      {e.cur ? (
+                        <div className="flex h-[46px] items-center gap-1.5 px-3.5 rounded-xl bg-emerald-50 text-emerald-800 text-xs font-bold border border-emerald-200">
+                          <HiOutlineClock className="h-4 w-4 text-emerald-600" />
+                          Present
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          <SelectField
+                            placeholder="Month"
+                            options={MONTHS}
+                            value={e.tm !== undefined ? MONTHS[Number(e.tm)] : undefined}
+                            onChange={(mName) => updateExp(idx, "tm", String(MONTHS.indexOf(mName)))}
+                          />
+                          <SelectField
+                            placeholder="Year"
+                            options={YEARS}
+                            value={e.ty}
+                            onChange={(yVal) => updateExp(idx, "ty", yVal)}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <label className="flex items-center gap-2.5 text-sm font-semibold text-slate-700 sm:col-span-2 cursor-pointer select-none pt-1">
+                      <input
+                        type="checkbox"
+                        checked={!!e.cur}
+                        onChange={(ev) => updateExp(idx, "cur", ev.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary accent-primary cursor-pointer"
+                      />
+                      <span>I currently work here</span>
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Add Experience Button */}
+            <button
+              type="button"
+              onClick={addExp}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-primary/40 bg-primary-soft/30 hover:bg-primary-soft/60 hover:border-primary text-primary font-bold text-sm transition-all cursor-pointer shadow-xs"
+            >
+              <HiPlus className="h-4 w-4" />
+              {exps.length ? "Add another experience" : "Add your first experience"}
+            </button>
+
+            <div className="grid gap-4 pt-2 sm:grid-cols-2">
+              <SelectField label="Notice period" required options={["Immediately", "15 days", "30 days", "60 days", "90 days"]} value={str("notice")} onChange={set("notice")} />
+              <Field label="Current monthly salary" optional prefix="₹" inputMode="numeric" {...input("currentSalary")} placeholder="Enter monthly salary" />
+            </div>
           </div>
         )}
       </FormSection>
@@ -460,42 +1058,66 @@ function Onboarding() {
         }
       >
         <div className="grid gap-4">
-          {neededDocs(s.portal, str("role")).map((d) => (
-            <UploadBox
-              key={d.label}
-              label={d.label}
-              hint={d.hint}
-              required={!d.label.includes("optional") && !d.label.includes("if applicable")}
-              file={docs[d.label]}
-              isDigiLocker={!f && d.label === "Identity proof"}
-              onDigiLocker={() => setShowDigiLockerModal(true)}
-              isVerified={d.label === "Identity proof" && !!docs[d.label]?.includes("DigiLocker")}
-              onFile={(n) =>
-                setDocs((x) => {
-                  const c = { ...x };
-                  if (n) c[d.label] = n;
-                  else delete c[d.label];
-                  return c;
-                })
-              }
-            />
-          ))}
-          {!f && (
-            <UploadBox
-              label="Profile photo"
-              hint="A clear, professional headshot in uniform or formal attire"
-              required={false}
-              file={docs["Profile photo"]}
-              onFile={(n) =>
-                setDocs((x) => {
-                  const updated = { ...x };
-                  if (n) updated["Profile photo"] = n;
-                  else delete updated["Profile photo"];
-                  return updated;
-                })
-              }
-            />
-          )}
+          {neededDocs(f ? "facility" : "candidate", str("role")).map((d) => {
+            if (!f && d.label === "Resume / CV") {
+              return (
+                <div key={d.label} className="space-y-2">
+                  <UploadBox
+                    label={d.label}
+                    hint={d.hint}
+                    required={true}
+                    file={docs[d.label]}
+                    onFile={(n) =>
+                      setDocs((x) => {
+                        const c = { ...x };
+                        if (n) c[d.label] = n;
+                        else delete c[d.label];
+                        return c;
+                      })
+                    }
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+                    <span className="text-slate-500">
+                      {docs["Resume / CV"]
+                        ? `Attached: ${docs["Resume / CV"]}`
+                        : "Have a PDF or Word resume ready?"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowResumeModal(true)}
+                      className="inline-flex items-center gap-1.5 font-bold text-primary hover:text-primary-hover hover:underline cursor-pointer"
+                    >
+                      <HiOutlineSparkles className="h-3.5 w-3.5" />
+                      {docs["Resume / CV"]
+                        ? "Re-parse & sync profile details"
+                        : "Auto-fill profile details from resume"}
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <UploadBox
+                key={d.label}
+                label={d.label}
+                hint={d.hint}
+                required={!d.label.includes("optional") && !d.label.includes("if applicable")}
+                file={docs[d.label]}
+                isDigiLocker={!f && d.label === "Identity proof"}
+                onDigiLocker={() => setShowDigiLockerModal(true)}
+                isVerified={d.label === "Identity proof" && !!docs[d.label]?.includes("DigiLocker")}
+                onFile={(n) =>
+                  setDocs((x) => {
+                    const c = { ...x };
+                    if (n) c[d.label] = n;
+                    else delete c[d.label];
+                    return c;
+                  })
+                }
+              />
+            );
+          })}
         </div>
       </FormSection>
       <Note>
@@ -509,21 +1131,21 @@ function Onboarding() {
       <div className="space-y-4">
         {(f
           ? [
-              ["Your details", 0, [str("recruiter"), str("designation"), str("email"), `+91 ${str("mobile")}`]],
-              ["Organization", 1, [str("org"), `${str("orgType")} · ${str("size")}`, `${str("address")}`, `${str("city")}, ${str("state")} ${str("pincode")}`]],
-              ["Verification", 2, [`Licence: ${str("licence")}`, `${Object.keys(docs).length} document(s) attached`]],
-              ["Hiring profile", 3, [arr("departments").join(", "), arr("hiring").join(", ")]],
-            ]
+            ["Your details", 0, [str("recruiter"), str("designation"), str("email"), `+91 ${str("mobile")}`]],
+            ["Organization", 1, [str("org"), `${str("orgType")} · ${str("size")}`, `${str("address")}`, `${str("city")}, ${str("state")} ${str("pincode")}`]],
+            ["Verification", 2, [`Licence: ${str("licence")}`, `${Object.keys(docs).length} document(s) attached`]],
+            ["Hiring profile", 3, [arr("departments").join(", "), arr("hiring").join(", ")]],
+          ]
           : [
-              ["Personal details", 0, [str("name"), `${str("gender")} · ${str("dob")}`, `+91 ${str("mobile")} · ${str("email")}`, `${str("city")}, ${str("state")} ${str("pincode")}`]],
-              ["Profession", 1, [`${str("role")} · ${str("specialty")}`, str("regNo") && `Reg. ${str("regNo")}`, arr("skills").join(", ")]],
-              ["Education & experience", 2, [`${str("qual")} (${str("year")})`, str("institution"), `${str("exp")}${str("employer") ? ` · ${str("employer")}` : ""}`]],
-              ["Preferences", 3, [str("preferredCity"), arr("employmentType").join(", "), `${str("salary")} · ${str("availability")}`]],
-              ["Documents", 4, [
-                docs["Identity proof"]?.includes("DigiLocker") ? "✓ Identity proof: Verified via DigiLocker (UIDAI e-Aadhaar)" : undefined,
-                `${Object.keys(docs).length} document(s) attached`,
-              ].filter(Boolean)],
-            ]
+            ["Personal details", 0, [str("name"), `${str("gender")} · ${str("dob")}`, `+91 ${str("mobile")} · ${str("email")}`, `${str("city")}, ${str("state")} ${str("pincode")}`]],
+            ["Profession", 1, [`${str("role")} · ${str("specialty")}`, str("regNo") && `Reg. ${str("regNo")}`, arr("skills").join(", ")]],
+            ["Education & experience", 2, [`${str("qual")} (${str("year")})`, str("institution"), `${str("exp")}${str("employer") ? ` · ${str("employer")}` : ""}`]],
+            ["Preferences", 3, [str("preferredCity"), arr("employmentType").join(", "), `${str("salary")} · ${str("availability")}`]],
+            ["Documents", 4, [
+              docs["Identity proof"]?.includes("DigiLocker") ? "✓ Identity proof: Verified via DigiLocker (UIDAI e-Aadhaar)" : undefined,
+              `${Object.keys(docs).length} document(s) attached`,
+            ].filter(Boolean)],
+          ]
         ).map(([title, i, lines]) => (
           <div key={title as string} className="rounded-2xl border border-slate-200/90 bg-slate-50/60 p-5 transition-all hover:bg-slate-50">
             <div className="mb-2.5 flex items-center justify-between">
@@ -572,6 +1194,20 @@ function Onboarding() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Candidate Resume Auto-fill trigger in header */}
+            {!f && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowResumeModal(true)}
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-full border-primary/30 text-xs font-bold text-primary hover:bg-primary-soft hover:text-primary transition-all cursor-pointer shadow-2xs"
+              >
+                <HiOutlineSparkles className="h-3.5 w-3.5" />
+                Auto-fill from Resume
+              </Button>
+            )}
+
             {/* Auto-saved badge */}
             <div className="hidden sm:flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1 text-xs font-semibold text-emerald-800">
               <span className="relative flex h-2 w-2">
@@ -602,101 +1238,99 @@ function Onboarding() {
       </header>
 
       {/* Main Grid: Stepper Sidebar + Master Form Card */}
-      <div className="mx-auto grid max-w-6xl gap-6 lg:gap-8 px-3.5 py-6 sm:px-6 sm:py-8 lg:grid-cols-[290px_minmax(0,1fr)]">
-        {/* Left Stepper Sidebar */}
-        <aside className="hidden lg:block select-none">
-          <div className="sticky top-24 space-y-4">
-            <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05),0_1px_3px_rgba(0,0,0,0.03)]">
-              {/* Header with progress */}
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-primary">
-                  {f ? "Facility Setup" : "Your Profile"}
-                </span>
-                <span className="inline-flex items-center rounded-full bg-primary-soft border border-primary/20 px-2.5 py-0.5 text-xs font-bold text-primary">
-                  {pct}% complete
-                </span>
-              </div>
+      <div className="mx-auto grid max-w-6xl gap-6 lg:gap-8 px-3.5 py-6 sm:px-6 sm:py-8 lg:grid-cols-[290px_minmax(0,1fr)] items-start">
+        {/* Left Stepper Sidebar - Sticky on page scroll without separate scrollbar */}
+        <aside className="hidden lg:block select-none self-start sticky top-[84px] space-y-4 z-20">
+          <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05),0_1px_3px_rgba(0,0,0,0.03)]">
+            {/* Header with progress */}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-primary">
+                {f ? "Facility Setup" : "Your Profile"}
+              </span>
+              <span className="inline-flex items-center rounded-full bg-primary-soft border border-primary/20 px-2.5 py-0.5 text-xs font-bold text-primary">
+                {pct}% complete
+              </span>
+            </div>
 
-              {/* Progress Bar */}
-              <div className="mt-3.5 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-primary to-orange-400 transition-all duration-500 shadow-sm shadow-primary/25"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
+            {/* Progress Bar */}
+            <div className="mt-3.5 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-primary to-orange-400 transition-all duration-500 shadow-sm shadow-primary/25"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
 
-              {/* Steps Timeline with connected vertical line */}
-              <div className="relative mt-7 space-y-2">
-                <div className="absolute left-[26px] -translate-x-1/2 top-5 bottom-5 w-[2px] bg-slate-200/80 z-0 pointer-events-none" />
+            {/* Steps Timeline with connected vertical line */}
+            <div className="relative mt-7 space-y-2">
+              <div className="absolute left-[26px] -translate-x-1/2 top-5 bottom-5 w-[2px] bg-slate-200/80 z-0 pointer-events-none" />
 
-                {steps.map((st, i) => {
-                  const isCurrent = i === step;
-                  const isCompleted = i < step;
-                  const isPending = i > step;
+              {steps.map((st, i) => {
+                const isCurrent = i === step;
+                const isCompleted = i < step;
+                const isPending = i > step;
 
-                  return (
-                    <div key={st.t} className="relative z-10">
-                      <button
-                        type="button"
-                        disabled={isPending}
-                        onClick={() => setStep(i)}
+                return (
+                  <div key={st.t} className="relative z-10">
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={() => setStep(i)}
+                      className={cn(
+                        "group flex w-full items-start gap-3 rounded-2xl p-2.5 text-left transition-all",
+                        isCurrent && "bg-primary-soft/60 border border-primary/25 shadow-sm",
+                        isCompleted && "hover:bg-slate-50 cursor-pointer",
+                        isPending && "cursor-not-allowed",
+                      )}
+                    >
+                      {/* Step Badge - 100% solid opaque with ring to cover the line */}
+                      <span
                         className={cn(
-                          "group flex w-full items-start gap-3 rounded-2xl p-2.5 text-left transition-all",
-                          isCurrent && "bg-primary-soft/60 border border-primary/25 shadow-sm",
-                          isCompleted && "hover:bg-slate-50 cursor-pointer",
-                          isPending && "cursor-not-allowed",
+                          "relative z-20 grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold transition-transform group-hover:scale-105",
+                          isCompleted && "bg-emerald-600 text-white shadow-sm ring-4 ring-white",
+                          isCurrent && "bg-primary text-white shadow-md shadow-primary/30 ring-4 ring-primary/15",
+                          isPending && "border border-slate-300 bg-white text-slate-400 ring-4 ring-white",
                         )}
                       >
-                        {/* Step Badge - 100% solid opaque with ring to cover the line */}
+                        {isCompleted ? <HiCheck className="h-4 w-4 stroke-[2.5]" /> : i + 1}
+                      </span>
+
+                      {/* Step Text */}
+                      <div className="pt-0.5 min-w-0">
                         <span
                           className={cn(
-                            "relative z-20 grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold transition-transform group-hover:scale-105",
-                            isCompleted && "bg-emerald-600 text-white shadow-sm ring-4 ring-white",
-                            isCurrent && "bg-primary text-white shadow-md shadow-primary/30 ring-4 ring-primary/15",
-                            isPending && "border border-slate-300 bg-white text-slate-400 ring-4 ring-white",
+                            "block text-sm font-bold leading-tight truncate",
+                            isCurrent && "text-primary",
+                            isCompleted && "text-slate-900",
+                            isPending && "text-slate-400",
                           )}
                         >
-                          {isCompleted ? <HiCheck className="h-4 w-4 stroke-[2.5]" /> : i + 1}
+                          {st.t}
                         </span>
-
-                        {/* Step Text */}
-                        <div className="pt-0.5 min-w-0">
-                          <span
-                            className={cn(
-                              "block text-sm font-bold leading-tight truncate",
-                              isCurrent && "text-primary",
-                              isCompleted && "text-slate-900",
-                              isPending && "text-slate-400",
-                            )}
-                          >
-                            {st.t}
-                          </span>
-                          <span
-                            className={cn(
-                              "mt-0.5 block text-xs leading-normal line-clamp-1",
-                              isPending ? "text-slate-400/80" : "text-slate-500",
-                            )}
-                          >
-                            {st.d}
-                          </span>
-                        </div>
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                        <span
+                          className={cn(
+                            "mt-0.5 block text-xs leading-normal line-clamp-1",
+                            isPending ? "text-slate-400/80" : "text-slate-500",
+                          )}
+                        >
+                          {st.d}
+                        </span>
+                      </div>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
+          </div>
 
-            {/* Credential Verification Trust Badge (Apple/LinkedIn style) */}
-            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 text-xs text-slate-600 space-y-2 shadow-sm">
-              <div className="flex items-center gap-2 font-bold text-slate-900">
-                <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
-                Verified Healthcare Network
-              </div>
-              <p className="text-[11px] leading-relaxed text-slate-500">
-                Credentials and registrations are verified directly with state councils and hospital boards.
-              </p>
+          {/* Credential Verification Trust Badge (Apple/LinkedIn style) */}
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 text-xs text-slate-600 space-y-2 shadow-sm">
+            <div className="flex items-center gap-2 font-bold text-slate-900">
+              <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
+              Verified Healthcare Network
             </div>
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              Credentials and registrations are verified directly with state councils and hospital boards.
+            </p>
           </div>
         </aside>
 
@@ -836,6 +1470,166 @@ function Onboarding() {
           setDocs((prev) => ({ ...prev, "Identity proof": fileName }));
         }}
       />
+
+      {/* Resume Auto-Fill Parser Modal */}
+      <ResumeParserModal
+        open={showResumeModal}
+        onClose={() => setShowResumeModal(false)}
+        onApplyData={handleApplyResumeData}
+      />
+
+      {/* Post-Review Profile Photo Modal - Bottom Drawer on Mobile, Centered Card on Desktop */}
+      {showPhotoModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            className="relative w-full sm:max-w-md max-h-[92vh] overflow-y-auto rounded-t-3xl rounded-b-none border-t border-x-0 border-b-0 sm:rounded-3xl sm:border border-slate-200/90 bg-white p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] sm:p-8 shadow-2xl space-y-6 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-200"
+            role="dialog"
+            aria-modal="true"
+          >
+            {/* Mobile Sheet Grab Handle */}
+            <div className="mx-auto -mt-2 mb-2 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+
+            {/* Close / Skip X Button */}
+            <button
+              type="button"
+              onClick={() => handleFinishOnboarding()}
+              className="absolute right-4 top-4 sm:right-5 sm:top-5 rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer transition-colors z-10"
+              title="Skip for now"
+            >
+              <HiOutlineXMark className="h-5 w-5" />
+            </button>
+
+            {/* Modal Header */}
+            <div className="text-center space-y-1.5 px-6 sm:px-4 pt-1">
+              <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+                Add your profile photo
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 leading-relaxed max-w-sm mx-auto">
+                Profiles with a clear photo receive up to <strong>3x more interview requests</strong> and shift bookings.
+              </p>
+            </div>
+
+            {/* Circular Avatar Uploader with perfectly positioned, unclipped camera badge */}
+            <div className="flex flex-col items-center justify-center space-y-3">
+              <div className="relative inline-block">
+                <div
+                  onClick={() => photoInputRef.current?.click()}
+                  className="relative h-28 w-28 sm:h-32 sm:w-32 rounded-full border-4 border-primary/20 bg-primary-soft text-primary shadow-lg cursor-pointer overflow-hidden transition-all hover:scale-[1.02] hover:border-primary flex items-center justify-center"
+                >
+                  {photoPreview ? (
+                    <img
+                      src={photoPreview}
+                      alt="Profile preview"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-3xl sm:text-4xl font-black text-primary select-none">
+                      {initials(str("name") || "FALE")}
+                    </span>
+                  )}
+
+                  {/* Subtle hover overlay */}
+                  <div className="absolute inset-0 bg-slate-900/40 opacity-0 hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[11px] font-bold">
+                    <HiOutlineCamera className="h-6 w-6 mb-0.5" />
+                    <span>{photoPreview ? "Change" : "Upload"}</span>
+                  </div>
+                </div>
+
+                {/* External camera badge - never clipped by overflow-hidden */}
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  className="absolute bottom-0 right-0 grid h-9 w-9 place-items-center rounded-full bg-primary text-white border-2 border-white shadow-md hover:bg-primary-hover hover:scale-105 transition-all cursor-pointer"
+                  title={photoPreview ? "Change photo" : "Upload photo"}
+                >
+                  <HiOutlineCamera className="h-4 w-4 stroke-[2.2]" />
+                </button>
+              </div>
+
+              {/* Hidden file input */}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/jpg"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  if (file.size > 5 * 1024 * 1024) {
+                    toast.error("Image too large. Please select a photo under 5 MB.");
+                    return;
+                  }
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    const res = reader.result as string;
+                    setPhotoPreview(res);
+                  };
+                  reader.readAsDataURL(file);
+                }}
+              />
+
+              <p className="text-xs font-medium text-slate-500 text-center">
+                {photoPreview ? (
+                  <span className="text-emerald-700 font-bold inline-flex items-center gap-1.5">
+                    <HiCheckCircle className="h-4 w-4 text-emerald-600" />
+                    Photo ready to save
+                  </span>
+                ) : (
+                  "Tap avatar or button below to choose photo (Max 5 MB)"
+                )}
+              </p>
+            </div>
+
+            {/* Quick Tips with clean React Icon alignment */}
+            <div className="rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 space-y-2.5 text-left">
+              <div className="flex items-center gap-2.5 text-xs text-slate-700">
+                <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+                  <HiCheck className="h-3 w-3 stroke-[3]" />
+                </span>
+                <span className="font-medium">Clear, front-facing headshot in good lighting</span>
+              </div>
+              <div className="flex items-center gap-2.5 text-xs text-slate-700">
+                <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+                  <HiCheck className="h-3 w-3 stroke-[3]" />
+                </span>
+                <span className="font-medium">Clinical scrubs, uniform, or formal attire works best</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-1">
+              {photoPreview ? (
+                <Button
+                  type="button"
+                  onClick={() => handleFinishOnboarding(photoPreview)}
+                  className="w-full h-12 rounded-xl bg-primary text-white font-semibold text-sm shadow-md shadow-primary/25 hover:bg-primary/95 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <HiCheckCircle className="h-4 w-4" />
+                  Save photo & view profile
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  className="w-full h-12 rounded-xl bg-primary text-white font-semibold text-sm shadow-md shadow-primary/25 hover:bg-primary/95 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <HiOutlineCamera className="h-4 w-4 stroke-[2.2]" />
+                  Choose photo
+                </Button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleFinishOnboarding()}
+                className="group w-full py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5"
+              >
+                <span>Skip for now & view profile</span>
+                <HiArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

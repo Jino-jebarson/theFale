@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FooterParticleLogo } from "@/components/FooterParticleLogo";
+import { openCookieSettings } from "@/components/fale/CookieConsent";
 import "@/styles/fale-landing.css";
 
 export const Route = createFileRoute("/landing")({
@@ -1358,7 +1359,18 @@ function LandingPage() {
               <li><a href="#about" onClick={(e) => scrollToSection(e, "about")} className="uc-hover-un">Terms &amp; Conditions</a></li>
               <li><a href="#about" onClick={(e) => scrollToSection(e, "about")} className="uc-hover-un">Verification Standards</a></li>
               <li><a href="#about" onClick={(e) => scrollToSection(e, "about")} className="uc-hover-un">Grievance Officer</a></li>
-              <li><a href="#about" onClick={(e) => scrollToSection(e, "about")} className="uc-hover-un">Cookie Settings</a></li>
+              <li>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openCookieSettings();
+                  }}
+                  className="uc-hover-un cursor-pointer bg-transparent border-0 p-0 text-inherit font-inherit"
+                >
+                  Cookie Settings
+                </button>
+              </li>
             </ul>
           </div>
         </div>
