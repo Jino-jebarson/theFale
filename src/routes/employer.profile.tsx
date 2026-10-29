@@ -22,6 +22,7 @@ import {
   HiOutlineBolt,
   HiOutlineHeart,
   HiOutlineInformationCircle,
+  HiOutlinePhoto,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
@@ -243,6 +244,18 @@ function HospitalProfileScreen() {
     );
   }, [hospitalName, store.postedShifts]);
 
+  // Uploaded facility photos from onboarding
+  const userFacilityPhotos = useMemo(() => {
+    try {
+      if (profile["facilityPhotos"]) {
+        return JSON.parse(profile["facilityPhotos"] as string) as string[];
+      }
+    } catch {
+      // fallback
+    }
+    return [];
+  }, [profile]);
+
   // Handle Edit Save
   const handleSaveProfile = () => {
     setState((s) => ({
@@ -272,7 +285,7 @@ function HospitalProfileScreen() {
           {/* Cover Banner Image with High-Definition Campus Presentation */}
           <div className="relative h-48 sm:h-64 md:h-72 w-full overflow-hidden bg-muted">
             <img
-              src={hospitalBanner}
+              src={(profile["facilityBanner"] as string) || (profile["avatar"] as string) || hospitalBanner}
               alt="Hospital Facility Campus"
               className="h-full w-full object-cover object-center"
             />
@@ -472,6 +485,32 @@ function HospitalProfileScreen() {
                   Our clinical ecosystem supports over 45 clinical specialties under one roof, managing complex patient referrals from across India and over 120 countries globally. We are deeply committed to empowering clinical staff through continuous medical education (CME), modern infrastructure, and safe nurse-to-patient staffing ratios.
                 </p>
               </div>
+
+              {/* Campus & Infrastructure Gallery (If uploaded in onboarding) */}
+              {userFacilityPhotos.length > 0 && (
+                <div className="rounded-2xl border border-border bg-card p-6 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                    <h2 className="text-base font-bold text-foreground flex items-center gap-2">
+                      <HiOutlinePhoto className="h-5 w-5 text-primary" />
+                      Campus & Clinical Infrastructure Gallery
+                    </h2>
+                    <span className="text-xs font-semibold text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
+                      {userFacilityPhotos.length} {userFacilityPhotos.length === 1 ? "Photo" : "Photos"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {userFacilityPhotos.map((imgUrl, i) => (
+                      <div key={i} className="group relative aspect-video rounded-xl overflow-hidden border border-border bg-muted shadow-2xs">
+                        <img
+                          src={imgUrl}
+                          alt={`Campus facility ${i + 1}`}
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Nurse-to-Patient Ratio Institutional Commitment (Apple/Naukri Trust Standard) */}
               <div className="rounded-2xl border border-border bg-card p-6 shadow-xs space-y-4">

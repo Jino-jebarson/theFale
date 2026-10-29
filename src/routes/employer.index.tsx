@@ -119,9 +119,17 @@ function Employer() {
             {/* Avatar & Hospital Identity */}
             <div className="-mt-10 px-4 sm:px-5 pb-5 text-center min-w-0">
               <div className="relative mx-auto inline-block">
-                <span className="grid h-20 w-20 place-items-center rounded-2xl border-4 border-card bg-primary-soft text-2xl font-black text-primary shadow-md">
-                  {initials(orgName)}
-                </span>
+                {s.profile["avatar"] ? (
+                  <img
+                    src={s.profile["avatar"] as string}
+                    alt={orgName}
+                    className="h-20 w-20 rounded-2xl border-4 border-card object-cover shadow-md"
+                  />
+                ) : (
+                  <span className="grid h-20 w-20 place-items-center rounded-2xl border-4 border-card bg-primary-soft text-2xl font-black text-primary shadow-md">
+                    {initials(orgName)}
+                  </span>
+                )}
                 <span
                   title="NABH Verified Hospital"
                   className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full bg-emerald-600 text-white ring-2 ring-card shadow-sm"

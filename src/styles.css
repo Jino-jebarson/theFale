@@ -440,3 +440,71 @@ body[style*="margin-right"],
   right: 0px !important;
   scrollbar-gutter: auto !important;
 }
+
+/* Click-Only Button Ripple & Pop Animation */
+@keyframes button-click-pop {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(0.93);
+  }
+  70% {
+    transform: scale(1.03);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-click-pop {
+  animation: button-click-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes click-ripple {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0.65;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(5);
+    opacity: 0;
+  }
+}
+
+.animate-click-ripple {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.4) 45%, transparent 70%);
+  animation: click-ripple 0.45s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes click-flash {
+  0% {
+    transform: translateX(-120%) skewX(-20deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateX(200%) skewX(-20deg);
+    opacity: 0;
+  }
+}
+
+.animate-click-flash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 100%
+  );
+  animation: click-flash 0.35s ease-out forwards;
+  pointer-events: none;
+}

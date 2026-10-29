@@ -29,6 +29,10 @@ import {
   HiOutlineTrash,
   HiPlus,
   HiOutlineCamera,
+  HiOutlinePhoto,
+  HiOutlinePhone,
+  HiOutlineBuildingLibrary,
+  HiOutlineLockClosed,
 } from "react-icons/hi2";
 import { ImSpinner2 } from "react-icons/im";
 import { LogOut } from "lucide-react";
@@ -195,6 +199,26 @@ function Onboarding() {
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string>("");
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const [showHospitalPhotoModal, setShowHospitalPhotoModal] = useState(false);
+  const [hospitalPhotos, setHospitalPhotos] = useState<string[]>([]);
+  const [hospitalLogoPreview, setHospitalLogoPreview] = useState<string>("");
+  const hospitalLogoInputRef = useRef<HTMLInputElement>(null);
+  const hospitalPhotosInputRef = useRef<HTMLInputElement>(null);
+  const [isButtonClicked, setIsButtonClicked] = useState(false);
+  const [rippleCoords, setRippleCoords] = useState<{ x: number; y: number } | null>(null);
+
+  const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setRippleCoords({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+    setIsButtonClicked(true);
+    setTimeout(() => {
+      setIsButtonClicked(false);
+      setRippleCoords(null);
+    }, 450);
+  };
 
   // Isolate onboarding flow from dark mode
   useEffect(() => {
@@ -386,7 +410,7 @@ function Onboarding() {
       if (!f) {
         setShowPhotoModal(true);
       } else {
-        handleFinishOnboarding();
+        setShowHospitalPhotoModal(true);
       }
     }
   };
@@ -420,6 +444,33 @@ function Onboarding() {
     setShowPhotoModal(false);
     toast.success("Profile submitted for verification", { description: "Review usually takes up to 48 hours." });
     navigate({ to: f ? "/employer" : "/profile" });
+  };
+
+  const handleFinishHospitalOnboarding = (primary?: string, gallery?: string[]) => {
+    const finalPrimary = primary || hospitalLogoPreview || (hospitalPhotos.length > 0 ? hospitalPhotos[0] : "");
+    const finalPhotos = gallery || hospitalPhotos;
+    const profileToSave = {
+      ...p,
+      ...(finalPrimary ? { avatar: finalPrimary, logo: finalPrimary } : {}),
+      ...(finalPhotos.length > 0 ? { facilityPhotos: JSON.stringify(finalPhotos), facilityBanner: finalPhotos[0] } : {}),
+    };
+    const finalDocs = { ...docs };
+    if (finalPrimary) {
+      finalDocs["Hospital photo"] = finalPrimary;
+    }
+    if (finalPhotos.length > 0) {
+      finalDocs["Facility photos"] = `${finalPhotos.length} photos uploaded`;
+    }
+    setState({
+      onboarded: true,
+      profile: profileToSave as Record<string, string | boolean>,
+      docs: finalDocs,
+    });
+    setShowHospitalPhotoModal(false);
+    toast.success("Facility profile submitted for verification", {
+      description: "Hospital review usually takes under 24 hours.",
+    });
+    navigate({ to: "/employer" });
   };
 
   const handleApplyResumeData = (data: ParsedResumeData, fileName: string) => {
@@ -1128,49 +1179,649 @@ function Onboarding() {
 
   const review = (
     <div className="space-y-6">
+      {/* Structured Section Cards */}
       <div className="space-y-4">
-        {(f
-          ? [
-            ["Your details", 0, [str("recruiter"), str("designation"), str("email"), `+91 ${str("mobile")}`]],
-            ["Organization", 1, [str("org"), `${str("orgType")} · ${str("size")}`, `${str("address")}`, `${str("city")}, ${str("state")} ${str("pincode")}`]],
-            ["Verification", 2, [`Licence: ${str("licence")}`, `${Object.keys(docs).length} document(s) attached`]],
-            ["Hiring profile", 3, [arr("departments").join(", "), arr("hiring").join(", ")]],
-          ]
-          : [
-            ["Personal details", 0, [str("name"), `${str("gender")} · ${str("dob")}`, `+91 ${str("mobile")} · ${str("email")}`, `${str("city")}, ${str("state")} ${str("pincode")}`]],
-            ["Profession", 1, [`${str("role")} · ${str("specialty")}`, str("regNo") && `Reg. ${str("regNo")}`, arr("skills").join(", ")]],
-            ["Education & experience", 2, [`${str("qual")} (${str("year")})`, str("institution"), `${str("exp")}${str("employer") ? ` · ${str("employer")}` : ""}`]],
-            ["Preferences", 3, [str("preferredCity"), arr("employmentType").join(", "), `${str("salary")} · ${str("availability")}`]],
-            ["Documents", 4, [
-              docs["Identity proof"]?.includes("DigiLocker") ? "✓ Identity proof: Verified via DigiLocker (UIDAI e-Aadhaar)" : undefined,
-              `${Object.keys(docs).length} document(s) attached`,
-            ].filter(Boolean)],
-          ]
-        ).map(([title, i, lines]) => (
-          <div key={title as string} className="rounded-2xl border border-slate-200/90 bg-slate-50/60 p-5 transition-all hover:bg-slate-50">
-            <div className="mb-2.5 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900">{title as string}</h3>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setStep(i as number)} className="gap-1 text-xs font-semibold text-primary hover:text-primary-hover hover:bg-primary-soft">
-                <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
-              </Button>
+        {f ? (
+          /* ==================== FACILITY REVIEW CARDS ==================== */
+          <>
+            {/* Card 1: Authorized Contact */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary mt-0.5">
+                    <HiOutlineUser className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Authorized Representative</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Primary recruiter & credentials contact</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStep(0)}
+                  className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+                </Button>
+              </div>
+
+              <div className="grid gap-2.5 sm:gap-3 sm:grid-cols-2 pt-1">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Full Name</span>
+                  <p className="mt-0.5 text-xs sm:text-sm font-bold text-slate-900">{str("recruiter") || "—"}</p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Designation</span>
+                  <div className="mt-0.5">
+                    <span className="inline-flex items-center rounded-md bg-white border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-800">
+                      {str("designation") || "—"}
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Work Email</span>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-800 break-all">
+                    <HiOutlineEnvelope className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    {str("email") || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Mobile Phone</span>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-800">
+                    <HiOutlinePhone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    +91 {str("mobile") || "—"}
+                  </p>
+                </div>
+              </div>
             </div>
-            <div className="space-y-1">
-              {(lines as string[]).filter((l) => l && l.trim() && !/^[\s·,()]*$/.test(l)).map((l) => (
-                <p key={l} className="text-sm text-slate-600 font-medium">{l}</p>
-              ))}
+
+            {/* Card 2: Organization & Campus */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-sky-50 text-sky-600 mt-0.5">
+                    <HiOutlineBuildingOffice2 className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Organization & Campus</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Facility details & deployment location</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStep(1)}
+                  className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+                </Button>
+              </div>
+
+              {/* Organization Info Row */}
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+                  <div className="min-w-0">
+                    <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Registered Name</span>
+                    <h4 className="text-sm sm:text-base font-bold text-slate-900">{str("org") || "—"}</h4>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {str("orgType") && (
+                      <span className="inline-flex items-center rounded-lg bg-sky-50 border border-sky-200 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-bold text-sky-800 shrink-0 whitespace-nowrap">
+                        {str("orgType")}
+                      </span>
+                    )}
+                    {str("size") && (
+                      <span className="inline-flex items-center rounded-lg bg-slate-100 border border-slate-200 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-semibold text-slate-700 shrink-0 whitespace-nowrap">
+                        {str("size")}
+                      </span>
+                    )}
+                    {str("beds") && (
+                      <span className="inline-flex items-center rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-semibold text-emerald-800 shrink-0 whitespace-nowrap">
+                        {str("beds")} beds
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {str("website") && (
+                  <div className="flex items-center gap-1.5 text-xs text-primary font-semibold">
+                    <HiOutlineGlobeAlt className="h-3.5 w-3.5 shrink-0" />
+                    <a href={str("website").startsWith("http") ? str("website") : `https://${str("website")}`} target="_blank" rel="noreferrer" className="hover:underline truncate">
+                      {str("website")}
+                    </a>
+                  </div>
+                )}
+
+                {/* Campus Address Card */}
+                <div className="flex items-start gap-2.5 sm:gap-3 rounded-xl border border-slate-200/80 bg-slate-50/80 p-3 sm:p-3.5">
+                  <div className="grid h-7 w-7 sm:h-8 sm:w-8 shrink-0 place-items-center rounded-lg bg-rose-50 text-rose-500 border border-rose-100 mt-0.5">
+                    <HiOutlineMapPin className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Campus Location</span>
+                    <p className="mt-0.5 text-xs sm:text-sm font-semibold text-slate-800 leading-snug break-words">
+                      {str("address") || "Location not provided"}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {str("city") && (
+                        <span className="inline-flex items-center rounded-md bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700 shrink-0 whitespace-nowrap">
+                          {str("city")}
+                        </span>
+                      )}
+                      {str("state") && (
+                        <span className="inline-flex items-center rounded-md bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700 shrink-0 whitespace-nowrap">
+                          {str("state")}
+                        </span>
+                      )}
+                      {str("pincode") && (
+                        <span className="inline-flex items-center rounded-md bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700 shrink-0 whitespace-nowrap">
+                          PIN: {str("pincode")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+
+            {/* Card 3: Verification & Licences */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600 mt-0.5">
+                    <HiOutlineShieldCheck className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Regulatory Verification & Licences</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Statutory registration & certificates</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStep(2)}
+                  className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="grid gap-2.5 sm:gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/50 p-3 sm:p-3.5">
+                    <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-emerald-800">Registration / Licence</span>
+                    <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-mono text-xs sm:text-sm font-bold text-slate-900 tracking-wide break-all">{str("licence") || "Not entered"}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 shrink-0 whitespace-nowrap">
+                        <HiCheckCircle className="h-3.5 w-3.5 text-emerald-600" /> Statutory
+                      </span>
+                    </div>
+                  </div>
+
+                  {str("gst") ? (
+                    <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-3 sm:p-3.5">
+                      <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-500">GSTIN</span>
+                      <p className="mt-1 font-mono text-xs sm:text-sm font-bold text-slate-800 break-all">{str("gst")}</p>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-slate-200/80 bg-slate-50/50 p-3 sm:p-3.5 flex items-center justify-between">
+                      <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">GSTIN</span>
+                      <span className="text-xs text-slate-400 italic">Not provided</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Attached Documents List */}
+                <div className="pt-2">
+                  <div className="mb-2 flex items-center justify-between gap-2 text-xs font-bold text-slate-700">
+                    <span>Attached Documents</span>
+                    <span className="inline-flex items-center rounded-full bg-primary-soft px-2.5 py-0.5 text-[10.5px] sm:text-[11px] font-bold text-primary shrink-0 whitespace-nowrap">
+                      {Object.keys(docs).length} file(s)
+                    </span>
+                  </div>
+
+                  {Object.keys(docs).length > 0 ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {Object.entries(docs).map(([docType, fileName]) => {
+                        const displayFile = fileName.startsWith("data:") ? "Photo file attached" : fileName;
+                        return (
+                          <div key={docType} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/60 p-2.5 overflow-hidden">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600">
+                                <HiOutlineDocumentCheck className="h-4 w-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-bold text-slate-800 truncate">{docType}</p>
+                                <p className="text-[10px] text-slate-400 truncate">{displayFile}</p>
+                              </div>
+                            </div>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 shrink-0 whitespace-nowrap">
+                              <HiCheck className="h-3 w-3 stroke-[3]" /> Attached
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3 text-xs text-amber-800">
+                      No documents attached yet. You can upload verification documents to speed up regulatory approval.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Card 4: Hiring Profile & Departments */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600 mt-0.5">
+                    <HiOutlineBriefcase className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Hiring Profile & Needs</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Departments & staffing models</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStep(3)}
+                  className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+                </Button>
+              </div>
+
+              <div className="space-y-3.5">
+                <div>
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                    Clinical Departments Sourcing For
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {arr("departments").length > 0 ? (
+                      arr("departments").map((d) => (
+                        <span key={d} className="inline-flex items-center rounded-xl bg-primary-soft border border-primary/25 px-2.5 py-0.5 sm:px-3 sm:py-1 text-[11px] sm:text-xs font-bold text-primary">
+                          {d}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-400 italic">No departments specified</span>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                    Employment Models
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {arr("hiring").length > 0 ? (
+                      arr("hiring").map((h) => (
+                        <span key={h} className="inline-flex items-center rounded-lg bg-slate-100 border border-slate-200 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-semibold text-slate-700">
+                          {h}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-400 italic">No employment models specified</span>
+                    )}
+                  </div>
+                </div>
+
+                {str("about") && (
+                  <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3 sm:p-3.5">
+                    <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400 block mb-1">About Facility</span>
+                    <p className="text-xs text-slate-700 leading-relaxed italic">
+                      "{str("about")}"
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          /* ==================== CANDIDATE REVIEW CARDS ==================== */
+          <>
+            {/* Card 0: Personal Details */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary mt-0.5">
+                    <HiOutlineUser className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Personal Details</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Contact details & primary residence</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStep(0)}
+                  className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+                </Button>
+              </div>
+
+              <div className="grid gap-2.5 sm:gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Full Name</span>
+                  <p className="mt-0.5 text-xs sm:text-sm font-bold text-slate-900">{str("name") || "—"}</p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Gender & Date of Birth</span>
+                  <p className="mt-0.5 text-xs sm:text-sm font-semibold text-slate-800">
+                    {str("gender") || "—"} {str("dob") ? `· ${str("dob")}` : ""}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Mobile Phone</span>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-800">
+                    <HiOutlinePhone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    +91 {str("mobile") || "—"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-800 break-all">
+                    <HiOutlineEnvelope className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    {str("email") || "—"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Location & Languages */}
+              <div className="mt-3 space-y-2">
+                <div className="flex items-start gap-2.5 sm:gap-3 rounded-xl border border-slate-200/80 bg-slate-50/80 p-3">
+                  <HiOutlineMapPin className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+                  <div className="text-xs text-slate-700 min-w-0 flex-1">
+                    <span className="font-semibold text-slate-900 break-words">{str("address") || "Address on file"}</span>
+                    {(str("city") || str("state") || str("pincode")) && (
+                      <p className="text-slate-500 text-[11px] mt-0.5">
+                        {[str("city"), str("state"), str("pincode")].filter(Boolean).join(", ")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {arr("languages").length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
+                    <span className="font-semibold text-slate-500 text-[11px]">Languages:</span>
+                    <div className="flex flex-wrap gap-1">
+                      {arr("languages").map((lang) => (
+                        <span key={lang} className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                          {lang}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Card 1: Profession & Registration */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-sky-50 text-sky-600 mt-0.5">
+                    <HiOutlineBriefcase className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Clinical Profession & Registration</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Discipline, specialty & council registration</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStep(1)}
+                  className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <span className="inline-flex items-center rounded-xl bg-primary-soft border border-primary/25 px-2.5 py-0.5 sm:px-3 sm:py-1 text-xs font-bold text-primary shrink-0 whitespace-nowrap">
+                    {str("role") || "Doctor"}
+                  </span>
+                  {str("specialty") && (
+                    <span className="inline-flex items-center rounded-xl bg-slate-100 border border-slate-200 px-2.5 py-0.5 sm:px-3 sm:py-1 text-xs font-bold text-slate-800 shrink-0 whitespace-nowrap">
+                      {str("specialty")}
+                    </span>
+                  )}
+                  {str("regNo") && (
+                    <span className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 sm:px-3 sm:py-1 text-xs font-bold text-emerald-800 shrink-0 whitespace-nowrap">
+                      <HiCheckCircle className="h-3.5 w-3.5 text-emerald-600" /> Reg: {str("regNo")}
+                    </span>
+                  )}
+                </div>
+
+                {str("council") && str("council") !== "Not applicable for my role" && (
+                  <p className="text-xs text-slate-600">
+                    <span className="font-semibold text-slate-800">Council:</span> {str("council")}
+                  </p>
+                )}
+
+                {arr("skills").length > 0 && (
+                  <div>
+                    <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                      Clinical Skills & Proficiencies
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {arr("skills").map((sk) => (
+                        <span key={sk} className="rounded-lg bg-slate-100 border border-slate-200 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-semibold text-slate-700">
+                          {sk}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Card 2: Education & Experience */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600 mt-0.5">
+                    <HiOutlineAcademicCap className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Education & Work Experience</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Degree, institution & clinical history</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStep(2)}
+                  className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 sm:p-3.5">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Highest Qualification</span>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs sm:text-sm font-bold text-slate-900">{str("qual") || "Medical Degree"}</span>
+                    {str("year") && (
+                      <span className="inline-flex items-center rounded-md bg-white border border-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700 shrink-0 whitespace-nowrap">
+                        Class of {str("year")}
+                      </span>
+                    )}
+                  </div>
+                  {str("institution") && (
+                    <p className="mt-1 text-xs text-slate-600 font-medium">{str("institution")}</p>
+                  )}
+                </div>
+
+                {/* Experience Summary */}
+                <div>
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                    Clinical Career History
+                  </span>
+                  {p["fresher"] ? (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-3 text-xs font-bold text-sky-800">
+                      Fresher / Recent Graduate — Open to Entry Clinical Roles & Fellowships
+                    </div>
+                  ) : exps.length > 0 ? (
+                    <div className="space-y-2">
+                      {exps.map((e, idx) => (
+                        <div key={idx} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-white p-3 shadow-2xs">
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-900 truncate">{e.role}</p>
+                            <p className="text-[11px] text-slate-500 truncate">{e.org}</p>
+                          </div>
+                          <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 shrink-0 whitespace-nowrap">
+                            {MONTHS[Number(e.fm)]} {e.fy} — {e.cur ? "Present" : `${MONTHS[Number(e.tm || 0)]} ${e.ty || ""}`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 italic">No previous experience logged</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Card 3: Job Preferences */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-rose-50 text-rose-600 mt-0.5">
+                    <HiOutlineClock className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Preferences & Availability</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Preferred cities, shifts & salary</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStep(3)}
+                  className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+                </Button>
+              </div>
+
+              <div className="grid gap-2.5 sm:gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Preferred City</span>
+                  <p className="mt-0.5 text-xs sm:text-sm font-bold text-slate-900">{str("preferredCity") || "Any City"}</p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Available to Join</span>
+                  <p className="mt-0.5 text-xs sm:text-sm font-bold text-slate-900">{str("availability") || "Immediately"}</p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Expected Monthly Salary</span>
+                  <p className="mt-0.5 text-xs sm:text-sm font-bold text-primary">{str("salary") || "Negotiable"}</p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+                  <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Employment Type</span>
+                  <p className="mt-0.5 text-xs sm:text-sm font-semibold text-slate-800">
+                    {arr("employmentType").join(", ") || "Full-time"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Card 4: Verified Documents */}
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                  <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600 mt-0.5">
+                    <HiOutlineDocumentCheck className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Documents & Credential Proof</h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">DigiLocker verification & certificates</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStep(4)}
+                  className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                {docs["Identity proof"]?.includes("DigiLocker") && (
+                  <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5 sm:p-3 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <HiCheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                      <span className="font-bold text-emerald-900 truncate">Identity proof verified via DigiLocker (UIDAI e-Aadhaar)</span>
+                    </div>
+                    <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800 shrink-0 whitespace-nowrap">
+                      e-Verified
+                    </span>
+                  </div>
+                )}
+
+                {Object.entries(docs).map(([docType, fileName]) => {
+                  const displayFile = fileName.startsWith("data:") ? "Photo file attached" : fileName;
+                  return (
+                    <div key={docType} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/60 p-2.5 overflow-hidden">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <HiOutlineDocumentCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-slate-800 truncate">{docType}</p>
+                          <p className="text-[10px] text-slate-400 truncate">{displayFile}</p>
+                        </div>
+                      </div>
+                      <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 shrink-0 whitespace-nowrap">
+                        Attached
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
-      <label className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary-soft/80 p-5 text-sm cursor-pointer select-none">
-        <input type="checkbox" required className="mt-0.5 h-4 w-4 accent-primary rounded cursor-pointer" />
-        <span className="text-slate-800 font-medium leading-relaxed">
-          {f
-            ? "I confirm I am authorized to represent this registered healthcare organization and all submitted details are authentic."
-            : "I confirm these details are accurate and consent to verification of my credentials against regulatory council databases."}
-        </span>
-      </label>
+      {/* 3. Statutory Declaration & Consent Card */}
+      <div className="rounded-2xl border border-primary/25 bg-gradient-to-r from-primary-soft/40 via-white to-emerald-50/30 p-4 sm:p-6 shadow-sm">
+        <label className="flex items-start gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            required
+            className="mt-1 h-5 w-5 accent-primary rounded cursor-pointer shrink-0"
+          />
+          <div className="space-y-1 min-w-0 flex-1">
+            <span className="text-sm font-bold text-slate-900 block">
+              {f ? "Authorized Institutional Declaration" : "Candidate Credential Declaration"}
+            </span>
+            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-normal">
+              {f
+                ? "I confirm I am an authorized representative of this registered healthcare institution. All submitted statutory licences and institutional operational details are genuine, authentic, and subject to regulatory verification."
+                : "I confirm all submitted professional qualifications, clinical experiences, and registrations are accurate. I authorize FALE to verify my credentials directly against statutory state councils and official medical registries."}
+            </p>
+          </div>
+        </label>
+      </div>
     </div>
   );
 
@@ -1356,7 +2007,7 @@ function Onboarding() {
             </div>
 
             {/* Form Step Body with smooth slide-in */}
-            <div key={step} className="animate-in fade-in slide-in-from-right-2 duration-300">
+            <div key={step} className="animate-in fade-in-50 slide-in-from-right-4 duration-300 ease-out">
               {body}
             </div>
 
@@ -1366,17 +2017,46 @@ function Onboarding() {
                 type="button"
                 variant="outline"
                 size="lg"
-                className="w-full sm:w-auto gap-2 rounded-xl border-slate-300 font-semibold text-slate-700 hover:bg-slate-50"
+                className="w-full sm:w-auto gap-2 rounded-xl border-slate-300 font-semibold text-slate-700 hover:bg-slate-50 active:scale-[0.98] transition-all cursor-pointer"
                 onClick={() => (step ? setStep(step - 1) : navigate({ to: "/" }))}
               >
                 <HiArrowLeft className="h-4 w-4" /> Back
               </Button>
               <Button
+                type="submit"
                 size="lg"
-                className="w-full sm:w-auto group gap-2 rounded-xl bg-primary px-8 font-semibold text-white shadow-md shadow-primary/25 hover:shadow-lg hover:shadow-primary/35 hover:bg-primary/95 transition-all cursor-pointer"
+                onClick={handleButtonClick}
+                className={cn(
+                  "relative overflow-hidden w-full sm:w-auto group gap-2.5 rounded-xl bg-primary px-8 font-semibold text-white shadow-md shadow-primary/25 hover:shadow-lg hover:shadow-primary/35 hover:bg-primary/95 transition-all cursor-pointer select-none",
+                  isButtonClicked && "animate-click-pop"
+                )}
               >
-                <span>{step === steps.length - 1 ? "Submit for verification" : "Save & continue"}</span>
-                <HiArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                {/* Click Flash & Ripple - Triggers ONLY when clicked */}
+                {isButtonClicked && (
+                  <>
+                    <span className="animate-click-flash" aria-hidden="true" />
+                    {rippleCoords && (
+                      <span
+                        className="animate-click-ripple"
+                        style={{ left: rippleCoords.x, top: rippleCoords.y }}
+                        aria-hidden="true"
+                      />
+                    )}
+                  </>
+                )}
+
+                <span className="relative z-10 font-semibold tracking-wide">
+                  {step === steps.length - 1 ? "Submit for verification" : "Save & continue"}
+                </span>
+
+                <span
+                  className={cn(
+                    "relative z-10 flex items-center transition-transform duration-200",
+                    isButtonClicked ? "translate-x-2 text-white" : "group-hover:translate-x-1"
+                  )}
+                >
+                  <HiArrowRight className="h-4 w-4 stroke-[2.2]" />
+                </span>
               </Button>
             </div>
 
@@ -1478,7 +2158,7 @@ function Onboarding() {
         onApplyData={handleApplyResumeData}
       />
 
-      {/* Post-Review Profile Photo Modal - Bottom Drawer on Mobile, Centered Card on Desktop */}
+      {/* Post-Review Candidate Profile Photo Modal */}
       {showPhotoModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div
@@ -1624,6 +2304,265 @@ function Onboarding() {
                 className="group w-full py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5"
               >
                 <span>Skip for now & view profile</span>
+                <HiArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Post-Review Hospital & Facility Photos Modal - Bottom Drawer on Mobile, Centered Card on Desktop */}
+      {showHospitalPhotoModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div
+            className="relative w-full sm:max-w-md max-h-[92vh] overflow-y-auto rounded-t-3xl rounded-b-none border-t border-x-0 border-b-0 sm:rounded-3xl sm:border border-slate-200/90 bg-white p-5 sm:p-6 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl space-y-4 animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-200"
+            role="dialog"
+            aria-modal="true"
+          >
+            {/* Mobile Sheet Grab Handle */}
+            <div className="mx-auto -mt-1 mb-1 h-1.5 w-12 rounded-full bg-slate-300 sm:hidden" />
+
+            {/* Close / Skip X Button */}
+            <button
+              type="button"
+              onClick={() => handleFinishHospitalOnboarding()}
+              className="absolute right-4 top-4 sm:right-5 sm:top-5 rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer transition-colors z-10"
+              title="Skip for now"
+            >
+              <HiOutlineXMark className="h-5 w-5" />
+            </button>
+
+            {/* Modal Header */}
+            <div className="text-center space-y-1 px-4 pt-1">
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                Add hospital & facility photos
+              </h2>
+              <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+                Showcase your official logo and hospital facilities to attract verified doctors and nurses.
+              </p>
+            </div>
+
+            {/* Unified Upload Section */}
+            <div className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-3.5 space-y-3">
+              {/* Part 1: Hospital Logo */}
+              <div className="flex items-center gap-3.5">
+                {/* Logo Squircle with external unclipped badge */}
+                <div className="relative shrink-0">
+                  <div
+                    onClick={() => hospitalLogoInputRef.current?.click()}
+                    className="relative h-14 w-14 rounded-2xl border-2 border-primary/25 bg-white text-primary shadow-2xs cursor-pointer overflow-hidden flex items-center justify-center hover:border-primary transition-all group"
+                    title="Upload hospital logo"
+                  >
+                    {hospitalLogoPreview ? (
+                      <img
+                        src={hospitalLogoPreview}
+                        alt="Hospital logo"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xl font-black text-primary select-none">
+                        {initials(str("org") || "HOSP")}
+                      </span>
+                    )}
+                    <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                      <HiOutlineCamera className="h-4 w-4" />
+                    </div>
+                  </div>
+
+                  {/* External camera badge - never clipped */}
+                  <button
+                    type="button"
+                    onClick={() => hospitalLogoInputRef.current?.click()}
+                    className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-primary text-white border-2 border-white shadow-xs cursor-pointer hover:scale-105 transition-transform"
+                    title={hospitalLogoPreview ? "Change logo" : "Upload logo"}
+                  >
+                    <HiOutlineCamera className="h-3 w-3 stroke-[2.2]" />
+                  </button>
+                </div>
+
+                {/* Logo Title, Description & Action Button - Perfectly Aligned */}
+                <div className="min-w-0 flex-1 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-bold text-slate-800 leading-tight">
+                      Hospital Logo
+                    </h4>
+                    <p className="text-[11px] text-slate-500 leading-tight mt-1 truncate">
+                      Official emblem for job listings & shifts
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => hospitalLogoInputRef.current?.click()}
+                    className="shrink-0 px-3 py-1.5 rounded-lg border border-primary/30 bg-white hover:bg-primary-soft text-primary text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                  >
+                    {hospitalLogoPreview ? "Change" : "Upload"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="h-px bg-slate-200/80" />
+
+              {/* Part 2: Facility Images (Multiple) */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-800">Facility Photos</p>
+                    <p className="text-[11px] text-slate-500 truncate">
+                      Building, reception, ICU, OT, or wards
+                    </p>
+                  </div>
+                  <span className="shrink-0 whitespace-nowrap text-[11px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-0.5 rounded-full shadow-2xs">
+                    {hospitalPhotos.length} {hospitalPhotos.length === 1 ? "photo" : "photos"}
+                  </span>
+                </div>
+
+                {hospitalPhotos.length > 0 ? (
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                    {hospitalPhotos.map((photo, idx) => (
+                      <div
+                        key={idx}
+                        className="group relative h-16 w-20 shrink-0 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-2xs"
+                      >
+                        <img
+                          src={photo}
+                          alt={`Facility ${idx + 1}`}
+                          className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setHospitalPhotos((prev) => prev.filter((_, i) => i !== idx))}
+                          className="absolute top-1 right-1 grid h-5 w-5 place-items-center rounded-full bg-slate-900/80 text-white hover:bg-rose-600 transition-colors cursor-pointer shadow-xs"
+                          title="Remove photo"
+                        >
+                          <HiOutlineXMark className="h-3 w-3 stroke-[2.5]" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* Add More Tile */}
+                    <button
+                      type="button"
+                      onClick={() => hospitalPhotosInputRef.current?.click()}
+                      className="h-16 w-16 shrink-0 rounded-xl border-2 border-dashed border-primary/30 hover:border-primary bg-primary-soft/40 hover:bg-primary-soft/80 flex flex-col items-center justify-center text-primary text-xs font-semibold gap-0.5 transition-all cursor-pointer"
+                      title="Add more facility photos"
+                    >
+                      <HiPlus className="h-4 w-4 stroke-[3]" />
+                      <span className="text-[9px] font-bold">Add</span>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => hospitalPhotosInputRef.current?.click()}
+                    className="w-full py-2.5 px-3 rounded-xl border-2 border-dashed border-primary/30 hover:border-primary hover:bg-primary-soft/40 transition-all flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 text-primary cursor-pointer bg-white"
+                  >
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <HiOutlineCloudArrowUp className="h-4 w-4 stroke-[2.2]" />
+                      <span className="text-xs font-bold text-slate-800">
+                        Upload facility photos
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-medium whitespace-nowrap">
+                      (Select multiple · Max 5 MB)
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              {/* Hidden file input for logo */}
+              <input
+                ref={hospitalLogoInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/jpg"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  if (file.size > 5 * 1024 * 1024) {
+                    toast.error("Image too large. Please select a photo under 5 MB.");
+                    return;
+                  }
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    setHospitalLogoPreview(reader.result as string);
+                  };
+                  reader.readAsDataURL(file);
+                }}
+              />
+
+              {/* Hidden file input for multiple facility photos */}
+              <input
+                ref={hospitalPhotosInputRef}
+                type="file"
+                multiple
+                accept="image/png,image/jpeg,image/webp,image/jpg"
+                className="hidden"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (!files.length) return;
+                  const validFiles = files.filter((f) => {
+                    if (f.size > 5 * 1024 * 1024) {
+                      toast.error(`"${f.name}" is over 5 MB. Please select a photo under 5 MB.`);
+                      return false;
+                    }
+                    return true;
+                  });
+                  validFiles.forEach((file) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      setHospitalPhotos((prev) => [...prev, reader.result as string]);
+                    };
+                    reader.readAsDataURL(file);
+                  });
+                }}
+              />
+            </div>
+
+            {/* Quick Tips with clean React Icon alignment */}
+            <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3 space-y-2 text-left">
+              <div className="flex items-center gap-2 text-xs text-slate-700">
+                <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+                  <HiCheck className="h-2.5 w-2.5 stroke-[3]" />
+                </span>
+                <span className="font-medium">Clear logo or front building exterior</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-700">
+                <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+                  <HiCheck className="h-2.5 w-2.5 stroke-[3]" />
+                </span>
+                <span className="font-medium">Modern ICU, OT, and wards help build clinical trust</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-1.5 pt-0.5">
+              {hospitalLogoPreview || hospitalPhotos.length > 0 ? (
+                <Button
+                  type="button"
+                  onClick={() => handleFinishHospitalOnboarding(hospitalLogoPreview, hospitalPhotos)}
+                  className="w-full h-11 rounded-xl bg-primary text-white font-semibold text-sm shadow-md shadow-primary/25 hover:bg-primary/95 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <HiCheckCircle className="h-4 w-4" />
+                  Save & view dashboard
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={() => hospitalPhotosInputRef.current?.click()}
+                  className="w-full h-11 rounded-xl bg-primary text-white font-semibold text-sm shadow-md shadow-primary/25 hover:bg-primary/95 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <HiOutlineCamera className="h-4 w-4 stroke-[2.2]" />
+                  Choose photos
+                </Button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleFinishHospitalOnboarding()}
+                className="group w-full py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5"
+              >
+                <span>Skip for now & view dashboard</span>
                 <HiArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
               </button>
             </div>
