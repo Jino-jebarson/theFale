@@ -676,8 +676,8 @@ function SignInPage() {
         </p>
 
         <p className="legal">
-          By continuing, you agree to The Fale's <Link to="/landing">Terms</Link> and{" "}
-          <Link to="/landing">Privacy Policy</Link> ·{" "}
+          By continuing, you agree to The Fale's <Link to="/terms">Terms</Link> and{" "}
+          <Link to="/privacy">Privacy Policy</Link> ·{" "}
           <button
             type="button"
             onClick={openCookieSettings}

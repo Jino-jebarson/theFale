@@ -309,28 +309,36 @@ function Home() {
                 </div>
               </div>
 
-              {/* Clean Stats Row */}
-              <div className="grid grid-cols-3 border-t border-border/70 text-center divide-x divide-border/70 bg-card">
-                <div className="py-2.5 px-2">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Views</div>
-                  <div className="mt-0.5 text-sm font-bold text-foreground">42</div>
-                  <div className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">+18%</div>
+              {/* Clean Stats Row with Payouts */}
+              <div className="grid grid-cols-4 border-t border-border/70 text-center divide-x divide-border/70 bg-card">
+                <div className="py-2 px-1">
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Views</div>
+                  <div className="mt-0.5 text-xs sm:text-sm font-bold text-foreground">42</div>
+                  <div className="text-[8px] font-semibold text-emerald-600 dark:text-emerald-400">+18%</div>
                 </div>
 
-                <Link to="/applications" className="py-2.5 px-2 hover:bg-muted/30 transition-colors group">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Applied</div>
-                  <div className="mt-0.5 text-sm font-bold text-foreground group-hover:text-primary transition-colors">
+                <Link to="/applications" className="py-2 px-1 hover:bg-muted/30 transition-colors group">
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Applied</div>
+                  <div className="mt-0.5 text-xs sm:text-sm font-bold text-foreground group-hover:text-primary transition-colors">
                     {s.applied.length}
                   </div>
-                  <div className="text-[9px] font-medium text-muted-foreground">{activeApplied.length} active</div>
+                  <div className="text-[8px] font-medium text-muted-foreground">{activeApplied.length} active</div>
                 </Link>
 
-                <Link to="/jobs" search={{ q: undefined }} className="py-2.5 px-2 hover:bg-muted/30 transition-colors group">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Saved</div>
-                  <div className="mt-0.5 text-sm font-bold text-foreground group-hover:text-primary transition-colors">
+                <Link to="/jobs" search={{ q: undefined }} className="py-2 px-1 hover:bg-muted/30 transition-colors group">
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Saved</div>
+                  <div className="mt-0.5 text-xs sm:text-sm font-bold text-foreground group-hover:text-primary transition-colors">
                     {s.saved.length}
                   </div>
-                  <div className="text-[9px] font-medium text-muted-foreground">Wishlist</div>
+                  <div className="text-[8px] font-medium text-muted-foreground">Wishlist</div>
+                </Link>
+
+                <Link to="/earnings" className="py-2 px-1 hover:bg-muted/30 transition-colors group">
+                  <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Payouts</div>
+                  <div className="mt-0.5 text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400 group-hover:underline">
+                    ₹29.8k
+                  </div>
+                  <div className="text-[8px] font-bold text-emerald-600 dark:text-emerald-400">24h SLA</div>
                 </Link>
               </div>
 

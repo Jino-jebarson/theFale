@@ -8,6 +8,7 @@ import {
   HiOutlineSun, HiOutlineMoon, HiOutlineComputerDesktop, HiCheck, HiOutlineQuestionMarkCircle,
   HiOutlineIdentification, HiIdentification, HiOutlineBuildingOffice2, HiBuildingOffice2,
   HiOutlineDocumentCheck, HiDocumentCheck, HiOutlineShieldCheck, HiOutlineUser,
+  HiOutlineBanknotes, HiBanknotes,
 } from "react-icons/hi2";
 import { RiBuilding4Line, RiStethoscopeLine, RiVerifiedBadgeFill } from "react-icons/ri";
 import { Logo } from "./Logo";
@@ -18,11 +19,15 @@ import { cn } from "@/lib/utils";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Sheet, SheetTrigger, SheetContent, SheetTitle, SheetDescription,
+} from "@/components/ui/sheet";
 
 const candidateNav = [
   { to: "/home", label: "Home", icon: HiOutlineHome, active: HiHome, badge: 0 },
   { to: "/jobs", label: "Jobs", icon: HiOutlineBriefcase, active: HiBriefcase, badge: 0 },
   { to: "/shifts", label: "Shifts", icon: HiOutlineClock, active: HiClock, badge: 0 },
+  { to: "/earnings", label: "Earnings", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
   { to: "/applications", label: "Applications", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
   { to: "/learning", label: "Learning", icon: HiOutlineAcademicCap, active: HiAcademicCap, badge: 0 },
 ] as const;
@@ -31,12 +36,314 @@ const facilityNav = [
   { to: "/employer", label: "Dashboard", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: 0 },
   { to: "/employer/post", label: "Post a job", icon: HiOutlinePlusCircle, active: HiPlusCircle, badge: 0 },
   { to: "/employer/post-shift", label: "Post a shift", icon: HiOutlineClock, active: HiClock, badge: 0 },
-  { to: "/employer/applicants", label: "Applicants", icon: HiOutlineUserGroup, active: HiUserGroup, badge: 0 },
+  { to: "/employer/applicants", label: "Shortlisted", icon: HiOutlineUserGroup, active: HiUserGroup, badge: 0 },
   { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
+  { to: "/employer/wallet", label: "Wallet & Escrow", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
 ] as const;
 
 export function initials(name?: string) {
   return (name || "FALE User").split(" ").map((x) => x[0]).slice(0, 2).join("").toUpperCase();
+}
+
+function AccountMenuContent({
+  name,
+  portal,
+  profile,
+  theme,
+  setTheme,
+  switchPortal,
+  onNavigate,
+  onSignOut,
+}: {
+  name: string;
+  portal: Portal;
+  profile: Record<string, any>;
+  theme: string;
+  setTheme: (t: "light" | "dark" | "system") => void;
+  switchPortal: (p: Portal) => void;
+  onNavigate: (path: string) => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="w-full space-y-2">
+      {/* Profile Card Header */}
+      <div className="flex items-center gap-3 p-3 rounded-2xl bg-muted/40 border border-border/60">
+        <div className="relative shrink-0">
+          <span
+            className={cn(
+              "grid h-11 w-11 place-items-center rounded-2xl text-xs font-black shadow-xs",
+              portal === "admin"
+                ? "bg-amber-600 text-white"
+                : portal === "facility"
+                  ? "bg-primary text-white"
+                  : "bg-gradient-brand text-white"
+            )}
+          >
+            {portal === "admin" ? "AD" : initials(name)}
+          </span>
+          <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card bg-emerald-500 shadow-2xs" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="font-extrabold text-sm text-foreground truncate">{name}</span>
+            {portal === "admin" ? (
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-black uppercase text-amber-700 dark:text-amber-400">
+                Master
+              </span>
+            ) : (
+              <RiVerifiedBadgeFill className="h-4 w-4 text-primary shrink-0" />
+            )}
+          </div>
+          <p className="text-[11px] font-medium text-muted-foreground truncate mt-0.5">
+            {portal === "admin"
+              ? "Clinical Verification Board"
+              : portal === "facility"
+                ? String(profile["org"] || "Your Organization")
+                : String(profile["role"] || "Verified Clinician")}
+          </p>
+        </div>
+      </div>
+
+      {/* Quick Navigation Profile Link */}
+      <div className="space-y-0.5">
+        {portal === "facility" && (
+          <button
+            type="button"
+            onClick={() => onNavigate("/employer/profile")}
+            className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
+          >
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
+              <HiOutlineBuildingOffice2 className="h-4 w-4" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-foreground">Hospital Profile & Verification</p>
+              <p className="text-[10px] text-muted-foreground">Manage accreditation & campus info</p>
+            </div>
+          </button>
+        )}
+
+        {portal === "candidate" && (
+          <button
+            type="button"
+            onClick={() => onNavigate("/profile")}
+            className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
+          >
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 shrink-0">
+              <HiOutlineUser className="h-4 w-4" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-foreground">Doctor Profile & Verified CV</p>
+              <p className="text-[10px] text-muted-foreground">Council registrations & DigiLocker KYC</p>
+            </div>
+          </button>
+        )}
+
+        {portal === "admin" && (
+          <button
+            type="button"
+            onClick={() => onNavigate("/admin/candidates")}
+            className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
+          >
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500/10 text-amber-600 shrink-0">
+              <HiOutlineDocumentCheck className="h-4 w-4" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-foreground">Pending Document Approvals</p>
+              <p className="text-[10px] text-muted-foreground">Review doctor KYC queue</p>
+            </div>
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => onNavigate("/support")}
+          className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
+        >
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-muted text-muted-foreground shrink-0">
+            <HiOutlineQuestionMarkCircle className="h-4 w-4 text-primary" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-foreground">Help Center & Escrow Support</p>
+            <p className="text-[10px] text-muted-foreground">24/7 hospital concierge & FAQ</p>
+          </div>
+        </button>
+      </div>
+
+      <div className="h-px bg-border/60 my-1" />
+
+      {/* Portal Switcher Header */}
+      <div className="px-2.5 py-1 flex items-center justify-between">
+        <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+          Switch Active Portal
+        </span>
+        <span className="text-[9px] font-bold text-primary bg-primary-soft px-1.5 py-0.2 rounded-full">
+          Multi-Role
+        </span>
+      </div>
+
+      {/* Portal Items */}
+      <div className="space-y-1">
+        {/* Hospital / Facility */}
+        <button
+          type="button"
+          onClick={() => switchPortal("facility")}
+          className={cn(
+            "w-full flex items-center gap-2.5 rounded-2xl p-2.5 text-xs cursor-pointer transition-all border text-left",
+            portal === "facility"
+              ? "bg-primary-soft/60 border-primary/30 text-foreground font-bold shadow-2xs"
+              : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <span
+            className={cn(
+              "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
+              portal === "facility" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
+            )}
+          >
+            <RiBuilding4Line className="h-4 w-4" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold">Hospital / Facility</span>
+              {portal === "facility" && (
+                <span className="text-[9px] font-extrabold text-primary uppercase tracking-wider">Active</span>
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground truncate">Post openings & verify clinicians</p>
+          </div>
+          {portal === "facility" && <HiCheck className="h-4 w-4 text-primary shrink-0" />}
+        </button>
+
+        {/* Candidate Portal */}
+        <button
+          type="button"
+          onClick={() => switchPortal("candidate")}
+          className={cn(
+            "w-full flex items-center gap-2.5 rounded-2xl p-2.5 text-xs cursor-pointer transition-all border text-left",
+            portal === "candidate"
+              ? "bg-sky-500/10 border-sky-500/30 text-foreground font-bold shadow-2xs"
+              : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <span
+            className={cn(
+              "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
+              portal === "candidate" ? "bg-sky-500 text-white" : "bg-muted text-muted-foreground"
+            )}
+          >
+            <RiStethoscopeLine className="h-4 w-4" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold">Candidate Portal</span>
+              {portal === "candidate" && (
+                <span className="text-[9px] font-extrabold text-sky-600 dark:text-sky-400 uppercase tracking-wider">Active</span>
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground truncate">Apply for jobs & instant shifts</p>
+          </div>
+          {portal === "candidate" && <HiCheck className="h-4 w-4 text-sky-600 dark:text-sky-400 shrink-0" />}
+        </button>
+
+        {/* Admin Operations */}
+        <button
+          type="button"
+          onClick={() => switchPortal("admin")}
+          className={cn(
+            "w-full flex items-center gap-2.5 rounded-2xl p-2.5 text-xs cursor-pointer transition-all border text-left",
+            portal === "admin"
+              ? "bg-amber-500/10 border-amber-500/30 text-foreground font-bold shadow-2xs"
+              : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <span
+            className={cn(
+              "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
+              portal === "admin" ? "bg-amber-500 text-white" : "bg-muted text-muted-foreground"
+            )}
+          >
+            <HiOutlineShieldCheck className="h-4 w-4" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold">Admin Operations</span>
+              {portal === "admin" && (
+                <span className="text-[9px] font-extrabold text-amber-600 uppercase tracking-wider">Active</span>
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground truncate">Credentialing, KYC & escrow</p>
+          </div>
+          {portal === "admin" && <HiCheck className="h-4 w-4 text-amber-600 shrink-0" />}
+        </button>
+      </div>
+
+      <div className="h-px bg-border/60 my-1" />
+
+      {/* Appearance / Theme Segmented Selector */}
+      <div className="px-1.5 py-1">
+        <div className="flex items-center justify-between px-1 mb-1.5">
+          <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+            Appearance
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-1 rounded-2xl bg-muted/50 p-1 border border-border/40">
+          <button
+            type="button"
+            onClick={() => setTheme("light")}
+            className={cn(
+              "flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition-all cursor-pointer",
+              theme === "light"
+                ? "bg-card text-foreground shadow-xs border border-border/50"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <HiOutlineSun className="h-3.5 w-3.5 text-amber-500" />
+            <span>Light</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setTheme("dark")}
+            className={cn(
+              "flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition-all cursor-pointer",
+              theme === "dark"
+                ? "bg-card text-foreground shadow-xs border border-border/50"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <HiOutlineMoon className="h-3.5 w-3.5 text-sky-400" />
+            <span>Dark</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setTheme("system")}
+            className={cn(
+              "flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition-all cursor-pointer",
+              theme === "system"
+                ? "bg-card text-foreground shadow-xs border border-border/50"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <HiOutlineComputerDesktop className="h-3.5 w-3.5" />
+            <span>System</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="h-px bg-border/60 my-1" />
+
+      {/* Sign out */}
+      <button
+        type="button"
+        onClick={onSignOut}
+        className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold text-destructive hover:bg-destructive/10 hover:text-destructive cursor-pointer transition-colors text-left"
+      >
+        <span className="grid h-8 w-8 place-items-center rounded-xl bg-destructive/10 text-destructive shrink-0">
+          <HiOutlineArrowRightOnRectangle className="h-4 w-4" />
+        </span>
+        <span>Sign out of session</span>
+      </button>
+    </div>
+  );
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -78,6 +385,29 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   const [headerVisible, setHeaderVisible] = useState(true);
+  const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
+  const closeMenus = () => {
+    setDesktopMenuOpen(false);
+    setMobileDrawerOpen(false);
+  };
+
+  const handleNavigate = (to: string) => {
+    closeMenus();
+    navigate({ to });
+  };
+
+  const handleSwitchPortal = (p: Portal) => {
+    closeMenus();
+    switchPortal(p);
+  };
+
+  const handleSignOut = () => {
+    closeMenus();
+    setState({ signedIn: false });
+    navigate({ to: "/" });
+  };
 
   useEffect(() => {
     let lastScrollY = window.scrollY;
@@ -172,289 +502,72 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-destructive" />
           </Link>
           <ThemeToggle />
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <span className={cn(
-                "grid h-9 w-9 place-items-center rounded-full text-xs font-bold text-primary-foreground",
-                s.portal === "admin" ? "bg-amber-600 text-white" : "bg-gradient-brand"
-              )}>
-                {s.portal === "admin" ? "AD" : initials(name)}
-              </span>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={8} className="w-80 rounded-3xl border border-border/80 bg-card/98 backdrop-blur-xl p-2.5 shadow-2xl">
-              {/* Profile Card Header */}
-              <div className="flex items-center gap-3 p-3 rounded-2xl bg-muted/40 border border-border/60">
-                <div className="relative shrink-0">
-                  <span
-                    className={cn(
-                      "grid h-11 w-11 place-items-center rounded-2xl text-xs font-black shadow-xs",
-                      s.portal === "admin"
-                        ? "bg-amber-600 text-white"
-                        : s.portal === "facility"
-                          ? "bg-primary text-white"
-                          : "bg-gradient-brand text-white"
-                    )}
-                  >
+          {/* Desktop User Menu Dropdown */}
+          <div className="hidden md:block">
+            <DropdownMenu open={desktopMenuOpen} onOpenChange={setDesktopMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Open profile menu"
+                  className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+                >
+                  <span className={cn(
+                    "grid h-9 w-9 place-items-center rounded-full text-xs font-bold text-primary-foreground",
+                    s.portal === "admin" ? "bg-amber-600 text-white" : "bg-gradient-brand"
+                  )}>
                     {s.portal === "admin" ? "AD" : initials(name)}
                   </span>
-                  <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card bg-emerald-500 shadow-2xs" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-extrabold text-sm text-foreground truncate">{name}</span>
-                    {s.portal === "admin" ? (
-                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-black uppercase text-amber-700 dark:text-amber-400">
-                        Master
-                      </span>
-                    ) : (
-                      <RiVerifiedBadgeFill className="h-4 w-4 text-primary shrink-0" />
-                    )}
-                  </div>
-                  <p className="text-[11px] font-medium text-muted-foreground truncate mt-0.5">
-                    {s.portal === "admin"
-                      ? "Clinical Verification Board"
-                      : s.portal === "facility"
-                        ? String(s.profile["org"] || "Your Organization")
-                        : String(s.profile["role"] || "Verified Clinician")}
-                  </p>
-                </div>
-              </div>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={8} className="w-80 rounded-3xl border border-border/80 bg-card/98 backdrop-blur-xl p-3 shadow-2xl">
+                <AccountMenuContent
+                  name={name}
+                  portal={activePortal}
+                  profile={s.profile}
+                  theme={theme}
+                  setTheme={setTheme}
+                  switchPortal={handleSwitchPortal}
+                  onNavigate={handleNavigate}
+                  onSignOut={handleSignOut}
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
 
-              {/* Quick Navigation Profile Link */}
-              <div className="mt-2 space-y-0.5">
-                {s.portal === "facility" && (
-                  <DropdownMenuItem
-                    onClick={() => navigate({ to: "/employer/profile" })}
-                    className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors"
-                  >
-                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
-                      <HiOutlineBuildingOffice2 className="h-4 w-4" />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-foreground">Hospital Profile & Verification</p>
-                      <p className="text-[10px] text-muted-foreground">Manage accreditation & campus info</p>
-                    </div>
-                  </DropdownMenuItem>
-                )}
-
-                {s.portal === "candidate" && (
-                  <DropdownMenuItem
-                    onClick={() => navigate({ to: "/profile" })}
-                    className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors"
-                  >
-                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 shrink-0">
-                      <HiOutlineUser className="h-4 w-4" />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-foreground">Doctor Profile & Verified CV</p>
-                      <p className="text-[10px] text-muted-foreground">Council registrations & DigiLocker KYC</p>
-                    </div>
-                  </DropdownMenuItem>
-                )}
-
-                {s.portal === "admin" && (
-                  <DropdownMenuItem
-                    onClick={() => navigate({ to: "/admin/candidates" })}
-                    className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors"
-                  >
-                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-amber-500/10 text-amber-600 shrink-0">
-                      <HiOutlineDocumentCheck className="h-4 w-4" />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-foreground">Pending Document Approvals</p>
-                      <p className="text-[10px] text-muted-foreground">Review doctor KYC queue</p>
-                    </div>
-                  </DropdownMenuItem>
-                )}
-
-                <DropdownMenuItem
-                  onClick={() => navigate({ to: "/support" })}
-                  className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors"
+          {/* Mobile User Menu Bottom Sheet */}
+          <div className="block md:hidden">
+            <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+              <SheetTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Open profile menu"
+                  className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
                 >
-                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-muted text-muted-foreground shrink-0">
-                    <HiOutlineQuestionMarkCircle className="h-4 w-4 text-primary" />
+                  <span className={cn(
+                    "grid h-9 w-9 place-items-center rounded-full text-xs font-bold text-primary-foreground",
+                    s.portal === "admin" ? "bg-amber-600 text-white" : "bg-gradient-brand"
+                  )}>
+                    {s.portal === "admin" ? "AD" : initials(name)}
                   </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-foreground">Help Center & Escrow Support</p>
-                    <p className="text-[10px] text-muted-foreground">24/7 hospital concierge & FAQ</p>
-                  </div>
-                </DropdownMenuItem>
-              </div>
-
-              <DropdownMenuSeparator className="my-2 bg-border/60" />
-
-              {/* Portal Switcher Header */}
-              <div className="px-2.5 py-1 flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
-                  Switch Active Portal
-                </span>
-                <span className="text-[9px] font-bold text-primary bg-primary-soft px-1.5 py-0.2 rounded-full">
-                  Multi-Role
-                </span>
-              </div>
-
-              {/* Portal Items */}
-              <div className="space-y-1 mt-1">
-                {/* Hospital / Facility */}
-                <DropdownMenuItem
-                  onClick={() => switchPortal("facility")}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-2xl p-2 text-xs cursor-pointer transition-all border",
-                    s.portal === "facility"
-                      ? "bg-primary-soft/60 border-primary/30 text-foreground font-bold shadow-2xs"
-                      : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
-                      s.portal === "facility" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
-                    )}
-                  >
-                    <RiBuilding4Line className="h-4 w-4" />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold">Hospital / Facility</span>
-                      {s.portal === "facility" && (
-                        <span className="text-[9px] font-extrabold text-primary uppercase tracking-wider">Active</span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground truncate">Post openings & verify clinicians</p>
-                  </div>
-                  {s.portal === "facility" && <HiCheck className="h-4 w-4 text-primary shrink-0" />}
-                </DropdownMenuItem>
-
-                {/* Candidate Portal */}
-                <DropdownMenuItem
-                  onClick={() => switchPortal("candidate")}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-2xl p-2 text-xs cursor-pointer transition-all border",
-                    s.portal === "candidate"
-                      ? "bg-sky-500/10 border-sky-500/30 text-foreground font-bold shadow-2xs"
-                      : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
-                      s.portal === "candidate" ? "bg-sky-500 text-white" : "bg-muted text-muted-foreground"
-                    )}
-                  >
-                    <RiStethoscopeLine className="h-4 w-4" />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold">Candidate Portal</span>
-                      {s.portal === "candidate" && (
-                        <span className="text-[9px] font-extrabold text-sky-600 dark:text-sky-400 uppercase tracking-wider">Active</span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground truncate">Apply for jobs & instant shifts</p>
-                  </div>
-                  {s.portal === "candidate" && <HiCheck className="h-4 w-4 text-sky-600 dark:text-sky-400 shrink-0" />}
-                </DropdownMenuItem>
-
-                {/* Admin Console */}
-                <DropdownMenuItem
-                  onClick={() => switchPortal("admin")}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-2xl p-2 text-xs cursor-pointer transition-all border",
-                    s.portal === "admin"
-                      ? "bg-amber-500/10 border-amber-500/30 text-foreground font-bold shadow-2xs"
-                      : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
-                      s.portal === "admin" ? "bg-amber-500 text-white" : "bg-muted text-muted-foreground"
-                    )}
-                  >
-                    <HiOutlineShieldCheck className="h-4 w-4" />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold">Admin Operations</span>
-                      {s.portal === "admin" && (
-                        <span className="text-[9px] font-extrabold text-amber-600 uppercase tracking-wider">Active</span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground truncate">Credentialing, KYC & escrow</p>
-                  </div>
-                  {s.portal === "admin" && <HiCheck className="h-4 w-4 text-amber-600 shrink-0" />}
-                </DropdownMenuItem>
-              </div>
-
-              <DropdownMenuSeparator className="my-2 bg-border/60" />
-
-              {/* Appearance / Theme Segmented Selector */}
-              <div className="px-1.5 py-1">
-                <div className="flex items-center justify-between px-1 mb-1.5">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
-                    Appearance
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-1 rounded-2xl bg-muted/50 p-1 border border-border/40">
-                  <button
-                    type="button"
-                    onClick={() => setTheme("light")}
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 rounded-xl py-1.5 text-xs font-bold transition-all cursor-pointer",
-                      theme === "light"
-                        ? "bg-card text-foreground shadow-xs border border-border/50"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <HiOutlineSun className="h-3.5 w-3.5 text-amber-500" />
-                    <span>Light</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTheme("dark")}
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 rounded-xl py-1.5 text-xs font-bold transition-all cursor-pointer",
-                      theme === "dark"
-                        ? "bg-card text-foreground shadow-xs border border-border/50"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <HiOutlineMoon className="h-3.5 w-3.5 text-sky-400" />
-                    <span>Dark</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTheme("system")}
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 rounded-xl py-1.5 text-xs font-bold transition-all cursor-pointer",
-                      theme === "system"
-                        ? "bg-card text-foreground shadow-xs border border-border/50"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <HiOutlineComputerDesktop className="h-3.5 w-3.5" />
-                    <span>System</span>
-                  </button>
-                </div>
-              </div>
-
-              <DropdownMenuSeparator className="my-2 bg-border/60" />
-
-              {/* Sign out */}
-              <DropdownMenuItem
-                onClick={() => {
-                  setState({ signedIn: false });
-                  navigate({ to: "/" });
-                }}
-                className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-xs font-bold text-destructive hover:bg-destructive/10 hover:text-destructive cursor-pointer transition-colors"
-              >
-                <span className="grid h-7 w-7 place-items-center rounded-lg bg-destructive/10 text-destructive shrink-0">
-                  <HiOutlineArrowRightOnRectangle className="h-4 w-4" />
-                </span>
-                <span>Sign out of session</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                </button>
+              </SheetTrigger>
+              <SheetContent side="bottom" className="rounded-t-3xl border-t border-border/80 bg-card max-h-[85vh] overflow-y-auto px-4 pb-6 pt-3 shadow-2xl focus:outline-none">
+                <div className="mx-auto mb-2.5 h-1.5 w-12 rounded-full bg-muted-foreground/30" />
+                <SheetTitle className="sr-only">Account & Portal Menu</SheetTitle>
+                <SheetDescription className="sr-only">Switch active portal, review profile, and adjust theme</SheetDescription>
+                <AccountMenuContent
+                  name={name}
+                  portal={activePortal}
+                  profile={s.profile}
+                  theme={theme}
+                  setTheme={setTheme}
+                  switchPortal={handleSwitchPortal}
+                  onNavigate={handleNavigate}
+                  onSignOut={handleSignOut}
+                />
+              </SheetContent>
+            </Sheet>
+          </div>
         </div>
       </header>
       <main className="px-4 sm:px-6 lg:px-8 py-5 sm:py-8 animate-in fade-in duration-300 w-full min-w-0">{children}</main>

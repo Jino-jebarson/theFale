@@ -32,6 +32,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { applicants, type Applicant } from "@/lib/data";
+import { useApp } from "@/lib/store";
 import { LottieAnimation } from "@/components/fale/LottieAnimation";
 import lottieEmptyAnimation from "@/assets/lottie-error.json";
 import { cn } from "@/lib/utils";
@@ -39,16 +40,16 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/employer/applicants")({
   head: () => ({
     meta: [
-      { title: "Applicants — FALE" },
+      { title: "Shortlisted Clinicians — FALE" },
       {
         name: "description",
         content:
-          "Review verified healthcare professionals who applied to your roles.",
+          "Review council-verified healthcare professionals shortlisted for your open roles.",
       },
-      { property: "og:title", content: "Applicants — FALE" },
+      { property: "og:title", content: "Shortlisted Clinicians — FALE" },
       {
         property: "og:description",
-        content: "Review verified healthcare applicants.",
+        content: "Review council-verified shortlisted candidates.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -58,19 +59,48 @@ export const Route = createFileRoute("/employer/applicants")({
 });
 
 function Applicants() {
+  const s = useApp();
   const [filter, setFilter] = useState("All");
   const [selectedRole, setSelectedRole] = useState("All");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<Record<string, string>>({});
   const [selectedResume, setSelectedResume] = useState<Applicant | null>(null);
 
-  // Merge live status overrides with applicant records
+  // Merge live status overrides with applicant records + admin shortlisted applications
   const allApplicants = useMemo(() => {
-    return applicants.map((a) => ({
+    // Dynamically pull candidates shortlisted by Admin
+    const adminShortlistedConverted: Applicant[] = (s.adminApplications || [])
+      .filter((a) => a.status === "shortlisted")
+      .map((a) => ({
+        id: a.id,
+        name: a.candidateName,
+        role: a.candidateRole,
+        exp: a.exp,
+        city: a.candidateCity,
+        for: a.jobTitle,
+        status: "Shortlisted",
+        verified: a.councilVerified,
+        match: a.matchScore,
+        appliedDate: a.appliedDate,
+        qualification: "MBBS / MD / Certified Clinician",
+        regNumber: a.regNumber || "Council Verified",
+        skills: ["Clinical Care", "ICU / Emergency Protocols", "Patient Safety"],
+        phone: a.phone || "+91 98401 23456",
+        email: a.email || "candidate@fale.care",
+        bio: a.summary || "Pre-screened and council-verified clinical professional.",
+      }));
+
+    const existingIds = new Set(adminShortlistedConverted.map((a) => a.id));
+    const combined = [
+      ...adminShortlistedConverted,
+      ...applicants.filter((a) => !existingIds.has(a.id)),
+    ];
+
+    return combined.map((a) => ({
       ...a,
       status: status[a.id] ?? a.status,
     }));
-  }, [status]);
+  }, [s.adminApplications, status]);
 
   // Unique roles for custom Select
   const roles = useMemo(() => {
@@ -134,10 +164,10 @@ function Applicants() {
         {/* Clean Executive Header */}
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            Meet your next team member.
+            Shortlisted Candidates
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Review verified profiles and move hiring forward.
+            Council-cleared clinical talent delivered to your desk for interview.
           </p>
         </div>
 

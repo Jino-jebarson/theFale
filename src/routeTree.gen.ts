@@ -11,14 +11,17 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApplicationsRouteImport } from './routes/applications'
+import { Route as EarningsRouteImport } from './routes/earnings'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as LandingRouteImport } from './routes/landing'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ShiftsRouteImport } from './routes/shifts'
 import { Route as SupportRouteImport } from './routes/support'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as VerifyRouteImport } from './routes/verify'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminApplicationsRouteImport } from './routes/admin.applications'
@@ -31,6 +34,7 @@ import { Route as EmployerCandidatesRouteImport } from './routes/employer.candid
 import { Route as EmployerPostRouteImport } from './routes/employer.post'
 import { Route as EmployerPostShiftRouteImport } from './routes/employer.post-shift'
 import { Route as EmployerProfileRouteImport } from './routes/employer.profile'
+import { Route as EmployerWalletRouteImport } from './routes/employer.wallet'
 import { Route as JobsIndexRouteImport } from './routes/jobs.index'
 import { Route as JobsIdRouteImport } from './routes/jobs.$id'
 import { Route as LearningIndexRouteImport } from './routes/learning.index'
@@ -44,6 +48,11 @@ const IndexRoute = IndexRouteImport.update({
 const ApplicationsRoute = ApplicationsRouteImport.update({
   id: '/applications',
   path: '/applications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EarningsRoute = EarningsRouteImport.update({
+  id: '/earnings',
+  path: '/earnings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HomeRoute = HomeRouteImport.update({
@@ -71,6 +80,11 @@ const OnboardingRoute = OnboardingRouteImport.update({
   path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -84,6 +98,11 @@ const ShiftsRoute = ShiftsRouteImport.update({
 const SupportRoute = SupportRouteImport.update({
   id: '/support',
   path: '/support',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VerifyRoute = VerifyRouteImport.update({
@@ -146,6 +165,11 @@ const EmployerProfileRoute = EmployerProfileRouteImport.update({
   path: '/employer/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EmployerWalletRoute = EmployerWalletRouteImport.update({
+  id: '/employer/wallet',
+  path: '/employer/wallet',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const JobsIndexRoute = JobsIndexRouteImport.update({
   id: '/jobs/',
   path: '/jobs/',
@@ -170,14 +194,17 @@ const LearningIdRoute = LearningIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/applications': typeof ApplicationsRoute
+  '/earnings': typeof EarningsRoute
   '/home': typeof HomeRoute
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/onboarding': typeof OnboardingRoute
+  '/privacy': typeof PrivacyRoute
   '/profile': typeof ProfileRoute
   '/shifts': typeof ShiftsRoute
   '/support': typeof SupportRoute
+  '/terms': typeof TermsRoute
   '/verify': typeof VerifyRoute
   '/admin/applications': typeof AdminApplicationsRoute
   '/admin/candidates': typeof AdminCandidatesRoute
@@ -188,6 +215,7 @@ export interface FileRoutesByFullPath {
   '/employer/post': typeof EmployerPostRoute
   '/employer/post-shift': typeof EmployerPostShiftRoute
   '/employer/profile': typeof EmployerProfileRoute
+  '/employer/wallet': typeof EmployerWalletRoute
   '/jobs/$id': typeof JobsIdRoute
   '/learning/$id': typeof LearningIdRoute
   '/admin/': typeof AdminIndexRoute
@@ -198,14 +226,17 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/applications': typeof ApplicationsRoute
+  '/earnings': typeof EarningsRoute
   '/home': typeof HomeRoute
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/onboarding': typeof OnboardingRoute
+  '/privacy': typeof PrivacyRoute
   '/profile': typeof ProfileRoute
   '/shifts': typeof ShiftsRoute
   '/support': typeof SupportRoute
+  '/terms': typeof TermsRoute
   '/verify': typeof VerifyRoute
   '/admin/applications': typeof AdminApplicationsRoute
   '/admin/candidates': typeof AdminCandidatesRoute
@@ -216,6 +247,7 @@ export interface FileRoutesByTo {
   '/employer/post': typeof EmployerPostRoute
   '/employer/post-shift': typeof EmployerPostShiftRoute
   '/employer/profile': typeof EmployerProfileRoute
+  '/employer/wallet': typeof EmployerWalletRoute
   '/jobs/$id': typeof JobsIdRoute
   '/learning/$id': typeof LearningIdRoute
   '/admin': typeof AdminIndexRoute
@@ -227,14 +259,17 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/applications': typeof ApplicationsRoute
+  '/earnings': typeof EarningsRoute
   '/home': typeof HomeRoute
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/onboarding': typeof OnboardingRoute
+  '/privacy': typeof PrivacyRoute
   '/profile': typeof ProfileRoute
   '/shifts': typeof ShiftsRoute
   '/support': typeof SupportRoute
+  '/terms': typeof TermsRoute
   '/verify': typeof VerifyRoute
   '/admin/applications': typeof AdminApplicationsRoute
   '/admin/candidates': typeof AdminCandidatesRoute
@@ -245,6 +280,7 @@ export interface FileRoutesById {
   '/employer/post': typeof EmployerPostRoute
   '/employer/post-shift': typeof EmployerPostShiftRoute
   '/employer/profile': typeof EmployerProfileRoute
+  '/employer/wallet': typeof EmployerWalletRoute
   '/jobs/$id': typeof JobsIdRoute
   '/learning/$id': typeof LearningIdRoute
   '/admin/': typeof AdminIndexRoute
@@ -257,14 +293,17 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/applications'
+    | '/earnings'
     | '/home'
     | '/landing'
     | '/login'
     | '/notifications'
     | '/onboarding'
+    | '/privacy'
     | '/profile'
     | '/shifts'
     | '/support'
+    | '/terms'
     | '/verify'
     | '/admin/applications'
     | '/admin/candidates'
@@ -275,6 +314,7 @@ export interface FileRouteTypes {
     | '/employer/post'
     | '/employer/post-shift'
     | '/employer/profile'
+    | '/employer/wallet'
     | '/jobs/$id'
     | '/learning/$id'
     | '/admin/'
@@ -285,14 +325,17 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/applications'
+    | '/earnings'
     | '/home'
     | '/landing'
     | '/login'
     | '/notifications'
     | '/onboarding'
+    | '/privacy'
     | '/profile'
     | '/shifts'
     | '/support'
+    | '/terms'
     | '/verify'
     | '/admin/applications'
     | '/admin/candidates'
@@ -303,6 +346,7 @@ export interface FileRouteTypes {
     | '/employer/post'
     | '/employer/post-shift'
     | '/employer/profile'
+    | '/employer/wallet'
     | '/jobs/$id'
     | '/learning/$id'
     | '/admin'
@@ -313,14 +357,17 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/applications'
+    | '/earnings'
     | '/home'
     | '/landing'
     | '/login'
     | '/notifications'
     | '/onboarding'
+    | '/privacy'
     | '/profile'
     | '/shifts'
     | '/support'
+    | '/terms'
     | '/verify'
     | '/admin/applications'
     | '/admin/candidates'
@@ -331,6 +378,7 @@ export interface FileRouteTypes {
     | '/employer/post'
     | '/employer/post-shift'
     | '/employer/profile'
+    | '/employer/wallet'
     | '/jobs/$id'
     | '/learning/$id'
     | '/admin/'
@@ -342,14 +390,17 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApplicationsRoute: typeof ApplicationsRoute
+  EarningsRoute: typeof EarningsRoute
   HomeRoute: typeof HomeRoute
   LandingRoute: typeof LandingRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
   OnboardingRoute: typeof OnboardingRoute
+  PrivacyRoute: typeof PrivacyRoute
   ProfileRoute: typeof ProfileRoute
   ShiftsRoute: typeof ShiftsRoute
   SupportRoute: typeof SupportRoute
+  TermsRoute: typeof TermsRoute
   VerifyRoute: typeof VerifyRoute
   AdminApplicationsRoute: typeof AdminApplicationsRoute
   AdminCandidatesRoute: typeof AdminCandidatesRoute
@@ -360,6 +411,7 @@ export interface RootRouteChildren {
   EmployerPostRoute: typeof EmployerPostRoute
   EmployerPostShiftRoute: typeof EmployerPostShiftRoute
   EmployerProfileRoute: typeof EmployerProfileRoute
+  EmployerWalletRoute: typeof EmployerWalletRoute
   JobsIdRoute: typeof JobsIdRoute
   LearningIdRoute: typeof LearningIdRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -382,6 +434,13 @@ declare module '@tanstack/react-router' {
       path: '/applications'
       fullPath: '/applications'
       preLoaderRoute: typeof ApplicationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/earnings': {
+      id: '/earnings'
+      path: '/earnings'
+      fullPath: '/earnings'
+      preLoaderRoute: typeof EarningsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/home': {
@@ -419,6 +478,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/profile': {
       id: '/profile'
       path: '/profile'
@@ -438,6 +504,13 @@ declare module '@tanstack/react-router' {
       path: '/support'
       fullPath: '/support'
       preLoaderRoute: typeof SupportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/verify': {
@@ -524,6 +597,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EmployerProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/employer/wallet': {
+      id: '/employer/wallet'
+      path: '/employer/wallet'
+      fullPath: '/employer/wallet'
+      preLoaderRoute: typeof EmployerWalletRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/jobs/': {
       id: '/jobs/'
       path: '/jobs'
@@ -558,14 +638,17 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApplicationsRoute: ApplicationsRoute,
+  EarningsRoute: EarningsRoute,
   HomeRoute: HomeRoute,
   LandingRoute: LandingRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
   OnboardingRoute: OnboardingRoute,
+  PrivacyRoute: PrivacyRoute,
   ProfileRoute: ProfileRoute,
   ShiftsRoute: ShiftsRoute,
   SupportRoute: SupportRoute,
+  TermsRoute: TermsRoute,
   VerifyRoute: VerifyRoute,
   AdminApplicationsRoute: AdminApplicationsRoute,
   AdminCandidatesRoute: AdminCandidatesRoute,
@@ -576,6 +659,7 @@ const rootRouteChildren: RootRouteChildren = {
   EmployerPostRoute: EmployerPostRoute,
   EmployerPostShiftRoute: EmployerPostShiftRoute,
   EmployerProfileRoute: EmployerProfileRoute,
+  EmployerWalletRoute: EmployerWalletRoute,
   JobsIdRoute: JobsIdRoute,
   LearningIdRoute: LearningIdRoute,
   AdminIndexRoute: AdminIndexRoute,

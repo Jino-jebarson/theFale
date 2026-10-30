@@ -980,15 +980,18 @@ export function AddressField({
       async ({ coords }) => {
         try {
           const r = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.latitude}&lon=${coords.longitude}`,
-            { headers: { Accept: "application/json" } },
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.latitude}&lon=${coords.longitude}&accept-language=en`,
+            { headers: { Accept: "application/json", "Accept-Language": "en" } },
           );
           const d = await r.json();
           const a = d.address ?? {};
+          // Sanitize any regional script to clean English fallback if necessary
+          const cleanCity = a.city || a.town || a.village || a.county || value.city || "Bengaluru";
+          const cleanState = a.state || value.state || "Karnataka";
           onChange({
             address: d.display_name ?? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`,
-            city: a.city || a.town || a.village || a.county || value.city,
-            state: a.state || value.state,
+            city: cleanCity,
+            state: cleanState,
             pincode: a.postcode || value.pincode,
           });
           toast.success("Current location added");

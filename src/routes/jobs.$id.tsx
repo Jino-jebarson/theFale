@@ -56,8 +56,8 @@ function JobDetail() {
     const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     const candidateName = String(s.profile["name"] || "Candidate Professional");
     const candidateRole = String(s.profile["role"] || "Healthcare Professional");
-    const candidateCity = String(s.profile["city"] || "Chennai");
-    const regNumber = String(s.profile["regNo"] || "TNC/RN/89421");
+    const candidateCity = String(s.profile["city"] || "Bengaluru");
+    const regNumber = String(s.profile["regNo"] || "KMC/DOC/89421");
 
     setState((x) => ({
       applied: [{ jobId: job.id, status: "Under Admin Screening", date: now }, ...x.applied.filter((a) => a.jobId !== job.id)],

@@ -71,6 +71,61 @@ export interface AdminApplication {
   email: string;
 }
 
+export interface WalletTransaction {
+  id: string;
+  type: "topup" | "escrow_hold" | "disbursement" | "credit_purchase" | "standby_credit" | "refund";
+  title: string;
+  subtitle: string;
+  amount: number;
+  date: string;
+  status: "Completed" | "In Escrow" | "Processing" | "Refunded";
+  refNumber: string;
+  invoiceId?: string;
+  utr?: string;
+}
+
+export interface HospitalBankAccount {
+  bankName: string;
+  accountNumber: string;
+  ifsc: string;
+  accountType: "Current" | "Escrow Sub-Account";
+  accountHolderName: string;
+  branch: string;
+  status: "Verified" | "Pending Penny Drop" | "Under Review";
+  documentName?: string;
+  documentDate?: string;
+  verifiedAt?: string;
+}
+
+export interface CandidatePayoutMethod {
+  type: "upi" | "bank";
+  upiId?: string;
+  accountNumber?: string;
+  confirmAccountNumber?: string;
+  ifsc?: string;
+  bankName?: string;
+  accountHolderName: string;
+  status: "Verified" | "Pending";
+  verifiedAt?: string;
+}
+
+export interface CandidatePayoutTransaction {
+  id: string;
+  shiftId: string;
+  shiftTitle: string;
+  hospitalName: string;
+  dept: string;
+  shiftDate: string;
+  hours: number;
+  rate: number;
+  amount: number;
+  payoutDate: string;
+  status: "Disbursed" | "In Escrow (24h SLA)" | "Under Review";
+  payoutMethodUsed: string;
+  utr?: string;
+  slipRef?: string;
+}
+
 export interface AppState {
   portal: Portal;
   contact: string;
@@ -106,6 +161,12 @@ export interface AppState {
   facilityKYC: FacilityKYCItem[];
   jobApprovals: AdminJobApproval[];
   adminApplications: AdminApplication[];
+  escrowBalance?: number;
+  lockedEscrow?: number;
+  walletTransactions?: WalletTransaction[];
+  hospitalBankAccount?: HospitalBankAccount;
+  candidatePayoutMethod?: CandidatePayoutMethod;
+  candidatePayouts?: CandidatePayoutTransaction[];
 }
 
 const KEY = "fale-pro-v2";
@@ -149,6 +210,161 @@ const initial: AppState = {
   ],
   candidateCredits: 3,
   unlockedCandidates: [],
+  escrowBalance: 48500,
+  lockedEscrow: 7200,
+  walletTransactions: [
+    {
+      id: "tx-101",
+      type: "disbursement",
+      title: "24-hr Locum Duty Payout",
+      subtitle: "Nurse Preethi Nair (ICU Night Cover) · Counter-signed",
+      amount: -3600,
+      date: "Today · 09:30 AM",
+      status: "Completed",
+      refNumber: "FALE-LOC-9942",
+      invoiceId: "INV-2026-1049",
+      utr: "UTRIB2026103009412",
+    },
+    {
+      id: "tx-102",
+      type: "escrow_hold",
+      title: "Shift Escrow Allocation",
+      subtitle: "2x ICU Night Staff Nurse (Tonight) · Locked in Nodal Escrow",
+      amount: -7200,
+      date: "Today · 08:15 AM",
+      status: "In Escrow",
+      refNumber: "FALE-ESC-4820",
+    },
+    {
+      id: "tx-103",
+      type: "topup",
+      title: "Escrow Reserve Top-up",
+      subtitle: "HDFC Corporate NetBanking · Auto-Escrow Replenish",
+      amount: 50000,
+      date: "28 Oct 2026 · 04:20 PM",
+      status: "Completed",
+      refNumber: "TXN-HDFC-99124",
+      invoiceId: "INV-2026-1038",
+      utr: "HDFCR52026102800192",
+    },
+    {
+      id: "tx-104",
+      type: "credit_purchase",
+      title: "Candidate Sourcing Credits (Starter Pack)",
+      subtitle: "10 Verified Candidate Contact Unlocks",
+      amount: -1999,
+      date: "25 Oct 2026 · 02:10 PM",
+      status: "Completed",
+      refNumber: "CRD-FALE-7721",
+      invoiceId: "INV-2026-1012",
+    },
+    {
+      id: "tx-105",
+      type: "disbursement",
+      title: "24-hr Locum Duty Payout",
+      subtitle: "Dr. Rajesh K (Emergency Trauma Cover) · Verified",
+      amount: -6800,
+      date: "23 Oct 2026 · 11:00 AM",
+      status: "Completed",
+      refNumber: "FALE-LOC-9811",
+      invoiceId: "INV-2026-0994",
+      utr: "UTRIB2026102300844",
+    },
+    {
+      id: "tx-106",
+      type: "standby_credit",
+      title: "Clinician Standby Cancellation Refund",
+      subtitle: "Emergency Dept Shift Re-credit",
+      amount: 1800,
+      date: "20 Oct 2026 · 06:45 PM",
+      status: "Completed",
+      refNumber: "FALE-STB-0144",
+    },
+  ],
+  hospitalBankAccount: {
+    bankName: "HDFC Bank Ltd",
+    accountNumber: "50200084920194",
+    ifsc: "HDFC0000060",
+    accountType: "Current",
+    accountHolderName: "Apollo Health City Private Limited",
+    branch: "Koramangala, Bengaluru",
+    status: "Verified",
+    documentName: "Apollo_Cancelled_Cheque_2026.pdf",
+    documentDate: "14 Oct 2026",
+    verifiedAt: "Cashfree ₹1 Penny Drop Verified",
+  },
+  candidatePayoutMethod: {
+    type: "upi",
+    upiId: "jinovj250@oksbi",
+    accountHolderName: "Jino Jebarson R",
+    status: "Verified",
+    verifiedAt: "Cashfree Instant VPA Validated",
+  },
+  candidatePayouts: [
+    {
+      id: "pay-101",
+      shiftId: "sh-882",
+      shiftTitle: "Emergency Triage Duty Medical Officer",
+      hospitalName: "Apollo Health City",
+      dept: "Emergency & Trauma",
+      shiftDate: "Tonight · 20:00 – 08:00",
+      hours: 12,
+      rate: 850,
+      amount: 10200,
+      payoutDate: "Releasing Tomorrow · 11:00 AM",
+      status: "In Escrow (24h SLA)",
+      payoutMethodUsed: "Cashfree Instant UPI · jinovj250@oksbi",
+      slipRef: "FALE-ESC-9941",
+    },
+    {
+      id: "pay-102",
+      shiftId: "sh-840",
+      shiftTitle: "ICU Night Specialist Cover",
+      hospitalName: "Manipal Hospital",
+      dept: "Critical Care",
+      shiftDate: "28 Oct 2026",
+      hours: 12,
+      rate: 750,
+      amount: 9000,
+      payoutDate: "29 Oct 2026 · 09:15 AM",
+      status: "Disbursed",
+      payoutMethodUsed: "Cashfree Instant UPI · jinovj250@oksbi",
+      utr: "CFUPI2026102900918",
+      slipRef: "FALE-DIS-8401",
+    },
+    {
+      id: "pay-103",
+      shiftId: "sh-812",
+      shiftTitle: "OT Surgical Assisting Resident",
+      hospitalName: "Fortis Healthcare",
+      dept: "Operation Theatre",
+      shiftDate: "24 Oct 2026",
+      hours: 8,
+      rate: 650,
+      amount: 5200,
+      payoutDate: "25 Oct 2026 · 10:00 AM",
+      status: "Disbursed",
+      payoutMethodUsed: "Cashfree Instant UPI · jinovj250@oksbi",
+      utr: "CFUPI2026102500412",
+      slipRef: "FALE-DIS-8129",
+    },
+    {
+      id: "pay-104",
+      shiftId: "sh-790",
+      shiftTitle: "Cardiac ICU Duty Doctor",
+      hospitalName: "Narayana Health City",
+      dept: "Cardiology",
+      shiftDate: "19 Oct 2026",
+      hours: 8,
+      rate: 700,
+      amount: 5600,
+      payoutDate: "20 Oct 2026 · 08:30 AM",
+      status: "Disbursed",
+      payoutMethodUsed: "Cashfree Instant UPI · jinovj250@oksbi",
+      utr: "CFUPI2026102000109",
+      slipRef: "FALE-DIS-7902",
+    },
+  ],
   candidateKYC: [
     {
       id: "ck1",

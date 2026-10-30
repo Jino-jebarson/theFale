@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { setState, useApp } from "@/lib/store";
 import { jobs as allJobs } from "@/lib/data";
 import heroHandsVideo from "@/assets/hero-hands.mp4";
@@ -1355,10 +1355,10 @@ function LandingPage() {
               <span>FA.LE = Failures = Learnings</span>
             </div>
             <ul className="uc-foot-legal-links">
-              <li><a href="#about" onClick={(e) => scrollToSection(e, "about")} className="uc-hover-un">Privacy Policy</a></li>
-              <li><a href="#about" onClick={(e) => scrollToSection(e, "about")} className="uc-hover-un">Terms &amp; Conditions</a></li>
-              <li><a href="#about" onClick={(e) => scrollToSection(e, "about")} className="uc-hover-un">Verification Standards</a></li>
-              <li><a href="#about" onClick={(e) => scrollToSection(e, "about")} className="uc-hover-un">Grievance Officer</a></li>
+              <li><Link to="/privacy" className="uc-hover-un">Privacy Policy</Link></li>
+              <li><Link to="/terms" className="uc-hover-un">Terms &amp; Conditions</Link></li>
+              <li><Link to="/privacy" className="uc-hover-un">Verification Standards</Link></li>
+              <li><Link to="/privacy" className="uc-hover-un">Grievance Officer</Link></li>
               <li>
                 <button
                   type="button"
