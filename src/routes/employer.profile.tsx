@@ -44,7 +44,9 @@ import {
 import { jobs, shifts } from "@/lib/data";
 import { useApp, setState } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import hospitalBanner from "@/assets/hospital-banner.jpg";
+import facilityMultispecialtyImg from "@/assets/facilities/facility-multispecialty.jpg";
+import facilityClinicImg from "@/assets/facilities/facility-clinic.jpg";
+import facilityDiagnosticImg from "@/assets/facilities/facility-diagnostic.jpg";
 
 export const Route = createFileRoute("/employer/profile")({
   head: () => ({
@@ -277,6 +279,19 @@ function HospitalProfileScreen() {
     toast.success("Profile link copied to clipboard");
   };
 
+  // Dynamic 3D Facility Banner
+  const dynamicFacilityBanner = useMemo(() => {
+    const cat = String(profile["facilityCategory"] || profile["orgType"] || "").toLowerCase();
+    const org = hospitalName.toLowerCase();
+    if (cat.includes("clinic") || org.includes("clinic") || org.includes("dental") || org.includes("polyclinic")) {
+      return facilityClinicImg;
+    }
+    if (cat.includes("diagnostic") || cat.includes("lab") || org.includes("diagnostic") || org.includes("lab") || org.includes("scan") || org.includes("imaging")) {
+      return facilityDiagnosticImg;
+    }
+    return facilityMultispecialtyImg;
+  }, [profile, hospitalName]);
+
   return (
     <AppShell>
       <div className="w-full min-w-0 space-y-6 pb-16">
@@ -285,9 +300,9 @@ function HospitalProfileScreen() {
           {/* Cover Banner Image with High-Definition Campus Presentation */}
           <div className="relative h-48 sm:h-64 md:h-72 w-full overflow-hidden bg-muted">
             <img
-              src={(profile["facilityBanner"] as string) || (profile["avatar"] as string) || hospitalBanner}
+              src={(profile["facilityBanner"] as string) || (profile["avatar"] as string) || dynamicFacilityBanner}
               alt="Hospital Facility Campus"
-              className="h-full w-full object-cover object-center"
+              className="h-full w-full object-cover object-[center_20%]"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
             <div className="absolute top-4 right-4 flex items-center gap-2">
