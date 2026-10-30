@@ -551,8 +551,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </span>
                 </button>
               </SheetTrigger>
-              <SheetContent side="bottom" className="rounded-t-3xl border-t border-border/80 bg-card max-h-[85vh] overflow-y-auto px-4 pb-6 pt-3 shadow-2xl focus:outline-none">
-                <div className="mx-auto mb-2.5 h-1.5 w-12 rounded-full bg-muted-foreground/30" />
+              <SheetContent
+                side="bottom"
+                className="rounded-t-[28px] border-t border-border/80 bg-card max-h-[85vh] overflow-y-auto px-4 pb-6 pt-1 shadow-2xl focus:outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button:last-child]:top-3 [&>button:last-child]:right-3.5 [&>button:last-child]:h-7 [&>button:last-child]:w-7 [&>button:last-child]:grid [&>button:last-child]:place-items-center [&>button:last-child]:rounded-full [&>button:last-child]:bg-muted/70 [&>button:last-child]:text-muted-foreground [&>button:last-child]:hover:text-foreground [&>button:last-child]:hover:bg-muted"
+              >
+                {/* Centered Drag Handle with balanced breathing room */}
+                <div className="relative flex items-center justify-center pt-2 pb-3.5 shrink-0">
+                  <div className="h-1.5 w-12 rounded-full bg-muted-foreground/30" />
+                </div>
                 <SheetTitle className="sr-only">Account & Portal Menu</SheetTitle>
                 <SheetDescription className="sr-only">Switch active portal, review profile, and adjust theme</SheetDescription>
                 <AccountMenuContent

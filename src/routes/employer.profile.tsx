@@ -104,7 +104,7 @@ const availableCities = [
   "Kochi",
 ];
 
-export function HospitalProfileScreen() {
+function HospitalProfileScreen() {
   const store = useApp();
   const profile = (store.profile || {}) as Record<string, string>;
 
@@ -752,5 +752,3 @@ export function HospitalProfileScreen() {
     </AppShell>
   );
 }
-
-export default HospitalProfileScreen;
