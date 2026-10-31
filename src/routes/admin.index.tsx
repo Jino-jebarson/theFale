@@ -111,20 +111,20 @@ export function AdminDashboard() {
     });
   };
 
-  // Pie Chart 1 Data: Workload Distribution by Queue
+  // Pie Chart 1 Data: Workload Distribution by Queue (Exact Facility Dashboard Palette)
   const queueData = [
-    { name: "Candidate KYC", value: pendingCandidateKYC.length || 1, color: "#f59e0b", link: "/admin/candidates" },
-    { name: "Hospital Verification", value: pendingFacilityKYC.length || 1, color: "#3b82f6", link: "/admin/facilities" },
-    { name: "Job & Shift Approvals", value: pendingJobApprovals.length || 1, color: "#10b981", link: "/admin/postings" },
-    { name: "Applicant Shortlisting", value: pendingShortlisting.length || 1, color: "#a855f7", link: "/admin/applications" },
+    { name: "Candidate KYC", value: pendingCandidateKYC.length || 1, color: "#FF5A1F", link: "/admin/candidates" },
+    { name: "Hospital Verification", value: pendingFacilityKYC.length || 1, color: "#E04812", link: "/admin/facilities" },
+    { name: "Job & Shift Approvals", value: pendingJobApprovals.length || 1, color: "#FF7E45", link: "/admin/postings" },
+    { name: "Applicant Shortlisting", value: pendingShortlisting.length || 1, color: "#FFA47A", link: "/admin/applications" },
   ];
 
-  // Pie Chart 2 Data: Clinical Profession Breakdown
+  // Pie Chart 2 Data: Clinical Profession Breakdown (Exact Facility Dashboard Palette)
   const professionData = [
-    { name: "Critical Care / Staff Nurses", value: 45, color: "#0ea5e9" },
-    { name: "Doctors & Medical Officers", value: 30, color: "#6366f1" },
-    { name: "Lab & Pathology Techs", value: 15, color: "#ec4899" },
-    { name: "Radiology & Dialysis", value: 10, color: "#14b8a6" },
+    { name: "Critical Care / Staff Nurses", value: 45, color: "#FF5A1F" },
+    { name: "Doctors & Medical Officers", value: 30, color: "#E04812" },
+    { name: "Lab & Pathology Techs", value: 15, color: "#FF7E45" },
+    { name: "Radiology & Dialysis", value: 10, color: "#FFA47A" },
   ];
 
   // Filtered queue items based on search and selected tab
@@ -240,7 +240,7 @@ export function AdminDashboard() {
   const dynamicSubtitle = totalPending > 0 ? (
     <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
       Welcome back. You have{" "}
-      <span className="inline-flex items-center align-middle -translate-y-px rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20 mx-0.5">
+      <span className="inline-flex items-center align-middle -translate-y-px rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary border border-primary/20 mx-0.5">
         {totalPending} action items
       </span>{" "}
       awaiting clinical review across candidate KYC, hospital verification, and job postings.
@@ -266,7 +266,7 @@ export function AdminDashboard() {
           >
             <HiOutlineIdentification className="h-4 w-4 text-primary shrink-0" />
             <span className="whitespace-nowrap">Review KYC</span>
-            <span className="rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 px-1.5 py-0.2 text-[10px] font-black border border-amber-500/20 shrink-0">
+            <span className="rounded-full bg-primary/15 text-primary px-1.5 py-0.2 text-[10px] font-black border border-primary/20 shrink-0">
               {pendingCandidateKYC.length}
             </span>
           </Button>
@@ -290,14 +290,14 @@ export function AdminDashboard() {
         <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs min-w-0">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-xs font-bold uppercase tracking-wider">Total Queue Pending</span>
-            <span className="flex items-center gap-1.5 text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+            <span className="flex items-center gap-1.5 text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
               <span>Live</span>
             </span>
           </div>
           <div className="mt-2.5 flex items-center justify-between gap-2">
             <span className="text-3xl font-black font-mono tracking-tight text-foreground">{totalPending}</span>
-            <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+            <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-lg border border-primary/20">
               Needs Review
             </span>
           </div>
@@ -323,13 +323,13 @@ export function AdminDashboard() {
         <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs min-w-0">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-xs font-bold uppercase tracking-wider">Accredited Hospitals</span>
-            <HiOutlineBuildingOffice2 className="h-4 w-4 text-blue-500" />
+            <HiOutlineBuildingOffice2 className="h-4 w-4 text-primary" />
           </div>
           <div className="mt-2.5 flex items-center justify-between gap-2">
             <span className="text-3xl font-black font-mono tracking-tight text-foreground">
               {s.facilityKYC.filter((f) => f.status === "verified").length + 42}
             </span>
-            <span className="text-[11px] font-bold text-blue-700 dark:text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-lg border border-blue-500/20">
+            <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-lg border border-primary/20">
               NABH / NABL
             </span>
           </div>
@@ -376,65 +376,58 @@ export function AdminDashboard() {
 
           <div className="mt-4 flex flex-col sm:flex-row lg:flex-col xl:flex-row items-center gap-4 sm:gap-6 min-w-0 w-full">
             <div
-              className="h-44 w-44 sm:h-48 sm:w-48 relative shrink-0 mx-auto"
+              className="relative h-56 w-56 shrink-0 mx-auto flex items-center justify-center my-auto py-1"
               onMouseLeave={handleQueueLeave}
             >
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={queueData}
-                    activeIndex={activeQueueIndex ?? undefined}
-                    activeShape={renderActiveShape}
-                    innerRadius={48}
-                    outerRadius={70}
-                    paddingAngle={4}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={66}
+                    outerRadius={90}
+                    paddingAngle={3}
                     dataKey="value"
-                    stroke="none"
                     isAnimationActive={false}
                     onMouseEnter={(_, index) => handleQueueEnter(index)}
                   >
-                    {queueData.map((entry, index) => {
-                      const isDimmed = activeQueueIndex !== null && activeQueueIndex !== index;
-                      return (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={entry.color}
-                          stroke="none"
-                          opacity={isDimmed ? 0.35 : 1}
-                          style={{
-                            transition: "opacity 0.25s ease, filter 0.25s ease",
-                            cursor: "pointer",
-                          }}
-                        />
-                      );
-                    })}
+                    {queueData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={entry.color}
+                        stroke="var(--card)"
+                        strokeWidth={2}
+                        className="transition-all duration-300 cursor-pointer"
+                        style={{
+                          transform: activeQueueIndex === index ? "scale(1.04)" : "scale(1)",
+                          transformOrigin: "center center",
+                        }}
+                      />
+                    ))}
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
-              {/* Dynamic Center Donut Label — Smooth persistent transitions */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-2 select-none">
-                <span
-                  className="text-2xl sm:text-3xl font-black font-mono leading-none tracking-tight transition-all duration-300 ease-out"
-                  style={{
-                    color: activeQueueIndex !== null && queueData[activeQueueIndex] ? queueData[activeQueueIndex].color : "var(--foreground)",
-                    transform: activeQueueIndex !== null ? "scale(1.08)" : "scale(1)",
-                  }}
-                >
+
+              {/* Center Stat with Generous Breathing Room (Mirroring Facility Dashboard) */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none text-center">
+                <span className="text-[9.5px] text-muted-foreground uppercase font-bold tracking-wider leading-none">
+                  {activeQueueIndex !== null && queueData[activeQueueIndex] ? "Selected" : "Workload"}
+                </span>
+                <span className="text-xl sm:text-2xl font-black font-mono text-foreground tracking-tight my-1 leading-none">
                   {activeQueueIndex !== null && queueData[activeQueueIndex] ? queueData[activeQueueIndex].value : totalPending}
                 </span>
-                <span className="text-[10px] font-bold text-foreground mt-1 max-w-[85px] leading-tight line-clamp-1 transition-all duration-300 ease-out">
-                  {activeQueueIndex !== null && queueData[activeQueueIndex] ? queueData[activeQueueIndex].name : "Pending"}
-                </span>
-                <span className="text-[9px] font-bold text-muted-foreground mt-0.5 transition-all duration-300 ease-out">
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[9px] font-bold text-primary leading-none">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                   {activeQueueIndex !== null && queueData[activeQueueIndex]
                     ? `${Math.round((queueData[activeQueueIndex].value / (totalPending || 1)) * 100)}% of queue`
-                    : "Total Workload"}
+                    : "Council Verified"}
                 </span>
               </div>
             </div>
 
             {/* Interactive Legend List */}
-            <div className="flex-1 space-y-2 w-full min-w-0">
+            <div className="flex-1 space-y-1.5 w-full min-w-0">
               {queueData.map((item, index) => {
                 const isActive = activeQueueIndex === index;
                 return (
@@ -444,31 +437,31 @@ export function AdminDashboard() {
                     onMouseEnter={() => handleQueueEnter(index)}
                     onMouseLeave={handleQueueLeave}
                     className={cn(
-                      "flex items-center justify-between p-2 rounded-xl transition-all group text-xs cursor-pointer border min-w-0 w-full",
+                      "flex items-center justify-between py-2 px-2.5 rounded-xl transition-all group text-xs cursor-pointer border min-w-0 w-full",
                       isActive
-                        ? "bg-muted border-border/80 scale-[1.01]"
-                        : "hover:bg-muted/50 border-transparent hover:border-border/60"
+                        ? "bg-primary/10 border-primary/20"
+                        : "hover:bg-muted/40 border-transparent hover:border-border/60"
                     )}
                   >
-                    <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
                       <span
-                        className={cn(
-                          "h-2.5 w-2.5 rounded-full shrink-0 transition-transform",
-                          isActive && "scale-125"
-                        )}
-                        style={{ backgroundColor: item.color }}
+                        className="h-2.5 w-2.5 rounded-full shrink-0 transition-transform"
+                        style={{
+                          backgroundColor: item.color,
+                          transform: isActive ? "scale(1.25)" : "scale(1)",
+                        }}
                       />
                       <span
                         className={cn(
-                          "font-semibold transition-colors truncate text-[11px] sm:text-xs",
-                          isActive ? "text-primary font-bold" : "text-foreground group-hover:text-primary"
+                          "truncate transition-colors text-[11px] sm:text-xs",
+                          isActive ? "text-foreground font-semibold" : "text-muted-foreground font-medium"
                         )}
                       >
                         {item.name}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="font-black text-foreground font-mono text-xs">{item.value}</span>
+                    <div className="flex items-center gap-2 shrink-0 font-mono">
+                      <span className="font-bold text-foreground text-xs tabular-nums">{item.value}</span>
                       <HiOutlineArrowRight className="h-3 w-3 text-muted-foreground group-hover:text-primary transition-transform group-hover:translate-x-0.5" />
                     </div>
                   </Link>
@@ -482,7 +475,7 @@ export function AdminDashboard() {
         <div className="lg:col-span-6 rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs min-w-0 w-full">
           <div className="flex items-center justify-between gap-2 pb-3.5 border-b border-border/60 min-w-0">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-              <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 flex items-center justify-center shrink-0">
+              <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
                 <HiOutlineSparkles className="h-4 w-4 sm:h-5 sm:w-5" />
               </div>
               <div className="min-w-0 flex-1">
@@ -501,63 +494,58 @@ export function AdminDashboard() {
 
           <div className="mt-4 flex flex-col sm:flex-row lg:flex-col xl:flex-row items-center gap-4 sm:gap-6 min-w-0 w-full">
             <div
-              className="h-44 w-44 sm:h-48 sm:w-48 relative shrink-0 mx-auto"
+              className="relative h-56 w-56 shrink-0 mx-auto flex items-center justify-center my-auto py-1"
               onMouseLeave={handleProfessionLeave}
             >
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={professionData}
-                    activeIndex={activeProfessionIndex ?? undefined}
-                    activeShape={renderActiveShape}
-                    innerRadius={48}
-                    outerRadius={70}
-                    paddingAngle={4}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={66}
+                    outerRadius={90}
+                    paddingAngle={3}
                     dataKey="value"
-                    stroke="none"
                     isAnimationActive={false}
                     onMouseEnter={(_, index) => handleProfessionEnter(index)}
                   >
-                    {professionData.map((entry, index) => {
-                      const isDimmed = activeProfessionIndex !== null && activeProfessionIndex !== index;
-                      return (
-                        <Cell
-                          key={`cell-prof-${index}`}
-                          fill={entry.color}
-                          stroke="none"
-                          opacity={isDimmed ? 0.35 : 1}
-                          style={{
-                            transition: "opacity 0.25s ease, filter 0.25s ease",
-                            cursor: "pointer",
-                          }}
-                        />
-                      );
-                    })}
+                    {professionData.map((entry, index) => (
+                      <Cell
+                        key={`cell-prof-${index}`}
+                        fill={entry.color}
+                        stroke="var(--card)"
+                        strokeWidth={2}
+                        className="transition-all duration-300 cursor-pointer"
+                        style={{
+                          transform: activeProfessionIndex === index ? "scale(1.04)" : "scale(1)",
+                          transformOrigin: "center center",
+                        }}
+                      />
+                    ))}
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
-              {/* Dynamic Center Donut Label — Smooth persistent transitions */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-2 select-none">
-                <span
-                  className="text-2xl sm:text-3xl font-black font-mono leading-none tracking-tight transition-all duration-300 ease-out"
-                  style={{
-                    color: activeProfessionIndex !== null && professionData[activeProfessionIndex] ? professionData[activeProfessionIndex].color : "var(--foreground)",
-                    transform: activeProfessionIndex !== null ? "scale(1.08)" : "scale(1)",
-                  }}
-                >
+
+              {/* Dynamic Center Donut Label — Facility Dashboard Pattern */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none text-center">
+                <span className="text-[9.5px] text-muted-foreground uppercase font-bold tracking-wider leading-none">
+                  Cadre Mix
+                </span>
+                <span className="text-xl sm:text-2xl font-black font-mono text-foreground tracking-tight my-1 leading-none">
                   {activeProfessionIndex !== null && professionData[activeProfessionIndex] ? `${professionData[activeProfessionIndex].value}%` : "100%"}
                 </span>
-                <span className="text-[10px] font-bold text-foreground mt-1 max-w-[85px] leading-tight line-clamp-1 transition-all duration-300 ease-out">
-                  {activeProfessionIndex !== null && professionData[activeProfessionIndex] ? professionData[activeProfessionIndex].name : "Cadre Mix"}
-                </span>
-                <span className="text-[9px] font-bold text-muted-foreground mt-0.5 transition-all duration-300 ease-out">
-                  {activeProfessionIndex !== null ? "Specialization Share" : "Pan-India Coverage"}
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[9px] font-bold text-primary leading-none">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  {activeProfessionIndex !== null && professionData[activeProfessionIndex]
+                    ? professionData[activeProfessionIndex].name.split("/")[0].trim()
+                    : "Pan-India Mix"}
                 </span>
               </div>
             </div>
 
             {/* Cadre Legend List with Percentages & Hover Link */}
-            <div className="flex-1 space-y-2 w-full min-w-0">
+            <div className="flex-1 space-y-1.5 w-full min-w-0">
               {professionData.map((item, index) => {
                 const isActive = activeProfessionIndex === index;
                 return (
@@ -566,30 +554,30 @@ export function AdminDashboard() {
                     onMouseEnter={() => handleProfessionEnter(index)}
                     onMouseLeave={handleProfessionLeave}
                     className={cn(
-                      "flex items-center justify-between p-2 rounded-xl text-xs border cursor-pointer transition-all min-w-0 w-full",
+                      "flex items-center justify-between py-2 px-2.5 rounded-xl text-xs border cursor-pointer transition-all min-w-0 w-full",
                       isActive
-                        ? "bg-muted border-border/80 scale-[1.01]"
-                        : "hover:bg-muted/50 border-transparent hover:border-border/60"
+                        ? "bg-primary/10 border-primary/20"
+                        : "hover:bg-muted/40 border-transparent hover:border-border/60"
                     )}
                   >
-                    <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
                       <span
-                        className={cn(
-                          "h-2.5 w-2.5 rounded-full shrink-0 transition-transform",
-                          isActive && "scale-125"
-                        )}
-                        style={{ backgroundColor: item.color }}
+                        className="h-2.5 w-2.5 rounded-full shrink-0 transition-transform"
+                        style={{
+                          backgroundColor: item.color,
+                          transform: isActive ? "scale(1.25)" : "scale(1)",
+                        }}
                       />
                       <span
                         className={cn(
-                          "font-semibold transition-colors truncate text-[11px] sm:text-xs",
-                          isActive ? "text-primary font-bold" : "text-foreground"
+                          "truncate transition-colors text-[11px] sm:text-xs",
+                          isActive ? "text-foreground font-semibold" : "text-muted-foreground font-medium"
                         )}
                       >
                         {item.name}
                       </span>
                     </div>
-                    <span className="font-mono font-bold text-foreground text-xs shrink-0">{item.value}%</span>
+                    <span className="font-mono font-bold text-foreground text-xs shrink-0 tabular-nums">{item.value}%</span>
                   </div>
                 );
               })}
@@ -606,7 +594,7 @@ export function AdminDashboard() {
             <div className="flex items-center gap-2">
               <HiOutlineShieldCheck className="h-5 w-5 text-primary shrink-0" />
               <h3 className="text-base font-black tracking-tight text-foreground">Priority Action Center</h3>
-              <span className="rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[10px] font-black px-2 py-0.5">
+              <span className="rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5">
                 {totalPending} Awaiting
               </span>
             </div>
@@ -708,14 +696,14 @@ export function AdminDashboard() {
               {filteredJobs.map((j) => (
                 <TableRow key={j.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
                   <TableCell className="py-3.5">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
                       <HiOutlineBriefcase className="h-3.5 w-3.5 shrink-0" />
                       <span>Job Posting</span>
                     </span>
                   </TableCell>
                   <TableCell className="py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                      <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
                         <HiOutlineBriefcase className="h-4 w-4" />
                       </div>
                       <div>
@@ -747,7 +735,7 @@ export function AdminDashboard() {
                       <Button
                         size="sm"
                         onClick={() => quickApproveJob(j.id, j.title)}
-                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98]"
+                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
                       >
                         <HiCheck className="h-3.5 w-3.5" /> Approve Live
                       </Button>
@@ -773,14 +761,14 @@ export function AdminDashboard() {
                 return (
                   <TableRow key={c.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
                     <TableCell className="py-3.5">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
                         <HiOutlineIdentification className="h-3.5 w-3.5 shrink-0" />
                         <span>Candidate KYC</span>
                       </span>
                     </TableCell>
                     <TableCell className="py-3.5">
                       <div className="flex items-center gap-3">
-                        <div className="h-9 w-9 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 font-bold text-xs flex items-center justify-center shrink-0">
+                        <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-xs flex items-center justify-center shrink-0">
                           {initials}
                         </div>
                         <div>
@@ -806,14 +794,14 @@ export function AdminDashboard() {
                         <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span>{c.submittedDate}</span>
                       </div>
-                      <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5 inline-block">NMC Validation</span>
+                      <span className="text-[10px] font-semibold text-primary mt-0.5 inline-block">NMC Validation</span>
                     </TableCell>
                     <TableCell className="text-right py-3.5">
                       <div className="flex items-center justify-end gap-1.5">
                         <Button
                           size="sm"
                           onClick={() => quickVerifyCandidate(c.id, c.name)}
-                          className="rounded-xl font-bold text-xs h-8 px-3.5 bg-blue-600 hover:bg-blue-700 text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98]"
+                          className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
                         >
                           <HiOutlineCheckBadge className="h-3.5 w-3.5" /> Verify Seal
                         </Button>
@@ -834,14 +822,14 @@ export function AdminDashboard() {
               {filteredFacilities.map((f) => (
                 <TableRow key={f.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
                   <TableCell className="py-3.5">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-1 text-[11px] font-bold text-blue-700 dark:text-blue-400 border border-blue-500/20">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
                       <HiOutlineBuildingOffice2 className="h-3.5 w-3.5 shrink-0" />
                       <span>Hospital License</span>
                     </span>
                   </TableCell>
                   <TableCell className="py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                      <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
                         <HiOutlineBuildingOffice2 className="h-4 w-4" />
                       </div>
                       <div>
@@ -860,7 +848,7 @@ export function AdminDashboard() {
                       <span>{f.accreditation}</span>
                     </div>
                     <div className="mt-0.5">
-                      <span className="font-mono text-blue-600 dark:text-blue-400 text-[10px] font-bold bg-blue-500/10 px-1.5 py-0.2 rounded border border-blue-500/20">
+                      <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-1.5 py-0.2 rounded border border-primary/20">
                         NABH: {f.nabhNumber}
                       </span>
                     </div>
@@ -870,14 +858,14 @@ export function AdminDashboard() {
                       <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span>{f.submittedDate}</span>
                     </div>
-                    <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 mt-0.5 inline-block">NABH Portal Sync</span>
+                    <span className="text-[10px] font-semibold text-primary mt-0.5 inline-block">NABH Portal Sync</span>
                   </TableCell>
                   <TableCell className="text-right py-3.5">
                     <div className="flex items-center justify-end gap-1.5">
                       <Button
                         size="sm"
                         onClick={() => quickVerifyFacility(f.id, f.name)}
-                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98]"
+                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
                       >
                         <HiCheck className="h-3.5 w-3.5" /> Approve Facility
                       </Button>
@@ -897,14 +885,14 @@ export function AdminDashboard() {
               {filteredApplications.map((a) => (
                 <TableRow key={a.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
                   <TableCell className="py-3.5">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-purple-500/10 px-2.5 py-1 text-[11px] font-bold text-purple-700 dark:text-purple-400 border border-purple-500/20">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
                       <HiOutlineDocumentCheck className="h-3.5 w-3.5 shrink-0" />
                       <span>Application</span>
                     </span>
                   </TableCell>
                   <TableCell className="py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                      <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
                         <HiOutlineDocumentCheck className="h-4 w-4" />
                       </div>
                       <div>
@@ -930,14 +918,14 @@ export function AdminDashboard() {
                       <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span>{a.appliedDate}</span>
                     </div>
-                    <span className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 mt-0.5 inline-block">Screening SLA</span>
+                    <span className="text-[10px] font-semibold text-primary mt-0.5 inline-block">Screening SLA</span>
                   </TableCell>
                   <TableCell className="text-right py-3.5">
                     <div className="flex items-center justify-end gap-1.5">
                       <Button
                         size="sm"
                         onClick={() => quickShortlistApp(a.id, a.candidateName)}
-                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-purple-600 hover:bg-purple-700 text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98]"
+                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
                       >
                         <HiCheck className="h-3.5 w-3.5" /> Shortlist
                       </Button>
@@ -971,7 +959,7 @@ export function AdminDashboard() {
           {filteredJobs.map((j) => (
             <div key={`m-job-${j.id}`} className="p-4 space-y-3 hover:bg-muted/20 transition-colors">
               <div className="flex items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
                   <HiOutlineBriefcase className="h-3 w-3 shrink-0" />
                   <span>Job Posting</span>
                 </span>
@@ -982,7 +970,7 @@ export function AdminDashboard() {
               </div>
 
               <div className="flex items-start gap-3">
-                <div className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0 mt-0.5">
                   <HiOutlineBriefcase className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -1013,7 +1001,7 @@ export function AdminDashboard() {
                 <Button
                   size="sm"
                   onClick={() => quickApproveJob(j.id, j.title)}
-                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98]"
+                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
                 >
                   <HiCheck className="h-4 w-4" /> Approve Live
                 </Button>
@@ -1038,7 +1026,7 @@ export function AdminDashboard() {
             return (
               <div key={`m-cand-${c.id}`} className="p-4 space-y-3 hover:bg-muted/20 transition-colors">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
                     <HiOutlineIdentification className="h-3 w-3 shrink-0" />
                     <span>Candidate KYC</span>
                   </span>
@@ -1049,7 +1037,7 @@ export function AdminDashboard() {
                 </div>
 
                 <div className="flex items-start gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 font-bold text-sm flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-sm flex items-center justify-center shrink-0 mt-0.5">
                     {initials}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -1081,7 +1069,7 @@ export function AdminDashboard() {
                   <Button
                     size="sm"
                     onClick={() => quickVerifyCandidate(c.id, c.name)}
-                    className="flex-1 rounded-xl font-bold text-xs h-9 bg-blue-600 hover:bg-blue-700 text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98]"
+                    className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
                   >
                     <HiOutlineCheckBadge className="h-4 w-4" /> Verify Seal
                   </Button>
@@ -1101,7 +1089,7 @@ export function AdminDashboard() {
           {filteredFacilities.map((f) => (
             <div key={`m-fac-${f.id}`} className="p-4 space-y-3 hover:bg-muted/20 transition-colors">
               <div className="flex items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[10px] font-bold text-blue-700 dark:text-blue-400 border border-blue-500/20">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
                   <HiOutlineBuildingOffice2 className="h-3 w-3 shrink-0" />
                   <span>Hospital License</span>
                 </span>
@@ -1112,7 +1100,7 @@ export function AdminDashboard() {
               </div>
 
               <div className="flex items-start gap-3">
-                <div className="h-10 w-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0 mt-0.5">
                   <HiOutlineBuildingOffice2 className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -1136,7 +1124,7 @@ export function AdminDashboard() {
                 <div className="text-right">
                   <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">NABH Certificate</div>
                   <div className="mt-0.5">
-                    <span className="font-mono text-blue-600 dark:text-blue-400 text-[10px] font-bold bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
+                    <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
                       NABH: {f.nabhNumber}
                     </span>
                   </div>
@@ -1147,7 +1135,7 @@ export function AdminDashboard() {
                 <Button
                   size="sm"
                   onClick={() => quickVerifyFacility(f.id, f.name)}
-                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98]"
+                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
                 >
                   <HiCheck className="h-4 w-4" /> Approve Facility
                 </Button>
@@ -1166,7 +1154,7 @@ export function AdminDashboard() {
           {filteredApplications.map((a) => (
             <div key={`m-app-${a.id}`} className="p-4 space-y-3 hover:bg-muted/20 transition-colors">
               <div className="flex items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-purple-500/10 px-2.5 py-0.5 text-[10px] font-bold text-purple-700 dark:text-purple-400 border border-purple-500/20">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
                   <HiOutlineDocumentCheck className="h-3 w-3 shrink-0" />
                   <span>Application</span>
                 </span>
@@ -1177,7 +1165,7 @@ export function AdminDashboard() {
               </div>
 
               <div className="flex items-start gap-3">
-                <div className="h-10 w-10 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 mt-0.5">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0 mt-0.5">
                   <HiOutlineDocumentCheck className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -1209,7 +1197,7 @@ export function AdminDashboard() {
                 <Button
                   size="sm"
                   onClick={() => quickShortlistApp(a.id, a.candidateName)}
-                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-purple-600 hover:bg-purple-700 text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98]"
+                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
                 >
                   <HiCheck className="h-4 w-4" /> Shortlist
                 </Button>

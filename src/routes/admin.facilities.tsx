@@ -193,7 +193,7 @@ export function FacilityKYCAdmin() {
                     {/* Hospital */}
                     <TableCell className="py-3.5 pl-5">
                       <div className="flex items-center gap-3">
-                        <div className="grid h-9 w-9 place-items-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold text-xs shrink-0 border border-amber-500/20">
+                        <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary font-bold text-xs shrink-0 border border-primary/20">
                           {initials}
                         </div>
                         <div>
@@ -253,7 +253,7 @@ export function FacilityKYCAdmin() {
                           <HiOutlineXMark className="h-3.5 w-3.5" /> Rejected
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary border border-primary/20">
                           Pending
                         </span>
                       )}
@@ -278,7 +278,7 @@ export function FacilityKYCAdmin() {
                           <Button
                             size="sm"
                             onClick={() => handleVerify(item.id, item.name)}
-                            className="h-8 px-3 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white gap-1 transition-all active:scale-[0.98]"
+                            className="h-8 px-3 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white gap-1 transition-all active:scale-[0.98]"
                           >
                             <HiCheck className="h-3.5 w-3.5" /> Approve
                           </Button>
@@ -321,7 +321,7 @@ export function FacilityKYCAdmin() {
                       <HiOutlineXMark className="h-3.5 w-3.5" /> Rejected
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary border border-primary/20">
                       Pending Verification
                     </span>
                   )}
@@ -334,7 +334,7 @@ export function FacilityKYCAdmin() {
 
                 {/* Facility Header */}
                 <div className="flex items-start gap-3.5 pt-0.5">
-                  <div className="grid h-11 w-11 place-items-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold text-xs shrink-0 border border-amber-500/20 mt-0.5">
+                  <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary font-bold text-xs shrink-0 border border-primary/20 mt-0.5">
                     {initials}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -405,7 +405,7 @@ export function FacilityKYCAdmin() {
                     variant="outline"
                     onClick={() => { setSelectedFacility(item); setSheetOpen(true); }}
                     className={cn(
-                      "h-10 text-xs font-bold rounded-xl border-border/80 hover:bg-muted shadow-2xs",
+                      "h-10 text-xs font-bold rounded-xl border-border/80 hover:bg-muted shadow-none",
                       item.status === "pending" ? "flex-1" : "w-full"
                     )}
                   >
@@ -416,7 +416,7 @@ export function FacilityKYCAdmin() {
                     <Button
                       size="sm"
                       onClick={() => handleVerify(item.id, item.name)}
-                      className="flex-1 h-10 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-2xs transition-all active:scale-[0.98]"
+                      className="flex-1 h-10 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1.5 shadow-none transition-all active:scale-[0.98]"
                     >
                       <HiCheck className="h-4 w-4" /> Approve
                     </Button>
@@ -441,7 +441,7 @@ export function FacilityKYCAdmin() {
           <SheetHeader className="px-4 py-3.5 sm:px-5 sm:py-4 border-b border-border bg-card shrink-0 text-left">
             <div className="pr-8">
               <SheetTitle className="text-base font-extrabold text-foreground flex items-center gap-2">
-                <HiOutlineBuildingOffice2 className="h-5 w-5 text-amber-500 shrink-0" />
+                <HiOutlineBuildingOffice2 className="h-5 w-5 text-primary shrink-0" />
                 <span>Hospital Accreditation Audit</span>
               </SheetTitle>
               <SheetDescription className="text-xs text-muted-foreground mt-0.5">
@@ -472,8 +472,8 @@ export function FacilityKYCAdmin() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border-2 border-dashed border-amber-500/30 bg-muted/20 p-4 sm:p-5 text-center space-y-2.5">
-                <div className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-600">
+              <div className="rounded-2xl border-2 border-dashed border-primary/30 bg-muted/20 p-4 sm:p-5 text-center space-y-2.5">
+                <div className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs font-bold text-primary">
                   <HiOutlineShieldCheck className="h-4 w-4 shrink-0" />
                   <span className="truncate">Attached Certificate: {selectedFacility.docName}</span>
                 </div>
@@ -492,19 +492,19 @@ export function FacilityKYCAdmin() {
                 </h5>
                 <div className="space-y-2 text-xs">
                   <div className="flex items-start gap-2.5">
-                    <div className="grid h-4 w-4 place-items-center rounded-full bg-emerald-500/10 text-emerald-600 shrink-0 mt-0.5">
+                    <div className="grid h-4 w-4 place-items-center rounded-full bg-primary/10 text-primary shrink-0 mt-0.5">
                       <HiCheck className="h-3 w-3" />
                     </div>
                     <span className="text-foreground/90">NABH Portal Accreditation active & validity confirmed</span>
                   </div>
                   <div className="flex items-start gap-2.5">
-                    <div className="grid h-4 w-4 place-items-center rounded-full bg-emerald-500/10 text-emerald-600 shrink-0 mt-0.5">
+                    <div className="grid h-4 w-4 place-items-center rounded-full bg-primary/10 text-primary shrink-0 mt-0.5">
                       <HiCheck className="h-3 w-3" />
                     </div>
                     <span className="text-foreground/90">Clinical Establishment Act license verified with State DHS</span>
                   </div>
                   <div className="flex items-start gap-2.5">
-                    <div className="grid h-4 w-4 place-items-center rounded-full bg-emerald-500/10 text-emerald-600 shrink-0 mt-0.5">
+                    <div className="grid h-4 w-4 place-items-center rounded-full bg-primary/10 text-primary shrink-0 mt-0.5">
                       <HiCheck className="h-3 w-3" />
                     </div>
                     <span className="text-foreground/90">Hospital Superintendent / Authorized HR credential checked</span>
@@ -533,7 +533,7 @@ export function FacilityKYCAdmin() {
                   <Button
                     size="sm"
                     onClick={() => handleVerify(selectedFacility.id, selectedFacility.name)}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold gap-1 rounded-xl shadow-2xs"
+                    className="bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1 rounded-xl shadow-none"
                   >
                     <HiCheck className="h-3.5 w-3.5" /> Approve & Issue Verified Badge
                   </Button>

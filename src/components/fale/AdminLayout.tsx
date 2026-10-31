@@ -158,7 +158,7 @@ export function AdminLayout({
                       )}
                     />
                     {n.badge > 0 && (
-                      <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white shadow-xs">
+                      <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-white shadow-xs">
                         {n.badge}
                       </span>
                     )}
@@ -189,7 +189,7 @@ export function AdminLayout({
           {/* Admin User Profile Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer">
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-amber-600 text-xs font-black text-white shadow-xs">
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-primary text-xs font-black text-white shadow-xs">
                 AD
               </span>
             </DropdownMenuTrigger>
@@ -197,7 +197,7 @@ export function AdminLayout({
               <DropdownMenuLabel>
                 <div className="flex items-center gap-1.5 font-bold text-foreground">
                   <span>Clinical Ops Admin</span>
-                  <span className="rounded bg-amber-500/15 px-1.5 py-0.2 text-[10px] font-bold text-amber-600">
+                  <span className="rounded bg-primary/10 px-1.5 py-0.2 text-[10px] font-bold text-primary border border-primary/20">
                     Master
                   </span>
                 </div>
@@ -284,7 +284,7 @@ export function AdminLayout({
               <div className="relative">
                 <Icon className="h-5 w-5 shrink-0" />
                 {n.badge > 0 && (
-                  <span className="absolute -top-1 -right-2 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-amber-500 px-0.5 text-[8px] font-bold text-white">
+                  <span className="absolute -top-1 -right-2 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-bold text-white shadow-xs">
                     {n.badge}
                   </span>
                 )}

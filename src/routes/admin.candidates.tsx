@@ -199,7 +199,7 @@ export function CandidateKYCAdmin() {
                     {/* Candidate */}
                     <TableCell className="py-3.5 pl-5">
                       <div className="flex items-center gap-3">
-                        <div className="grid h-8 w-8 place-items-center rounded-lg bg-muted border border-border/60 text-foreground font-bold text-xs shrink-0">
+                        <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 border border-primary/20 text-primary font-bold text-xs shrink-0">
                           {initials}
                         </div>
                         <div>
@@ -253,7 +253,7 @@ export function CandidateKYCAdmin() {
                           <HiOutlineXMark className="h-3.5 w-3.5" /> Rejected
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary border border-primary/20">
                           Pending
                         </span>
                       )}
@@ -275,7 +275,7 @@ export function CandidateKYCAdmin() {
                           <Button
                             size="sm"
                             onClick={() => handleVerify(item.id, item.name)}
-                            className="h-8 px-3 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white gap-1 transition-all active:scale-[0.98]"
+                            className="h-8 px-3 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white gap-1 transition-all active:scale-[0.98]"
                           >
                             <HiCheck className="h-3.5 w-3.5" /> Verify
                           </Button>
@@ -318,7 +318,7 @@ export function CandidateKYCAdmin() {
                       <HiOutlineXMark className="h-3.5 w-3.5" /> Rejected
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary border border-primary/20">
                       Pending
                     </span>
                   )}
@@ -331,7 +331,7 @@ export function CandidateKYCAdmin() {
 
                 {/* Candidate Info */}
                 <div className="flex items-start gap-3.5 pt-0.5">
-                  <div className="grid h-11 w-11 place-items-center rounded-xl bg-muted border border-border/60 text-foreground font-bold text-xs shrink-0 mt-0.5">
+                  <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-xs shrink-0 mt-0.5">
                     {initials}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -386,7 +386,7 @@ export function CandidateKYCAdmin() {
                     variant="outline"
                     onClick={() => { setSelectedCandidate(item); setSheetOpen(true); }}
                     className={cn(
-                      "h-10 text-xs font-bold rounded-xl border-border/80 hover:bg-muted shadow-2xs",
+                      "h-10 text-xs font-bold rounded-xl border-border/80 hover:bg-muted shadow-none",
                       item.status === "pending" ? "flex-1" : "w-full"
                     )}
                   >
@@ -397,7 +397,7 @@ export function CandidateKYCAdmin() {
                     <Button
                       size="sm"
                       onClick={() => handleVerify(item.id, item.name)}
-                      className="flex-1 h-10 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-2xs transition-all active:scale-[0.98]"
+                      className="flex-1 h-10 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1.5 shadow-none transition-all active:scale-[0.98]"
                     >
                       <HiCheck className="h-4 w-4" /> Verify
                     </Button>
@@ -451,7 +451,7 @@ export function CandidateKYCAdmin() {
                       Rejected
                     </span>
                   ) : (
-                    <span className="rounded-md bg-amber-500/10 text-amber-600 text-xs font-bold px-2 py-0.5 border border-amber-500/20 shrink-0">
+                    <span className="rounded-md bg-primary/10 text-primary text-xs font-bold px-2 py-0.5 border border-primary/20 shrink-0">
                       Pending
                     </span>
                   )}
@@ -477,7 +477,7 @@ export function CandidateKYCAdmin() {
               </div>
 
               {/* State Council Card */}
-              <div className="rounded-2xl border border-border bg-card p-4 space-y-2.5 shadow-2xs min-w-0">
+              <div className="rounded-2xl border border-border bg-card p-4 space-y-2.5 shadow-none min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   State Council Registration
                 </p>
@@ -490,7 +490,7 @@ export function CandidateKYCAdmin() {
 
               {/* Simulated Certificate Inspection Box */}
               <div className="rounded-2xl border-2 border-dashed border-primary/30 bg-muted/20 p-4 sm:p-5 text-center space-y-2.5 min-w-0">
-                <div className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600">
+                <div className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs font-bold text-primary">
                   <HiOutlineShieldCheck className="h-4 w-4 shrink-0" />
                   <span className="truncate">Attached Document: {selectedCandidate.docName}</span>
                 </div>
@@ -523,7 +523,7 @@ export function CandidateKYCAdmin() {
                   <Button
                     size="sm"
                     onClick={() => handleVerify(selectedCandidate.id, selectedCandidate.name)}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold gap-1"
+                    className="bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1"
                   >
                     <HiCheck className="h-3.5 w-3.5" /> Approve & Issue Seal
                   </Button>

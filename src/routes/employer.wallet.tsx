@@ -335,10 +335,10 @@ function EmployerWalletPage() {
           {/* Card 2: Locked in Escrow */}
           <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
             <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
                 <HiOutlineLockClosed className="h-4 w-4" />
               </span>
-              <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full whitespace-nowrap">
+              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full whitespace-nowrap">
                 2 shifts
               </span>
             </div>
@@ -358,13 +358,13 @@ function EmployerWalletPage() {
           {/* Card 3: Sourcing Credits */}
           <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
             <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
                 <HiOutlineSparkles className="h-4 w-4" />
               </span>
               <button
                 type="button"
                 onClick={() => setBuyCreditsModalOpen(true)}
-                className="text-[10px] font-semibold text-primary hover:underline cursor-pointer whitespace-nowrap bg-primary/10 px-2 py-0.5 rounded-full"
+                className="text-[10px] font-bold text-blue-700 dark:text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 cursor-pointer whitespace-nowrap px-2.5 py-0.5 rounded-full transition-colors"
               >
                 + Recharge
               </button>
@@ -385,10 +385,10 @@ function EmployerWalletPage() {
           {/* Card 4: Lifetime Disbursed */}
           <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
             <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
                 <HiOutlineArrowTrendingUp className="h-4 w-4" />
               </span>
-              <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full whitespace-nowrap">
+              <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full whitespace-nowrap">
                 100% on-time
               </span>
             </div>

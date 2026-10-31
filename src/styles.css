@@ -118,7 +118,7 @@
   --gradient-brand: linear-gradient(135deg, #FF5A1F, #E04E19);
   --gradient-overlay: linear-gradient(180deg, rgba(255, 90, 31, 0.06) 0%, rgba(26, 26, 26, 0.95) 100%);
   --gradient-soft: linear-gradient(180deg, #FFEDE5, #FFFFFF);
-  --shadow-brand-v: 0 10px 25px -6px rgba(255, 90, 31, 0.35);
+  --shadow-brand-v: none;
   --shadow-card-v: 0 1px 3px rgba(0, 0, 0, 0.04), 0 8px 24px -6px rgba(0, 0, 0, 0.06);
   --field-focus-shadow: 0 0 0 3px rgba(255, 90, 31, 0.2);
 }
@@ -176,7 +176,7 @@
   --gradient-brand: linear-gradient(135deg, oklch(0.66 0.22 41), oklch(0.55 0.20 36));
   --gradient-overlay: linear-gradient(180deg, oklch(0.12 0.005 60 / 0.1) 0%, oklch(0.12 0.005 60 / 0.95) 100%);
   --gradient-soft: linear-gradient(180deg, oklch(0.25 0.05 42), oklch(0.18 0.006 60));
-  --shadow-brand-v: 0 10px 25px -6px oklch(0.66 0.22 41 / 0.45);
+  --shadow-brand-v: none;
   --shadow-card-v: 0 1px 3px oklch(0 0 0 / 0.4), 0 8px 24px -6px oklch(0 0 0 / 0.5);
   --field-focus-shadow: 0 0 0 3px oklch(0.66 0.22 41 / 0.3);
 }
@@ -227,7 +227,7 @@
   --gradient-brand: linear-gradient(135deg, oklch(0.64 0.22 41), oklch(0.58 0.22 36));
   --gradient-overlay: linear-gradient(180deg, oklch(0.64 0.22 41 / 0.06) 0%, oklch(0.18 0.005 60 / 0.95) 100%);
   --gradient-soft: linear-gradient(180deg, oklch(0.97 0.025 48), oklch(1 0 0));
-  --shadow-brand-v: 0 10px 25px -6px oklch(0.64 0.22 41 / 0.38);
+  --shadow-brand-v: none;
   --shadow-card-v: 0 1px 3px oklch(0.18 0.005 60 / 0.04), 0 8px 24px -6px oklch(0.18 0.005 60 / 0.06);
   --field-focus-shadow: 0 0 0 3px oklch(0.64 0.22 41 / 0.2);
 }

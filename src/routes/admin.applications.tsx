@@ -199,7 +199,7 @@ export function ApplicationsAdmin() {
                   {/* Candidate */}
                   <TableCell className="py-3.5 pl-5 font-semibold text-foreground">
                     <div className="flex items-center gap-3">
-                      <div className="grid h-9 w-9 place-items-center rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold text-xs shrink-0 border border-purple-500/20">
+                      <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary font-bold text-xs shrink-0 border border-primary/20">
                         {item.candidateName.split(" ").map((x) => x[0]).slice(0, 2).join("")}
                       </div>
                       <div>
@@ -240,7 +240,7 @@ export function ApplicationsAdmin() {
                   {/* Status Badge */}
                   <TableCell className="py-3.5">
                     {item.status === "shortlisted" ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[11px] font-bold text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary border border-primary/20">
                         <HiOutlinePaperAirplane className="h-3 w-3" /> Dispatched
                       </span>
                     ) : item.status === "rejected" ? (
@@ -248,7 +248,7 @@ export function ApplicationsAdmin() {
                         <HiOutlineXMark className="h-3 w-3" /> Ineligible
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary border border-primary/20">
                         Screening Needed
                       </span>
                     )}
@@ -273,7 +273,7 @@ export function ApplicationsAdmin() {
                         <Button
                           size="sm"
                           onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
-                          className="h-8 px-3 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white gap-1.5 shadow-xs"
+                          className="h-8 px-3 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1.5 shadow-none"
                         >
                           <HiOutlinePaperAirplane className="h-3.5 w-3.5" /> Shortlist
                         </Button>
@@ -305,7 +305,7 @@ export function ApplicationsAdmin() {
               {/* Header: Candidate Info + Match Score */}
               <div className="flex items-start justify-between gap-2.5 min-w-0">
                 <div className="flex items-start gap-2.5 min-w-0">
-                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold text-sm shrink-0 border border-purple-500/20">
+                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary font-bold text-sm shrink-0 border border-primary/20">
                     {item.candidateName.split(" ").map((x) => x[0]).slice(0, 2).join("")}
                   </div>
                   <div className="min-w-0">
@@ -363,7 +363,7 @@ export function ApplicationsAdmin() {
                   <span className="text-[11px] font-semibold text-muted-foreground shrink-0">Status</span>
                   <div className="shrink-0">
                     {item.status === "shortlisted" ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 border border-blue-500/20 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20 whitespace-nowrap">
                         <HiOutlinePaperAirplane className="h-3 w-3" /> Dispatched
                       </span>
                     ) : item.status === "rejected" ? (
@@ -371,7 +371,7 @@ export function ApplicationsAdmin() {
                         <HiOutlineXMark className="h-3 w-3" /> Ineligible
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20 whitespace-nowrap">
                         Screening Needed
                       </span>
                     )}
@@ -389,7 +389,7 @@ export function ApplicationsAdmin() {
                     setSheetOpen(true);
                   }}
                   className={cn(
-                    "h-9.5 px-2 text-xs font-bold rounded-xl border-border/80 hover:bg-muted text-foreground min-w-0 w-full shadow-2xs",
+                    "h-9.5 px-2 text-xs font-bold rounded-xl border-border/80 hover:bg-muted text-foreground min-w-0 w-full shadow-none",
                     item.status !== "pending_admin" && "col-span-2"
                   )}
                 >
@@ -401,7 +401,7 @@ export function ApplicationsAdmin() {
                   <Button
                     size="sm"
                     onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
-                    className="h-9.5 px-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-700 text-white gap-1 min-w-0 w-full shadow-2xs"
+                    className="h-9.5 px-2 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1 min-w-0 w-full shadow-none"
                   >
                     <HiOutlinePaperAirplane className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">Shortlist</span>
@@ -426,7 +426,7 @@ export function ApplicationsAdmin() {
           <SheetHeader className="px-4 py-3.5 sm:px-5 sm:py-4 border-b border-border bg-card shrink-0 text-left">
             <div className="pr-8">
               <SheetTitle className="text-base font-extrabold text-foreground flex items-center gap-2">
-                <HiOutlineUserGroup className="h-5 w-5 text-blue-600 shrink-0" />
+                <HiOutlineUserGroup className="h-5 w-5 text-primary shrink-0" />
                 <span>Candidate Clinical Dossier</span>
               </SheetTitle>
               <SheetDescription className="text-xs text-muted-foreground mt-0.5">
@@ -455,7 +455,7 @@ export function ApplicationsAdmin() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-border bg-card p-4 space-y-2 shadow-2xs">
+              <div className="rounded-2xl border border-border bg-card p-4 space-y-2 shadow-none">
                 <h5 className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Clinical Verification Details</h5>
                 <p className="text-xs text-foreground font-mono font-semibold">Council Reg: {selectedApp.regNumber}</p>
                 <p className="text-xs text-muted-foreground leading-relaxed">{selectedApp.summary}</p>
@@ -482,7 +482,7 @@ export function ApplicationsAdmin() {
                   <Button
                     size="sm"
                     onClick={() => handleShortlist(selectedApp.id, selectedApp.candidateName, selectedApp.hospitalName)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold gap-1"
+                    className="bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1"
                   >
                     <HiOutlinePaperAirplane className="h-3.5 w-3.5" /> Shortlist for Hospital
                   </Button>

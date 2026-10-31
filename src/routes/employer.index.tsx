@@ -153,32 +153,27 @@ function EmployerDashboard() {
                 </span>
               </div>
 
-              <div className="space-y-0.5 min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
+              <div className="space-y-2 min-w-0 flex-1">
+                <div className="flex items-center gap-3 sm:gap-3.5 flex-wrap">
                   <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
                     {orgName}
                   </h1>
 
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] sm:text-[10.5px] font-bold text-emerald-700 dark:text-emerald-300">
-                    <RiShieldCheckFill className="h-3 w-3" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-[10.5px] sm:text-[11px] font-bold text-primary">
+                    <RiShieldCheckFill className="h-3.5 w-3.5 text-primary" />
                     NABH Tier-1 Partner
                   </span>
                 </div>
 
-                <div className="text-[11px] sm:text-xs text-muted-foreground flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                  <span className="font-semibold text-foreground flex items-center gap-1">
+                <div className="text-[11px] sm:text-xs text-muted-foreground flex items-center gap-2 sm:gap-2.5 flex-wrap pt-0.5">
+                  <span className="font-semibold text-foreground flex items-center gap-1.5">
                     <HiOutlineMapPin className="h-3.5 w-3.5 text-primary" />
                     {city} Central Campus
                   </span>
-                  <span className="text-muted-foreground/30">•</span>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold inline-flex items-center gap-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    99.4% Staffed
-                  </span>
-                  <span className="hidden lg:inline text-muted-foreground/30">•</span>
-                  <span className="hidden lg:inline">750 Beds (120 ICU)</span>
-                  <span className="hidden lg:inline text-muted-foreground/30">•</span>
-                  <span className="hidden lg:inline">Level-1 Trauma Care</span>
+                  <span className="hidden sm:inline text-muted-foreground/40">•</span>
+                  <span className="hidden sm:inline">750 Beds (120 ICU)</span>
+                  <span className="hidden sm:inline text-muted-foreground/40">•</span>
+                  <span className="hidden sm:inline">Level-1 Trauma Care</span>
                 </div>
               </div>
             </div>
@@ -259,12 +254,13 @@ function EmployerDashboard() {
                   <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[11px] font-bold text-primary">
                     Multi-Specialty Campus
                   </span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-[11px] font-bold text-primary">
+                    <RiShieldCheckFill className="h-3.5 w-3.5 text-primary" />
                     NABH Tier-1 Partner
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {city} Central Campus · Dual Rooftop Helipads · 24/7 Level-1 Emergency Bay · 99.4% Clinically Staffed
+                  {city} Central Campus · Dual Rooftop Helipads · 24/7 Level-1 Emergency Bay
                 </p>
               </div>
               <Button
@@ -314,7 +310,7 @@ function EmployerDashboard() {
             </div>
 
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
-              <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+              <span className="text-primary font-semibold flex items-center gap-1">
                 <HiOutlineArrowTrendingUp className="h-3.5 w-3.5" />
                 94% Fill Velocity
               </span>
@@ -353,8 +349,9 @@ function EmployerDashboard() {
             </div>
 
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
-              <span className="font-semibold text-foreground truncate">
-                {activeShifts.length} Live Broadcasts
+              <span className="text-primary font-semibold truncate flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+                <span>{`${activeShifts.length} Live Broadcasts`}</span>
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
@@ -368,14 +365,14 @@ function EmployerDashboard() {
             <div>
               <div className="flex items-center justify-between gap-1">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
                     <HiOutlineDocumentCheck className="h-4 w-4" />
                   </span>
                   <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
                     Pipeline
                   </span>
                 </div>
-                <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
+                <span className="shrink-0 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20 text-[10px] font-extrabold px-2 py-0.5">
                   {applicants.length} Interview
                 </span>
               </div>
@@ -391,7 +388,7 @@ function EmployerDashboard() {
             </div>
 
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
-              <span className="text-emerald-600 dark:text-emerald-400 font-semibold truncate flex items-center gap-1">
+              <span className="text-primary font-semibold truncate flex items-center gap-1">
                 <HiOutlineCheckBadge className="h-3.5 w-3.5" />
                 Council Verified
               </span>
@@ -402,19 +399,19 @@ function EmployerDashboard() {
           {/* Card 4: Escrow Protection */}
           <Link
             to="/employer/wallet"
-            className="group rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs hover:border-emerald-500/50 transition-all flex flex-col justify-between"
+            className="group rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs hover:border-primary/40 transition-all flex flex-col justify-between"
           >
             <div>
               <div className="flex items-center justify-between gap-1">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
                     <HiOutlineShieldCheck className="h-4 w-4" />
                   </span>
                   <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
                     Escrow Protection
                   </span>
                 </div>
-                <span className="shrink-0 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 text-[10px] font-extrabold px-2 py-0.5">
+                <span className="shrink-0 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-extrabold px-2 py-0.5">
                   100% Nodal
                 </span>
               </div>
@@ -430,7 +427,7 @@ function EmployerDashboard() {
             </div>
 
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
-              <span className="text-emerald-600 dark:text-emerald-400 font-semibold truncate">
+              <span className="text-primary font-semibold truncate">
                 24h Auto-Release
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />

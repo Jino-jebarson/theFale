@@ -225,8 +225,8 @@ export function JobApprovalsAdmin() {
                     <span className={cn(
                       "rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border",
                       item.type === "shift"
-                        ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
-                        : "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
+                        ? "bg-primary/10 text-primary border-primary/20"
+                        : "bg-secondary/10 text-secondary-foreground/90 border-border"
                     )}>
                       {item.type === "shift" ? "Locum Shift" : "Full-Time"}
                     </span>
@@ -243,7 +243,7 @@ export function JobApprovalsAdmin() {
                         <HiOutlineXMark className="h-3.5 w-3.5" /> Rejected
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary border border-primary/20">
                         Pending Admin
                       </span>
                     )}
@@ -268,7 +268,7 @@ export function JobApprovalsAdmin() {
                         <Button
                           size="sm"
                           onClick={() => handleApprove(item.id, item.title)}
-                          className="h-8 px-3 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white gap-1 transition-all active:scale-[0.98]"
+                          className="h-8 px-3 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white gap-1 transition-all active:scale-[0.98]"
                         >
                           <HiCheck className="h-3.5 w-3.5" /> Approve & Go Live
                         </Button>
@@ -309,7 +309,7 @@ export function JobApprovalsAdmin() {
                       <HiOutlineXMark className="h-3 w-3" /> Rejected
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20 whitespace-nowrap shrink-0">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20 whitespace-nowrap shrink-0">
                       Pending
                     </span>
                   )}
@@ -317,8 +317,8 @@ export function JobApprovalsAdmin() {
                   <span className={cn(
                     "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap shrink-0",
                     item.type === "shift"
-                      ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
-                      : "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
+                      ? "bg-primary/10 text-primary border-primary/20"
+                      : "bg-secondary/10 text-secondary-foreground/90 border-border"
                   )}>
                     {item.type === "shift" ? "Shift" : "Full-Time"}
                   </span>
@@ -381,7 +381,7 @@ export function JobApprovalsAdmin() {
                   variant="outline"
                   onClick={() => { setSelectedJob(item); setSheetOpen(true); }}
                   className={cn(
-                    "h-9.5 px-2 text-xs font-bold rounded-xl border-border/80 hover:bg-muted text-foreground min-w-0 w-full shadow-2xs",
+                    "h-9.5 px-2 text-xs font-bold rounded-xl border-border/80 hover:bg-muted text-foreground min-w-0 w-full shadow-none",
                     item.status !== "pending" && "col-span-2"
                   )}
                 >
@@ -393,7 +393,7 @@ export function JobApprovalsAdmin() {
                   <Button
                     size="sm"
                     onClick={() => handleApprove(item.id, item.title)}
-                    className="h-9.5 px-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white gap-1 min-w-0 w-full shadow-2xs transition-all active:scale-[0.98]"
+                    className="h-9.5 px-2 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1 min-w-0 w-full shadow-none transition-all active:scale-[0.98]"
                   >
                     <HiCheck className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">Approve & Live</span>
@@ -418,7 +418,7 @@ export function JobApprovalsAdmin() {
           <SheetHeader className="px-4 py-3.5 sm:px-5 sm:py-4 border-b border-border bg-card shrink-0 text-left">
             <div className="pr-8">
               <SheetTitle className="text-base font-extrabold text-foreground flex items-center gap-2">
-                <HiOutlineDocumentCheck className="h-5 w-5 text-emerald-500 shrink-0" />
+                <HiOutlineDocumentCheck className="h-5 w-5 text-primary shrink-0" />
                 <span>Job Requirement Audit</span>
               </SheetTitle>
               <SheetDescription className="text-xs text-muted-foreground mt-0.5">
@@ -445,17 +445,20 @@ export function JobApprovalsAdmin() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-border bg-card p-4 space-y-2 shadow-2xs">
+              <div className="rounded-2xl border border-border bg-card p-4 space-y-2.5 shadow-none">
                 <h5 className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Compliance Checklist</h5>
-                <div className="space-y-1.5 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-                    <HiCheck className="h-4 w-4" /> Hospital verified with active accreditation
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center gap-2 text-foreground/90 font-medium">
+                    <HiCheck className="h-4 w-4 text-primary shrink-0" />
+                    <span>Hospital verified with active accreditation</span>
                   </div>
-                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-                    <HiCheck className="h-4 w-4" /> Duty hours comply with clinical shift caps
+                  <div className="flex items-center gap-2 text-foreground/90 font-medium">
+                    <HiCheck className="h-4 w-4 text-primary shrink-0" />
+                    <span>Duty hours comply with clinical shift caps</span>
                   </div>
-                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-                    <HiCheck className="h-4 w-4" /> Remuneration satisfies state clinical standards
+                  <div className="flex items-center gap-2 text-foreground/90 font-medium">
+                    <HiCheck className="h-4 w-4 text-primary shrink-0" />
+                    <span>Remuneration satisfies state clinical standards</span>
                   </div>
                 </div>
               </div>
@@ -481,7 +484,7 @@ export function JobApprovalsAdmin() {
                   <Button
                     size="sm"
                     onClick={() => handleApprove(selectedJob.id, selectedJob.title)}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold gap-1"
+                    className="bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1"
                   >
                     <HiCheck className="h-3.5 w-3.5" /> Approve & Publish Live
                   </Button>
