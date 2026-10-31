@@ -247,7 +247,7 @@ function CandidateEarningsPage() {
           {/* Card 1: Total Disbursed */}
           <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
             <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
                 <HiOutlineBanknotes className="h-4 w-4" />
               </span>
               <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full whitespace-nowrap">
@@ -270,7 +270,7 @@ function CandidateEarningsPage() {
           {/* Card 2: In Escrow (24h SLA) */}
           <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
             <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
                 <HiOutlineLockClosed className="h-4 w-4" />
               </span>
               <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full whitespace-nowrap">
@@ -316,7 +316,7 @@ function CandidateEarningsPage() {
           {/* Card 4: Completed Duties */}
           <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
             <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
                 <HiOutlineClock className="h-4 w-4" />
               </span>
               <span className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full whitespace-nowrap">
@@ -343,7 +343,7 @@ function CandidateEarningsPage() {
             <div className="space-y-1.5 min-w-0">
               <div className="flex items-start sm:items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600 shrink-0">
+                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
                     <HiOutlineCheckBadge className="h-4.5 w-4.5" />
                   </span>
                   <div className="min-w-0">

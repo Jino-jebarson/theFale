@@ -190,12 +190,6 @@ function Profile() {
                 </Button>
               </div>
             </div>
-
-            {/* Bottom row inside cover: Hospital Affiliation tag */}
-            <div className="relative z-10 hidden sm:flex items-center gap-2 text-xs text-white/75 font-medium">
-              <HiOutlineBuildingOffice2 className="h-4 w-4 text-primary" />
-              <span className="truncate">{employer}</span>
-            </div>
           </div>
 
           {/* Identity Body Section */}
