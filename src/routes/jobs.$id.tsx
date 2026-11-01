@@ -47,6 +47,9 @@ function JobDetail() {
   const s = useApp();
   const [withdrawing, setWithdrawing] = useState(false);
 
+  const candidateLevel = s.candidateLevel || (s.profile["level"] as any) || (s.profile["cadreLevel"] as any) || (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
+  const isStudent = candidateLevel === "student";
+
   const app = s.applied.find((a) => a.jobId === job.id);
   const isApplied = Boolean(app && app.status !== "Withdrawn");
   const isWithdrawn = Boolean(app && app.status === "Withdrawn");
@@ -103,7 +106,7 @@ function JobDetail() {
   return (
     <AppShell>
       <Link to="/jobs" search={{ q: undefined }} className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-primary">
-        <HiArrowLeft className="h-4 w-4" /> Back to jobs
+        <HiArrowLeft className="h-4 w-4" /> {isStudent ? "Back to internships" : "Back to jobs"}
       </Link>
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="space-y-5">
@@ -119,7 +122,7 @@ function JobDetail() {
               <span className="rounded-full bg-success-soft px-3 py-1 text-xs font-bold text-success">{job.match}% match</span>
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-4">
-              {[[HiOutlineCurrencyRupee, "Salary / month", job.salary], [HiOutlineBriefcase, "Experience", job.exp], [HiOutlineMapPin, "Location", job.city], [HiOutlineClock, "Shift", job.shift]].map(([I, l, v]) => {
+              {[[HiOutlineCurrencyRupee, isStudent ? "Stipend / month" : "Salary / month", job.salary], [HiOutlineBriefcase, "Experience", job.exp], [HiOutlineMapPin, "Location", job.city], [HiOutlineClock, "Shift", job.shift]].map(([I, l, v]) => {
                 const Icon = I as typeof HiOutlineClock;
                 return (
                   <div key={l as string} className="rounded-xl bg-muted p-3">
@@ -157,7 +160,7 @@ function JobDetail() {
                   </Button>
                 </>
               ) : (
-                <Button size="lg" onClick={apply}>Easy apply</Button>
+                <Button size="lg" onClick={apply}>{isStudent ? "Apply for Internship" : "Easy apply"}</Button>
               )}
               <Button
                 variant="outline"
@@ -187,7 +190,7 @@ function JobDetail() {
             </section>
             <section>
               <h2 className="mb-2 text-base font-bold">Benefits</h2>
-              <p className="text-muted-foreground">PF & ESI · Health insurance · Accommodation support · Paid learning days</p>
+              <p className="text-muted-foreground">{isStudent ? "Teaching hospital rotation credit · Logbook sign-off · Mentorship by Senior Consultants · Monthly Educational Stipend" : "PF & ESI · Health insurance · Accommodation support · Paid learning days"}</p>
             </section>
           </div>
         </div>
@@ -197,8 +200,13 @@ function JobDetail() {
             <p className="mt-2 text-sm text-muted-foreground">A leading multi-speciality healthcare provider with a strong focus on patient safety and staff development.</p>
           </div>
           <div>
-            <h3 className="mb-3 font-bold">Similar jobs</h3>
-            <div className="space-y-3">{jobs.filter((j) => j.id !== job.id).slice(0, 2).map((j) => <JobCard key={j.id} job={j} compact />)}</div>
+            <h3 className="mb-3 font-bold">{isStudent ? "Similar internships" : "Similar jobs"}</h3>
+            <div className="space-y-3">
+              {jobs
+                .filter((j) => j.id !== job.id && (!isStudent || j.title.toLowerCase().includes("intern") || j.title.toLowerCase().includes("observership") || j.tags.some((t) => t.toLowerCase().includes("intern"))))
+                .slice(0, 2)
+                .map((j) => <JobCard key={j.id} job={j} compact />)}
+            </div>
           </div>
         </aside>
       </div>

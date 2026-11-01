@@ -149,48 +149,28 @@ function SignInPage() {
     const isHire = mode === "hire";
     const targetPortal = isHire ? "facility" : "candidate";
 
-    setDoneTitle(isSignUp ? "Verified!" : "You're in.");
+    setDoneTitle("Verified!");
     setDoneText(
-      isSignUp
-        ? (isHire
-          ? "Mobile verified. Redirecting to employer onboarding…"
-          : "Mobile verified. Redirecting to candidate onboarding…")
-        : (isHire
-          ? "Welcome to The Fale. Let's find your next hire."
-          : "Welcome to The Fale. Let's find your next opportunity.")
+      isHire
+        ? "Mobile verified. Redirecting to employer onboarding…"
+        : "Mobile verified. Redirecting to career pathway setup…"
     );
     setView("done");
 
-    if (isSignUp) {
-      // Create Account flow -> Onboarding
-      setState({
-        signedIn: true,
-        portal: targetPortal,
-        contact: userContact,
-        onboarded: false,
-      });
+    setState({
+      signedIn: true,
+      portal: targetPortal,
+      contact: userContact,
+      onboarded: false,
+      candidateLevel: undefined,
+    });
 
-      setTimeout(() => {
-        navigate({
-          to: "/onboarding",
-          search: { role: isHire ? "employer" : "candidate" },
-        });
-      }, 1200);
-    } else {
-      // Login flow -> Directly to Home / Employer Dashboard
-      setState({
-        signedIn: true,
-        portal: targetPortal,
-        contact: userContact,
-        onboarded: true,
+    setTimeout(() => {
+      navigate({
+        to: "/onboarding",
+        search: { role: isHire ? "employer" : "candidate" },
       });
-
-      setTimeout(() => {
-        navigate({
-          to: isHire ? "/employer" : "/home",
-        });
-      }, 1200);
-    }
+    }, 1000);
   };
 
   // Directly trigger dynamic mobile OTP registration flow for employer vs candidate

@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApplicationsRouteImport } from './routes/applications'
 import { Route as EarningsRouteImport } from './routes/earnings'
 import { Route as HomeRouteImport } from './routes/home'
+import { Route as HuddleRouteImport } from './routes/huddle'
 import { Route as LandingRouteImport } from './routes/landing'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
@@ -27,6 +28,7 @@ import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminApplicationsRouteImport } from './routes/admin.applications'
 import { Route as AdminCandidatesRouteImport } from './routes/admin.candidates'
 import { Route as AdminFacilitiesRouteImport } from './routes/admin.facilities'
+import { Route as AdminHuddleRouteImport } from './routes/admin.huddle'
 import { Route as AdminPostingsRouteImport } from './routes/admin.postings'
 import { Route as EmployerIndexRouteImport } from './routes/employer.index'
 import { Route as EmployerApplicantsRouteImport } from './routes/employer.applicants'
@@ -58,6 +60,11 @@ const EarningsRoute = EarningsRouteImport.update({
 const HomeRoute = HomeRouteImport.update({
   id: '/home',
   path: '/home',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HuddleRoute = HuddleRouteImport.update({
+  id: '/huddle',
+  path: '/huddle',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LandingRoute = LandingRouteImport.update({
@@ -130,6 +137,11 @@ const AdminFacilitiesRoute = AdminFacilitiesRouteImport.update({
   path: '/admin/facilities',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminHuddleRoute = AdminHuddleRouteImport.update({
+  id: '/admin/huddle',
+  path: '/admin/huddle',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminPostingsRoute = AdminPostingsRouteImport.update({
   id: '/admin/postings',
   path: '/admin/postings',
@@ -196,6 +208,7 @@ export interface FileRoutesByFullPath {
   '/applications': typeof ApplicationsRoute
   '/earnings': typeof EarningsRoute
   '/home': typeof HomeRoute
+  '/huddle': typeof HuddleRoute
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
@@ -209,6 +222,7 @@ export interface FileRoutesByFullPath {
   '/admin/applications': typeof AdminApplicationsRoute
   '/admin/candidates': typeof AdminCandidatesRoute
   '/admin/facilities': typeof AdminFacilitiesRoute
+  '/admin/huddle': typeof AdminHuddleRoute
   '/admin/postings': typeof AdminPostingsRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
@@ -228,6 +242,7 @@ export interface FileRoutesByTo {
   '/applications': typeof ApplicationsRoute
   '/earnings': typeof EarningsRoute
   '/home': typeof HomeRoute
+  '/huddle': typeof HuddleRoute
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
@@ -241,6 +256,7 @@ export interface FileRoutesByTo {
   '/admin/applications': typeof AdminApplicationsRoute
   '/admin/candidates': typeof AdminCandidatesRoute
   '/admin/facilities': typeof AdminFacilitiesRoute
+  '/admin/huddle': typeof AdminHuddleRoute
   '/admin/postings': typeof AdminPostingsRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
@@ -261,6 +277,7 @@ export interface FileRoutesById {
   '/applications': typeof ApplicationsRoute
   '/earnings': typeof EarningsRoute
   '/home': typeof HomeRoute
+  '/huddle': typeof HuddleRoute
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
@@ -274,6 +291,7 @@ export interface FileRoutesById {
   '/admin/applications': typeof AdminApplicationsRoute
   '/admin/candidates': typeof AdminCandidatesRoute
   '/admin/facilities': typeof AdminFacilitiesRoute
+  '/admin/huddle': typeof AdminHuddleRoute
   '/admin/postings': typeof AdminPostingsRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
@@ -295,6 +313,7 @@ export interface FileRouteTypes {
     | '/applications'
     | '/earnings'
     | '/home'
+    | '/huddle'
     | '/landing'
     | '/login'
     | '/notifications'
@@ -308,6 +327,7 @@ export interface FileRouteTypes {
     | '/admin/applications'
     | '/admin/candidates'
     | '/admin/facilities'
+    | '/admin/huddle'
     | '/admin/postings'
     | '/employer/applicants'
     | '/employer/candidates'
@@ -327,6 +347,7 @@ export interface FileRouteTypes {
     | '/applications'
     | '/earnings'
     | '/home'
+    | '/huddle'
     | '/landing'
     | '/login'
     | '/notifications'
@@ -340,6 +361,7 @@ export interface FileRouteTypes {
     | '/admin/applications'
     | '/admin/candidates'
     | '/admin/facilities'
+    | '/admin/huddle'
     | '/admin/postings'
     | '/employer/applicants'
     | '/employer/candidates'
@@ -359,6 +381,7 @@ export interface FileRouteTypes {
     | '/applications'
     | '/earnings'
     | '/home'
+    | '/huddle'
     | '/landing'
     | '/login'
     | '/notifications'
@@ -372,6 +395,7 @@ export interface FileRouteTypes {
     | '/admin/applications'
     | '/admin/candidates'
     | '/admin/facilities'
+    | '/admin/huddle'
     | '/admin/postings'
     | '/employer/applicants'
     | '/employer/candidates'
@@ -392,6 +416,7 @@ export interface RootRouteChildren {
   ApplicationsRoute: typeof ApplicationsRoute
   EarningsRoute: typeof EarningsRoute
   HomeRoute: typeof HomeRoute
+  HuddleRoute: typeof HuddleRoute
   LandingRoute: typeof LandingRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
@@ -405,6 +430,7 @@ export interface RootRouteChildren {
   AdminApplicationsRoute: typeof AdminApplicationsRoute
   AdminCandidatesRoute: typeof AdminCandidatesRoute
   AdminFacilitiesRoute: typeof AdminFacilitiesRoute
+  AdminHuddleRoute: typeof AdminHuddleRoute
   AdminPostingsRoute: typeof AdminPostingsRoute
   EmployerApplicantsRoute: typeof EmployerApplicantsRoute
   EmployerCandidatesRoute: typeof EmployerCandidatesRoute
@@ -448,6 +474,13 @@ declare module '@tanstack/react-router' {
       path: '/home'
       fullPath: '/home'
       preLoaderRoute: typeof HomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/huddle': {
+      id: '/huddle'
+      path: '/huddle'
+      fullPath: '/huddle'
+      preLoaderRoute: typeof HuddleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/landing': {
@@ -548,6 +581,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminFacilitiesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/huddle': {
+      id: '/admin/huddle'
+      path: '/admin/huddle'
+      fullPath: '/admin/huddle'
+      preLoaderRoute: typeof AdminHuddleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/postings': {
       id: '/admin/postings'
       path: '/admin/postings'
@@ -640,6 +680,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApplicationsRoute: ApplicationsRoute,
   EarningsRoute: EarningsRoute,
   HomeRoute: HomeRoute,
+  HuddleRoute: HuddleRoute,
   LandingRoute: LandingRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
@@ -653,6 +694,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminApplicationsRoute: AdminApplicationsRoute,
   AdminCandidatesRoute: AdminCandidatesRoute,
   AdminFacilitiesRoute: AdminFacilitiesRoute,
+  AdminHuddleRoute: AdminHuddleRoute,
   AdminPostingsRoute: AdminPostingsRoute,
   EmployerApplicantsRoute: EmployerApplicantsRoute,
   EmployerCandidatesRoute: EmployerCandidatesRoute,

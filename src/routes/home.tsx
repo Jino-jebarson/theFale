@@ -19,8 +19,9 @@ import {
   HiOutlineShieldCheck,
   HiOutlineBars3,
   HiOutlineSquares2X2,
+  HiOutlineLockClosed,
 } from "react-icons/hi2";
-import { RiVerifiedBadgeFill } from "react-icons/ri";
+import { RiVerifiedBadgeFill, RiChatVoiceLine } from "react-icons/ri";
 import { toast } from "sonner";
 import { AppShell, initials } from "@/components/fale/AppShell";
 import { ClinicalConciergeWidget } from "@/components/fale/ClinicalConciergeWidget";
@@ -44,7 +45,7 @@ export const Route = createFileRoute("/home")({
   component: Home,
 });
 
-type FilterTab = "All" | "Top match" | "Urgent" | "Day shift";
+type FilterTab = "All" | "Top match" | "Urgent" | "Day shift" | "Internships";
 
 function Home() {
   const s = useApp();
@@ -53,23 +54,47 @@ function Home() {
   const [isOpenToWork, setIsOpenToWork] = useState(true);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
 
-  const fullName = String(s.profile["name"] || "Dr. Ananya Patel").trim();
+  const candidateLevel =
+    s.candidateLevel ||
+    (s.profile["level"] as any) ||
+    (s.profile["cadreLevel"] as any) ||
+    (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
+  const isStudent = candidateLevel === "student";
+
+  const courseName = String(s.profile["course"] || "Allied Health Sciences");
+  const collegeName = String(s.profile["college"] || "Healthcare Academy");
+  const studyYear = String(s.profile["studyYear"] || "Final Year");
+  const studentArea = String(s.profile["area"] || s.profile["city"] || "Bengaluru");
+
+  const fullName = String(s.profile["name"] || (isStudent ? "Healthcare Student" : "Dr. Ananya Patel")).trim();
   const firstName = fullName.split(" ")[0]?.replace(",", "") || "there";
-  const roleName = String(s.profile["role"] || "Pharmacist");
-  const specialty = String(s.profile["specialty"] || "Clinical Pharmacy");
-  const roleIllustration = getRoleIllustration(roleName);
+  const roleName = isStudent ? `Student (${courseName})` : String(s.profile["role"] || "Pharmacist");
+  const specialty = isStudent ? `${courseName} · ${collegeName}` : String(s.profile["specialty"] || "Clinical Pharmacy");
+  const roleIllustration = getRoleIllustration(isStudent ? courseName : roleName);
   const completeness = Math.min(100, 40 + Object.keys(s.profile).length * 3 + Object.keys(s.docs).length * 5);
 
   const activeApplied = s.applied.filter((a) => !["Not selected", "Withdrawn"].includes(a.status));
+  const studentInternships = jobs.filter((j) => j.kind === "internship" || j.type === "Internship");
 
-  const filteredJobs = jobs.filter((j) => {
-    if (filter === "Top match") return j.match >= 85;
-    if (filter === "Urgent") return Boolean(j.urgent);
-    if (filter === "Day shift") return j.shift === "Day";
-    return true;
-  });
+  const filteredJobs = jobs
+    .filter((j) => {
+      const isIntern = j.kind === "internship" || j.type === "Internship";
+      if (isStudent && !isIntern) return false;
+      if (filter === "Internships") return isIntern;
+      if (filter === "Top match") return j.match >= 85;
+      if (filter === "Urgent") return Boolean(j.urgent);
+      if (filter === "Day shift") return j.shift === "Day";
+      return true;
+    })
+    .sort((a, b) => b.match - a.match);
 
   const handleClaimShift = (shiftId: string, title: string, org: string) => {
+    if (isStudent) {
+      toast.info("Shift duty locked for active students", {
+        description: "Patient duty shifts require State Council Registration. Explore clinical internships!",
+      });
+      return;
+    }
     setClaimedShifts((prev) => ({ ...prev, [shiftId]: true }));
     toast.success("Shift claim submitted!", {
       description: `Your interest in ${title} at ${org} was sent. Facility HR will confirm shortly.`,
@@ -77,8 +102,10 @@ function Home() {
   };
 
   const handleDownloadCV = () => {
-    toast.success("Clinical CV exported!", {
-      description: "Downloaded verified medical resume in standard NABH format.",
+    toast.success(isStudent ? "Student Academic Portfolio exported!" : "Clinical CV exported!", {
+      description: isStudent
+        ? "Downloaded verified student profile with college accreditation."
+        : "Downloaded verified medical resume in standard NABH format.",
     });
   };
 
@@ -93,6 +120,14 @@ function Home() {
   };
 
   const handleQuickApply = (job: Job) => {
+    const isIntern = job.kind === "internship" || job.type === "Internship";
+    if (isStudent && !isIntern) {
+      toast.info("Internships only for students", {
+        description: "Full-time hospital positions unlock once you graduate with council registration.",
+      });
+      return;
+    }
+
     const isAlreadyApplied = s.applied.some((a) => a.jobId === job.id);
     if (isAlreadyApplied) {
       toast.info("Already applied to this position");
@@ -148,8 +183,12 @@ function Home() {
                     Welcome back, {firstName}
                   </h1>
                   <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-xs font-bold text-primary shrink-0">
-                    <HiCheckBadge className="h-3.5 w-3.5 text-primary shrink-0" />
-                    <span>Verified {roleName}</span>
+                    {isStudent ? (
+                      <HiOutlineAcademicCap className="h-3.5 w-3.5 text-primary shrink-0" />
+                    ) : (
+                      <HiCheckBadge className="h-3.5 w-3.5 text-primary shrink-0" />
+                    )}
+                    <span>{isStudent ? `Verified Student · ${studyYear}` : `Verified ${roleName}`}</span>
                   </span>
                 </div>
 
@@ -158,12 +197,12 @@ function Home() {
                   <span className="hidden sm:inline-block h-1 w-1 rounded-full bg-muted-foreground/35 shrink-0" />
                   <span className="inline-flex items-center gap-1 text-muted-foreground">
                     <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-                    <span>Chennai, Tamil Nadu</span>
+                    <span>{studentArea}</span>
                   </span>
                   <span className="hidden sm:inline-block h-1 w-1 rounded-full bg-muted-foreground/35 shrink-0" />
                   <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                    <span>Fast-Track Placement Active</span>
+                    <span>{isStudent ? "Internship & Mentorship Track Active" : "Fast-Track Placement Active"}</span>
                   </span>
                 </div>
               </div>
@@ -178,7 +217,7 @@ function Home() {
                 className="w-full sm:w-auto h-10 px-4 rounded-xl border-border/80 hover:bg-muted font-bold text-xs shadow-none gap-2 justify-center"
               >
                 <HiOutlineArrowDownTray className="h-4 w-4 text-primary shrink-0" />
-                <span>Export Clinical CV</span>
+                <span>{isStudent ? "Export Academic Portfolio" : "Export Clinical CV"}</span>
               </Button>
               <Button
                 size="sm"
@@ -186,7 +225,7 @@ function Home() {
                 className="w-full sm:w-auto h-10 px-5 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-white shadow-none gap-2 justify-center"
               >
                 <Link to="/jobs" search={{ q: undefined }}>
-                  <span>Explore Matches</span>
+                  <span>{isStudent ? "Explore Internships" : "Explore Matches"}</span>
                   <HiArrowRight className="h-4 w-4 shrink-0" />
                 </Link>
               </Button>
@@ -227,7 +266,7 @@ function Home() {
             </div>
           </div>
 
-          {/* Card 2: Curated Roles */}
+          {/* Card 2: Curated Roles / Internships */}
           <Link
             to="/jobs"
             search={{ q: undefined }}
@@ -236,31 +275,31 @@ function Home() {
             <div className="flex items-center justify-between gap-1">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
-                  <HiOutlineBriefcase className="h-4 w-4" />
+                  {isStudent ? <HiOutlineAcademicCap className="h-4 w-4" /> : <HiOutlineBriefcase className="h-4 w-4" />}
                 </span>
                 <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
-                  Curated Roles
+                  {isStudent ? "Clinical Internships" : "Curated Roles"}
                 </span>
               </div>
               <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
-                Top 94% Match
+                {isStudent ? `${studentInternships.length} Openings` : "Top 94% Match"}
               </span>
             </div>
             <div>
               <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground">
-                {filteredJobs.length}
+                {isStudent ? studentInternships.length : filteredJobs.length}
               </div>
               <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-                verified vacancies
+                {isStudent ? "accredited student roles" : "verified vacancies"}
               </p>
             </div>
             <div className="pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
-              <span className="text-primary font-semibold">Immediate Joining</span>
+              <span className="text-primary font-semibold">{isStudent ? "Hospital Certified Track" : "Immediate Joining"}</span>
               <HiArrowRight className="h-3.5 w-3.5 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
           </Link>
 
-          {/* Card 3: Instant Shifts */}
+          {/* Card 3: Instant Shifts / Student Shift Notice */}
           <Link
             to="/shifts"
             className="group rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs hover:border-primary/40 transition-all flex flex-col justify-between space-y-3"
@@ -268,26 +307,31 @@ function Home() {
             <div className="flex items-center justify-between gap-1">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
-                  <HiOutlineBolt className="h-4 w-4" />
+                  {isStudent ? <HiOutlineLockClosed className="h-4 w-4" /> : <HiOutlineBolt className="h-4 w-4" />}
                 </span>
                 <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
-                  Instant Shifts
+                  {isStudent ? "Hospital Shifts" : "Instant Shifts"}
                 </span>
               </div>
-              <span className="shrink-0 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 text-[10px] font-extrabold px-2 py-0.5">
-                Tonight
+              <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
+                {isStudent ? "Post-Graduation" : "Tonight"}
               </span>
             </div>
             <div>
-              <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground">
-                {shifts.length}
+              <div className={cn(
+                "font-black tracking-tight text-foreground",
+                isStudent ? "text-xl sm:text-2xl" : "text-2xl sm:text-3xl font-mono"
+              )}>
+                {isStudent ? "Post-Degree" : shifts.length}
               </div>
               <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-                shifts ready to claim
+                {isStudent ? "Requires degree & State Council license" : "shifts ready to claim"}
               </p>
             </div>
             <div className="pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
-              <span className="text-primary font-semibold">From ₹350/hr</span>
+              <span className="text-primary font-semibold">
+                {isStudent ? "View licensing criteria" : "From ₹350/hr"}
+              </span>
               <HiArrowRight className="h-3.5 w-3.5 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
           </Link>
@@ -306,7 +350,7 @@ function Home() {
                   Applications
                 </span>
               </div>
-              <span className="shrink-0 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20 text-[10px] font-extrabold px-2 py-0.5">
+              <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
                 {activeApplied.length} Active
               </span>
             </div>
@@ -326,6 +370,43 @@ function Home() {
         </section>
 
         {/* ========================================================================= */}
+        {/* HUDDLE COMMUNITY & CLINICAL MENTORSHIP BAR                                */}
+        {/* ========================================================================= */}
+        <section className="rounded-3xl border border-primary/20 bg-gradient-to-r from-card via-card to-primary-soft/30 p-5 sm:p-6 shadow-xs">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <RiChatVoiceLine className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-black text-base sm:text-lg text-foreground">
+                    FALE Huddle · Verified Clinical Peer Community
+                  </h3>
+                  <span className="rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider">
+                    Live
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 max-w-2xl leading-relaxed">
+                  Discuss ward protocols, de-identified clinical cases, and night duty dilemmas with verified peers in Bengaluru.
+                  Ask questions to senior clinical mentors and book seats for accredited CME hospital workshops.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 shrink-0 self-start md:self-auto">
+              <Link
+                to="/huddle"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary hover:bg-primary-hover px-4 py-2.5 text-xs font-black text-white shadow-xs transition-all"
+              >
+                <span>Enter Huddle</span>
+                <HiArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        {/* ========================================================================= */}
         {/* 3. BALANCED 2-COLUMN COCKPIT (EXPANSIVE FEED + SMART RIGHT RAIL)          */}
         {/* ========================================================================= */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start w-full min-w-0">
@@ -339,14 +420,16 @@ function Home() {
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <h2 className="text-lg sm:text-xl font-bold tracking-tight text-foreground">
-                    Recommended Roles
+                    {isStudent ? "Recommended for You (Internships)" : "Recommended Roles"}
                   </h2>
                   <span className="rounded-full bg-primary/10 border border-primary/20 text-primary px-2.5 py-0.5 text-xs font-bold shrink-0">
-                    {filteredJobs.length} roles available
+                    {filteredJobs.length} {isStudent ? "openings available" : "roles available"}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Curated clinical opportunities matched to your verified credentials
+                  {isStudent
+                    ? `Ranked on your verified ${courseName} course, skills, and academic profile. Full-time jobs unlock when you graduate.`
+                    : "Curated clinical opportunities matched to your verified credentials"}
                 </p>
               </div>
 
@@ -355,7 +438,7 @@ function Home() {
                 search={{ q: undefined }}
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline self-start sm:self-auto shrink-0"
               >
-                <span>View all jobs ({jobs.length})</span>
+                <span>{isStudent ? `View all internships (${studentInternships.length})` : `View all jobs (${jobs.length})`}</span>
                 <HiOutlineArrowTopRightOnSquare className="h-4 w-4" />
               </Link>
             </div>
@@ -363,11 +446,14 @@ function Home() {
             {/* Filter Tabs & View Mode Switcher */}
             <div className="flex items-center justify-between gap-3 min-w-0">
               <div className="flex items-center gap-1.5 bg-muted/40 p-1.5 rounded-2xl border border-border/70 overflow-x-auto max-w-full [scrollbar-width:none] [&::-webkit-scrollbar]:hidden shrink-0 sm:shrink">
-                {(["All", "Top match", "Urgent", "Day shift"] as const).map((tab) => (
+                {(isStudent
+                  ? (["All", "Top match", "Urgent"] as const)
+                  : (["All", "Top match", "Urgent", "Day shift"] as const)
+                ).map((tab) => (
                   <button
                     key={tab}
                     type="button"
-                    onClick={() => setFilter(tab)}
+                    onClick={() => setFilter(tab as FilterTab)}
                     className={cn(
                       "rounded-xl px-3 sm:px-4 py-2 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shrink-0",
                       filter === tab
@@ -375,7 +461,7 @@ function Home() {
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    {tab === "All" ? "All Roles" : tab}
+                    {tab === "All" ? (isStudent ? "All Internships" : "All Roles") : tab}
                   </button>
                 ))}
               </div>
@@ -424,6 +510,8 @@ function Home() {
               {filteredJobs.slice(0, viewMode === "grid" ? 10 : 8).map((job) => {
                 const isSaved = s.saved.includes(job.id);
                 const isApplied = s.applied.some((a) => a.jobId === job.id);
+                const isIntern = job.kind === "internship" || job.type === "Internship";
+                const isRestrictedForStudent = isStudent && !isIntern;
 
                 return (
                   <div
@@ -447,13 +535,19 @@ function Home() {
                               {job.org}
                             </h4>
                             <p className="text-xs text-muted-foreground truncate mt-0.5">
-                              {job.city} · {job.type}
+                              {job.city} · {isIntern ? "Clinical Internship" : job.type}
                               {job.dept && ` · ${job.dept}`}
                             </p>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
+                          {isIntern && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-black text-primary">
+                              <HiOutlineAcademicCap className="h-3 w-3" />
+                              <span>Internship</span>
+                            </span>
+                          )}
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
                             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                             {job.match}% Match
@@ -514,8 +608,10 @@ function Home() {
                     {/* Footer Row: Salary, Experience & Actions */}
                     <div className="mt-4 pt-3.5 border-t border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
-                        <span className="text-base font-extrabold text-foreground">{job.salary}</span>
-                        <span className="text-xs">/ month</span>
+                        <span className="text-base font-extrabold text-foreground">
+                          {job.stipend || job.salary}
+                        </span>
+                        {!job.stipend && <span className="text-xs">/ month</span>}
                         <span className="text-muted-foreground/40">•</span>
                         <span className="font-medium text-foreground/80">{job.exp}</span>
                         {job.shift && (
@@ -545,6 +641,14 @@ function Home() {
                             <HiOutlineCheckCircle className="h-4 w-4" />
                             <span>Applied</span>
                           </span>
+                        ) : isRestrictedForStudent ? (
+                          <span
+                            title="Students can apply to accredited clinical internships. Full-time hospital roles unlock upon graduation with council registration."
+                            className="inline-flex items-center gap-1 rounded-xl bg-muted border border-border/80 px-3 py-1.5 text-xs font-semibold text-muted-foreground cursor-not-allowed select-none"
+                          >
+                            <HiOutlineLockClosed className="h-3.5 w-3.5" />
+                            <span>Internships only for students</span>
+                          </span>
                         ) : (
                           <Button
                             size="sm"
@@ -570,7 +674,7 @@ function Home() {
                   className="rounded-xl border-border/80 bg-card hover:bg-muted font-bold text-xs h-10 px-6 shadow-none gap-2"
                 >
                   <Link to="/jobs" search={{ q: undefined }}>
-                    <span>Explore all {filteredJobs.length} verified roles</span>
+                    <span>{isStudent ? `Explore all ${filteredJobs.length} clinical internships` : `Explore all ${filteredJobs.length} verified roles`}</span>
                     <HiArrowRight className="h-4 w-4 text-primary" />
                   </Link>
                 </Button>
@@ -590,8 +694,12 @@ function Home() {
                     <HiOutlineSparkles className="h-4 w-4" />
                   </span>
                   <div>
-                    <h3 className="text-sm font-bold text-foreground">Placement Profile</h3>
-                    <p className="text-[11px] text-muted-foreground">Fast-Track Status</p>
+                    <h3 className="text-sm font-bold text-foreground">
+                      {isStudent ? "Student Profile Status" : "Placement Profile"}
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground">
+                      {isStudent ? "Academic Verification" : "Fast-Track Status"}
+                    </p>
                   </div>
                 </div>
                 <span className="font-extrabold text-xs text-primary bg-primary/10 border border-primary/20 px-2.5 py-0.5 rounded-full">
@@ -608,7 +716,7 @@ function Home() {
                   />
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>Verified credentials active</span>
+                  <span>{isStudent ? "College ID checked & verified" : "Verified credentials active"}</span>
                   <Link to="/profile" className="font-bold text-primary hover:underline">
                     Manage Profile →
                   </Link>
@@ -620,7 +728,7 @@ function Home() {
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-foreground flex items-center gap-1.5">
                     <span className={cn("h-2 w-2 rounded-full shrink-0", isOpenToWork ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground")} />
-                    <span>Open to Instant Offers</span>
+                    <span>{isStudent ? "Open to Internship Offers" : "Open to Instant Offers"}</span>
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
                     Allows hospitals to direct-message you
@@ -647,64 +755,111 @@ function Home() {
               </div>
             </div>
 
-            {/* 2. Instant Locum Shifts Widget */}
-            <div className="rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
-                    <HiOutlineClock className="h-4 w-4" />
+            {/* 2. Instant Locum Shifts Widget / Student Clinical Roadmap */}
+            {isStudent ? (
+              <div className="rounded-3xl border border-primary/20 bg-gradient-to-br from-card via-card to-primary-soft/30 p-5 sm:p-6 shadow-xs space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
+                      <HiOutlineAcademicCap className="h-4.5 w-4.5" />
+                    </span>
+                    <div>
+                      <h3 className="text-sm font-bold text-foreground">Clinical Licensing Desk</h3>
+                      <p className="text-[11px] text-muted-foreground">Pre-Graduation Roadmap</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-primary bg-primary/10 border border-primary/20 px-2.5 py-0.5 rounded-full">
+                    Student
                   </span>
-                  <div>
-                    <h3 className="text-sm font-bold text-foreground">Instant Locum Shifts</h3>
-                    <p className="text-[11px] text-muted-foreground">Direct hospital coverage</p>
+                </div>
+
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  In compliance with clinical council norms, independent ward & ICU shifts require completed degrees and State Council Registration (KNC, KMC, etc.).
+                </p>
+
+                <div className="rounded-2xl border border-border/70 bg-card p-3.5 space-y-2.5 text-xs">
+                  <div className="flex items-center gap-2 text-foreground font-semibold">
+                    <HiOutlineCheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span>Accredited Clinical Internships Open</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-foreground font-semibold">
+                    <HiOutlineCheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span>Verified Clinical Mentors in Huddle</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <HiOutlineLockClosed className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span>Independent Shifts (Unlocks on Graduation)</span>
                   </div>
                 </div>
-                <Link to="/shifts" className="text-xs font-bold text-primary hover:underline">
-                  View all
-                </Link>
+
+                <div className="pt-1 flex items-center gap-2">
+                  <Button asChild size="sm" className="w-full rounded-xl text-xs font-bold bg-primary hover:bg-primary-hover text-white shadow-none">
+                    <Link to="/huddle">
+                      <span>Enter Huddle Discussions</span>
+                      <HiArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                    </Link>
+                  </Button>
+                </div>
               </div>
-
-              <div className="space-y-3">
-                {shifts.slice(0, 3).map((sh) => {
-                  const isClaimed = claimedShifts[sh.id];
-                  return (
-                    <div
-                      key={sh.id}
-                      className="rounded-2xl border border-border/70 p-3.5 bg-muted/20 hover:bg-muted/40 transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-bold text-foreground truncate">{sh.title}</p>
-                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                            {sh.org} · {sh.date}
-                          </p>
-                          <div className="mt-2 flex items-center gap-2">
-                            <span className="rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 text-[11px] font-bold text-primary">
-                              ₹{sh.rate}/hr
-                            </span>
-                            <span className="text-[11px] text-muted-foreground">{sh.hours}h shift</span>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleClaimShift(sh.id, sh.title, sh.org)}
-                          disabled={isClaimed}
-                          className={cn(
-                            "shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold transition-all cursor-pointer shadow-none",
-                            isClaimed
-                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 cursor-default"
-                              : "bg-primary text-white hover:bg-primary-hover"
-                          )}
-                        >
-                          {isClaimed ? "Claimed" : "Claim"}
-                        </button>
-                      </div>
+            ) : (
+              <div className="rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
+                      <HiOutlineClock className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <h3 className="text-sm font-bold text-foreground">Instant Locum Shifts</h3>
+                      <p className="text-[11px] text-muted-foreground">Direct hospital coverage</p>
                     </div>
-                  );
-                })}
+                  </div>
+                  <Link to="/shifts" className="text-xs font-bold text-primary hover:underline">
+                    View all
+                  </Link>
+                </div>
+
+                <div className="space-y-3">
+                  {shifts.slice(0, 3).map((sh) => {
+                    const isClaimed = claimedShifts[sh.id];
+                    return (
+                      <div
+                        key={sh.id}
+                        className="rounded-2xl border border-border/70 p-3.5 bg-muted/20 hover:bg-muted/40 transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-foreground truncate">{sh.title}</p>
+                            <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                              {sh.org} · {sh.date}
+                            </p>
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className="rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 text-[11px] font-bold text-primary">
+                                ₹{sh.rate}/hr
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">{sh.hours}h shift</span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleClaimShift(sh.id, sh.title, sh.org)}
+                            disabled={isClaimed}
+                            className={cn(
+                              "shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold transition-all cursor-pointer shadow-none",
+                              isClaimed
+                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 cursor-default"
+                                : "bg-primary text-white hover:bg-primary-hover"
+                            )}
+                          >
+                            {isClaimed ? "Claimed" : "Claim"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* 3. Recruiter Pulse Radar */}
             <div className="rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs space-y-3">

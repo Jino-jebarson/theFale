@@ -954,5 +954,3 @@ function EmployerDashboard() {
     </AppShell>
   );
 }
-
-export default EmployerDashboard;

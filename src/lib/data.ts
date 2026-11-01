@@ -15,9 +15,94 @@ export interface Job {
   qualification?: string;
   perks?: string[];
   accredited?: boolean;
+  kind?: "job" | "internship";
+  stipend?: string;
+  forStudents?: boolean;
 }
 
 export const jobs: Job[] = [
+  {
+    id: "intern-1",
+    title: "Physiotherapy Clinical Intern",
+    org: "Manipal Hospitals",
+    city: "Bengaluru",
+    salary: "₹14,000 – ₹18,000",
+    stipend: "₹16,000 / month",
+    exp: "Student / Intern",
+    type: "Internship",
+    kind: "internship",
+    forStudents: true,
+    shift: "Day",
+    posted: "Today",
+    tags: ["BPT / MPT Student", "Ortho & Neuro Rehab", "Bedside Mentorship"],
+    match: 96,
+    urgent: true,
+    dept: "Physiotherapy & Rehab",
+    qualification: "BPT / MPT (Ongoing)",
+    perks: ["Hospital Certificate", "Stipend Provided", "CME Credits"],
+    accredited: true,
+  },
+  {
+    id: "intern-2",
+    title: "Graduate Nurse Trainee / Clinical Intern",
+    org: "Apollo Hospitals",
+    city: "Bengaluru",
+    salary: "₹15,000 – ₹20,000",
+    stipend: "₹18,000 / month",
+    exp: "Final Year Student",
+    type: "Internship",
+    kind: "internship",
+    forStudents: true,
+    shift: "Morning",
+    posted: "1 day ago",
+    tags: ["B.Sc / GNM Nursing Student", "ICU Shadowing", "BLS Support"],
+    match: 94,
+    urgent: true,
+    dept: "ICU & Critical Care",
+    qualification: "B.Sc Nursing / GNM (Final Year)",
+    perks: ["Hostel Available", "Hospital Uniform", "Direct PPO Track"],
+    accredited: true,
+  },
+  {
+    id: "intern-3",
+    title: "Medical Laboratory Intern",
+    org: "Metropolis Healthcare",
+    city: "Bengaluru",
+    salary: "₹12,000 – ₹15,000",
+    stipend: "₹14,000 / month",
+    exp: "Student / Intern",
+    type: "Internship",
+    kind: "internship",
+    forStudents: true,
+    shift: "Day",
+    posted: "2 days ago",
+    tags: ["BMLT / DMLT Student", "Automated Biochemistry", "Hematology"],
+    match: 91,
+    dept: "Diagnostics & Pathology",
+    qualification: "BMLT / DMLT (Enrolled)",
+    perks: ["NABL Training Certificate", "Stipend Provided"],
+    accredited: true,
+  },
+  {
+    id: "intern-4",
+    title: "Radiology & Imaging Technologist Trainee",
+    org: "Aster CMI",
+    city: "Bengaluru",
+    salary: "₹15,000 – ₹18,000",
+    stipend: "₹15,000 / month",
+    exp: "Final Year / Intern",
+    type: "Internship",
+    kind: "internship",
+    forStudents: true,
+    shift: "Day",
+    posted: "3 days ago",
+    tags: ["B.Sc Radiology / MIT", "CT & MRI Shadowing", "Radiation Safety"],
+    match: 88,
+    dept: "Radiology & Imaging",
+    qualification: "B.Sc MIT / Radiology (Ongoing)",
+    perks: ["AERB Protocol Certificate", "Stipend Provided"],
+    accredited: true,
+  },
   {
     id: "j1",
     title: "Staff Nurse — ICU",
@@ -277,6 +362,88 @@ export const jobs: Job[] = [
     qualification: "Medical Diploma / Cert",
     perks: ["Transport / Cab", "PF & Gratuity"],
     accredited: true,
+  },
+  {
+    id: "intern-1",
+    title: "Physiotherapy Clinical Intern · 6 Months",
+    org: "Manipal Hospitals (Whitefield)",
+    city: "Bengaluru",
+    salary: "₹10,000 / month Stipend",
+    stipend: "₹10,000 / month",
+    exp: "Student / Intern",
+    type: "Internship",
+    shift: "Day",
+    posted: "1 day ago",
+    tags: ["BPT Final Year", "Neuro / Ortho Rehab", "Hands-on Exposure"],
+    match: 95,
+    urgent: true,
+    dept: "Physiotherapy & Rehab",
+    qualification: "BPT (3rd/4th Year or Intern)",
+    perks: ["Clinical Mentorship", "Certificate of Completion", "Subsidized Canteen"],
+    accredited: true,
+    kind: "internship",
+    forStudents: true,
+  },
+  {
+    id: "intern-2",
+    title: "Medical Lab Technician Intern — Central Lab",
+    org: "Indiranagar Diagnostics & Rehab",
+    city: "Bengaluru",
+    salary: "₹8,500 / month Stipend",
+    stipend: "₹8,500 / month",
+    exp: "Student / Intern",
+    type: "Internship",
+    shift: "Morning",
+    posted: "2 days ago",
+    tags: ["DMLT / BMLT", "Haematology Analysers", "Biochemistry"],
+    match: 91,
+    dept: "Diagnostics & Pathology",
+    qualification: "DMLT / B.Sc MLT Student",
+    perks: ["Automated Analyser Training", "Logbook Countersigned"],
+    accredited: true,
+    kind: "internship",
+    forStudents: true,
+  },
+  {
+    id: "intern-3",
+    title: "Staff Nurse Clinical Trainee · General & ICU",
+    org: "Apollo Hospitals",
+    city: "Chennai",
+    salary: "₹12,000 / month Stipend",
+    stipend: "₹12,000 / month",
+    exp: "Student / Fresher",
+    type: "Internship",
+    shift: "Rotational",
+    posted: "Today",
+    tags: ["B.Sc Nursing / GNM", "Ward Protocols", "IV Cannulation"],
+    match: 94,
+    urgent: true,
+    dept: "ICU & Critical Care",
+    qualification: "B.Sc Nursing / GNM (Final Year or Intern)",
+    perks: ["Hostel Accommodation", "BLS Certification Training", "PF & Stipend"],
+    accredited: true,
+    kind: "internship",
+    forStudents: true,
+  },
+  {
+    id: "intern-4",
+    title: "Clinical Pharmacy Trainee — Inpatient Care",
+    org: "Fortis Healthcare",
+    city: "Bengaluru",
+    salary: "₹11,000 / month Stipend",
+    stipend: "₹11,000 / month",
+    exp: "Student / Intern",
+    type: "Internship",
+    shift: "Day",
+    posted: "3 days ago",
+    tags: ["Pharm.D / B.Pharm", "Drug Interaction Screening", "Ward Rounds"],
+    match: 88,
+    dept: "Pharmacy",
+    qualification: "Pharm.D / B.Pharm 4th-5th Year",
+    perks: ["Clinical Ward Exposure", "Preceptor Guidance"],
+    accredited: true,
+    kind: "internship",
+    forStudents: true,
   },
 ];
 
@@ -1401,13 +1568,20 @@ export const indianCities = [
   "Pan India (Open to anywhere)",
 ];
 
-export function neededDocs(portal: "candidate" | "facility", role?: string): { label: string; hint: string }[] {
+export function neededDocs(portal: "candidate" | "facility", role?: string, level?: string): { label: string; hint: string }[] {
   if (portal === "facility")
     return [
       { label: "Facility registration / licence", hint: "Clinical establishment certificate or equivalent" },
       { label: "GST certificate (if applicable)", hint: "Supporting evidence" },
       { label: "Representative authorization", hint: "Letter on company letterhead" },
     ];
+  if (level === "student") {
+    return [
+      { label: "College ID card / Bonafide proof", hint: "Proof of active healthcare study or internship (KMC/KNC/College ID)" },
+      { label: "Identity proof", hint: "Aadhaar, PAN, Passport or Voter ID — kept private" },
+      { label: "Resume / CV (optional)", hint: "For hospital internship applications" },
+    ];
+  }
   const base = [
     { label: "Resume / CV", hint: "Shown to employers when you apply" },
     { label: "Identity proof", hint: "Aadhaar, PAN, Passport or Voter ID — kept private" },
@@ -1810,5 +1984,482 @@ export const designationPlaceholders: Record<string, string> = {
   "Dental Hygienist": "e.g. Dental Hygienist",
   "Medical Coder": "e.g. Medical Coder",
 };
+
+// ══════════════════════════════════════════════════════════════════════
+// HUDDLE COMMUNITY & CLINICAL MENTORSHIP
+// ══════════════════════════════════════════════════════════════════════
+
+export type HuddlePostType = "Thought" | "Experience" | "Case" | "Question" | "Update" | "Event";
+export type HuddleField = "All" | "Physio" | "Nursing" | "Lab" | "Radiology" | "Pharmacy" | "Medicine";
+
+export interface HuddleReply {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorShort: string;
+  authorRole: string;
+  authorLevel?: "student" | "fresher" | "professional";
+  text: string;
+  at: string;
+  helpfulCount?: number;
+}
+
+export interface HuddlePost {
+  id: string;
+  type: HuddlePostType;
+  field: HuddleField;
+  authorId: string;
+  authorName: string;
+  authorShort: string;
+  authorRole: string;
+  authorLevel: "student" | "fresher" | "professional" | "hospital";
+  isMentor?: boolean;
+  anon: boolean;
+  text: string;
+  helpfulCount: number;
+  userHelpful?: boolean;
+  replies: HuddleReply[];
+  reports: string[];
+  status: "live" | "review" | "hidden";
+  at: string;
+  image?: string;
+  isHospital?: boolean;
+  hospitalName?: string;
+  pinned?: boolean;
+  warningIssued?: string;
+  moderationNotes?: string;
+}
+
+export interface ClinicalMentor {
+  id: string;
+  name: string;
+  role: string;
+  org: string;
+  yrs: number;
+  answersCount: number;
+  specialties: string[];
+  verified: boolean;
+  email?: string;
+  phone?: string;
+}
+
+export interface HuddleMentorAnswer {
+  id: string;
+  mentorId: string;
+  mentorName: string;
+  mentorShort: string;
+  mentorRole: string;
+  mentorYrs: number;
+  mentorSpecialty: string;
+  text: string;
+  at: string;
+  sample?: boolean;
+}
+
+export interface HuddleQuestion {
+  id: string;
+  topic: "Career" | "Clinical skill" | "Exams" | "Interview" | "Workplace";
+  askerId: string;
+  askerName: string;
+  askerShort: string;
+  askerLevel: "student" | "fresher" | "professional";
+  askerProfession?: string;
+  text: string;
+  answers: HuddleMentorAnswer[];
+  at: string;
+}
+
+export interface HuddleSession {
+  id: string;
+  title: string;
+  category: "CME & Workshop" | "Clinical Talk" | "Interview Masterclass" | "Department Round";
+  hostType: "mentor" | "hospital";
+  hostName: string;
+  hostSub: string;
+  when: string; // ISO date string
+  where: string;
+  seats: number;
+  bookedCount: number;
+  isBooked?: boolean;
+  description: string;
+  forRoles: string[];
+}
+
+export interface SafetyCheckResult {
+  st: "ok" | "empty" | "block" | "hire";
+  why: string;
+}
+
+export const SAFE_RX = {
+  patient: /\b(bed|file|ip|uhid|mrd)\s*(no\.?|number|#)\s*[:#-]?\s*\d+|\b(uhid|mrd)\s*[:#-]?\s*\d+|patient\s*name\s*[:-]|\b(mr|mrs)\.?\s+[A-Z][a-z]+/i,
+  contact: /[\w.+-]+@[\w-]+\.[a-z]{2,}|(\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}\b|wa\.me|t\.me\/|whats\s?app\s*(me|on|no|number)|telegram/i,
+  hireStrong: /\b(we('| a)re hiring|hiring now|vacanc(y|ies)|walk-?in( interview)?|send (your )?(cv|resume)|join our team|apply now|urgent requirement|dm (me|us) for (a )?(job|opening))/i,
+  hireWeak: /\b(hiring|openings?|salary|ctc|stipend)\b/i,
+};
+
+export function safetyCheck(text: string, isHosp: boolean = false): SafetyCheckResult {
+  if (!String(text || "").trim()) {
+    return { st: "empty", why: "Type something to share with the community." };
+  }
+  if (SAFE_RX.patient.test(text)) {
+    return {
+      st: "block",
+      why: "Looks like a patient detail (bed, file, UHID number or a patient's name). Remove it to keep Huddle strictly de-identified.",
+    };
+  }
+  if (SAFE_RX.contact.test(text)) {
+    return {
+      st: "block",
+      why: "Phone numbers, emails, WhatsApp links and off-platform solicitations are blocked to prevent spam & protect member safety.",
+    };
+  }
+  if (SAFE_RX.hireStrong.test(text) || (isHosp && SAFE_RX.hireWeak.test(text))) {
+    return {
+      st: "hire",
+      why: isHosp
+        ? "Direct hiring posts aren't allowed in Huddle. Post requirements through FALE Post a Job so our matching algorithm sends you verified people."
+        : "This looks like a job advertisement or broker solicitation. Huddle is a clinical peer forum, not a recruiter board.",
+    };
+  }
+  return {
+    st: "ok",
+    why: "Looks clean! No patient identifiers, contact solicitations, or recruiter spam.",
+  };
+}
+
+export const initialHuddlePosts: HuddlePost[] = [
+  {
+    id: "h1",
+    type: "Case",
+    field: "Physio",
+    authorId: "p5",
+    authorName: "Dr. Arjun Desai",
+    authorShort: "Arjun D.",
+    authorRole: "Sports Physiotherapist",
+    authorLevel: "professional",
+    isMentor: true,
+    anon: false,
+    text: "Post-op ACL reconstruction, week 3: patient stuck at 70° knee flexion with persistent quadriceps lag. What finally broke through was low-load long-duration heel slides with a towel before every manual session, followed by prone hangs. What protocols do you titrate in your rehab clinics?",
+    helpfulCount: 24,
+    userHelpful: false,
+    replies: [
+      {
+        id: "r1",
+        authorId: "p9",
+        authorName: "Sneha Kumar",
+        authorShort: "Sneha K.",
+        authorRole: "Staff Nurse (Orthopaedics)",
+        authorLevel: "fresher",
+        text: "Prone hangs with a 1kg ankle cuff helped our post-op patients tremendously, 5 minutes twice daily prior to CPM.",
+        at: "1 day ago",
+        helpfulCount: 5,
+      },
+      {
+        id: "r2",
+        authorId: "p1",
+        authorName: "Vikram Hegde",
+        authorShort: "Vikram H.",
+        authorRole: "Physiotherapist",
+        authorLevel: "professional",
+        text: "Make sure you rule out cyclops lesion if extension remains blocked past week 6. Super common missed sign.",
+        at: "18 hours ago",
+        helpfulCount: 8,
+      },
+    ],
+    reports: [],
+    status: "live",
+    at: "2 days ago",
+  },
+  {
+    id: "h2",
+    type: "Experience",
+    field: "Nursing",
+    authorId: "p11",
+    authorName: "Asha Thomas",
+    authorShort: "Asha T.",
+    authorRole: "Senior ICU Staff Nurse",
+    authorLevel: "professional",
+    anon: true,
+    text: "First night shift alone in the ICU. Two code blues before 3:00 am, vitals plummeting on a septic shock patient. What saved me was a senior sister who whispered: 'Slow is smooth, and smooth is fast. Double-check your syringe pump rate first.' To all nursing freshers: never hesitate to call for backup. Senior staff will never judge you for asking.",
+    helpfulCount: 52,
+    userHelpful: true,
+    replies: [
+      {
+        id: "r3",
+        authorId: "p8",
+        authorName: "Joseph Thomas",
+        authorShort: "Joseph T.",
+        authorRole: "Critical Care Nurse",
+        authorLevel: "professional",
+        text: "Golden advice. In critical care, rushing leads to drug titration errors. Breathe and call the charge nurse.",
+        at: "2 days ago",
+        helpfulCount: 14,
+      },
+    ],
+    reports: [],
+    status: "live",
+    at: "3 days ago",
+  },
+  {
+    id: "h3",
+    type: "Question",
+    field: "Lab",
+    authorId: "p15",
+    authorName: "Karthik Shetty",
+    authorShort: "Karthik S.",
+    authorRole: "BMLT Final Year Student",
+    authorLevel: "student",
+    anon: false,
+    text: "For haematology internships in tier-1 Bengaluru hospitals, do lab heads expect students to independently run 5-part differential counters right away, or do they give supervised bench training during the first 2 weeks?",
+    helpfulCount: 15,
+    userHelpful: false,
+    replies: [
+      {
+        id: "r4",
+        authorId: "p13",
+        authorName: "Meera Varma",
+        authorShort: "Meera V.",
+        authorRole: "Biochemistry Lab Incharge",
+        authorLevel: "professional",
+        text: "Every accredited hospital will shadow you for the first 14 days under a senior technician. Focus on mastering sample rejection criteria and flagging abnormal histogram patterns before touching the analyser controls.",
+        at: "1 day ago",
+        helpfulCount: 11,
+      },
+    ],
+    reports: [],
+    status: "live",
+    at: "1 week ago",
+  },
+  {
+    id: "h4",
+    type: "Event",
+    field: "All",
+    authorId: "o1",
+    authorName: "Manipal Hospital Whitefield",
+    authorShort: "Manipal Hospital",
+    authorRole: "Tertiary Multi-speciality Hospital",
+    authorLevel: "hospital",
+    isHospital: true,
+    hospitalName: "Manipal Hospital Whitefield",
+    anon: false,
+    text: "Free Clinical CME Workshop: 'Early Mobilisation & Ventilator Liberation Protocols in Multi-organ ICU'. Saturday 15 November, 10:00 AM – 1:30 PM. Whitefield Campus Auditorium & Live Hybrid stream. 40 physical seats reserved for nurses, physiotherapists, and final-year allied health students. Certificate with 2 KMC/KNC credit hours.",
+    helpfulCount: 38,
+    userHelpful: false,
+    replies: [],
+    reports: [],
+    status: "live",
+    at: "4 days ago",
+  },
+  {
+    id: "h5",
+    type: "Thought",
+    field: "Radiology",
+    authorId: "p16",
+    authorName: "Arjun Kumar",
+    authorShort: "Arjun K.",
+    authorRole: "Senior Radiographer (CT/MRI)",
+    authorLevel: "professional",
+    anon: false,
+    text: "Radiographers should always participate in morning emergency handovers with the trauma team. Nearly 40% of repeat or suboptimal CT scans occur simply because clinical history or renal function (serum creatinine) wasn't relayed during the rush.",
+    helpfulCount: 29,
+    userHelpful: false,
+    replies: [],
+    reports: [],
+    status: "live",
+    at: "5 days ago",
+  },
+  {
+    id: "h6",
+    type: "Case",
+    field: "Physio",
+    authorId: "p4",
+    authorName: "Rahul Prakash",
+    authorShort: "Rahul P.",
+    authorRole: "Physiotherapist",
+    authorLevel: "fresher",
+    anon: false,
+    text: "Stroke rehab case: Right MCA ischemic stroke with flaccid hemiplegia, 2 weeks post-ictus. Initiated mirror therapy 20 mins BID with functional task-oriented reach training. Showing early finger flexor activation. Any protocol tips from neuro rehab mentors?",
+    helpfulCount: 0,
+    userHelpful: false,
+    replies: [],
+    reports: [],
+    status: "review", // Held for admin clinical review
+    at: "3 hours ago",
+  },
+  {
+    id: "h7",
+    type: "Thought",
+    field: "Nursing",
+    authorId: "p12",
+    authorName: "Meena Joseph",
+    authorShort: "Meena J.",
+    authorRole: "Healthcare Worker",
+    authorLevel: "professional",
+    anon: false,
+    text: "Contact me on WhatsApp +91 98888 77777 for guaranteed fast-track overseas nursing jobs without IELTS examination.",
+    helpfulCount: 0,
+    userHelpful: false,
+    replies: [],
+    reports: ["p1", "p8", "p9"],
+    status: "hidden", // Flagged by community, routed to admin queue
+    at: "6 hours ago",
+  },
+];
+
+export const initialHuddleQuestions: HuddleQuestion[] = [
+  {
+    id: "q1",
+    topic: "Career",
+    askerId: "p15",
+    askerName: "Karthik Shetty",
+    askerShort: "Karthik S.",
+    askerLevel: "student",
+    askerProfession: "Lab Technician",
+    text: "BMLT final year student dilemma: Should I opt for a 6-month internship in a 500-bed multi-speciality hospital or a commercial corporate diagnostic chain (like Metropolis / Lal PathLabs)?",
+    answers: [
+      {
+        id: "a1",
+        mentorId: "p13",
+        mentorName: "Meera Varma",
+        mentorShort: "Meera V.",
+        mentorRole: "Senior Lab Technologist",
+        mentorYrs: 4,
+        mentorSpecialty: "Clinical Pathology & Biochemistry",
+        text: "Choose the 500-bed hospital first! In a hospital setting, you handle critical emergency cross-matching, blood gas emergencies, CSF analysis, and acute ICU draws. Diagnostic chains are fast-paced but heavily automated for routine outpatient profiles. The hospital foundation will make you much more versatile.",
+        at: "1 day ago",
+      },
+    ],
+    at: "2 days ago",
+  },
+  {
+    id: "q2",
+    topic: "Interview",
+    askerId: "p9",
+    askerName: "Sneha Kumar",
+    askerShort: "Sneha K.",
+    askerLevel: "fresher",
+    askerProfession: "Staff Nurse",
+    text: "What technical scenarios do Nursing Superintendents in Bengaluru multi-speciality hospitals ask freshers during the clinical interview?",
+    answers: [
+      {
+        id: "a2",
+        mentorId: "p8",
+        mentorName: "Joseph Thomas",
+        mentorShort: "Joseph T.",
+        mentorRole: "ICU Clinical Preceptor",
+        mentorYrs: 5,
+        mentorSpecialty: "Critical Care Nursing",
+        text: "They almost always test 3 core areas: 1) High-alert drug dilution calculations (e.g., Noradrenaline infusion rate calculation mcg/kg/min), 2) Crash cart medication locations & BLS algorithm, and 3) Needle stick injury protocol. Practice drug math aloud!",
+        at: "1 day ago",
+      },
+    ],
+    at: "3 days ago",
+  },
+  {
+    id: "q3",
+    topic: "Clinical skill",
+    askerId: "p4",
+    askerName: "Rahul Prakash",
+    askerShort: "Rahul P.",
+    askerLevel: "fresher",
+    askerProfession: "Physiotherapist",
+    text: "How soon after weaning from mechanical ventilation should we begin bedside chest physiotherapy and trunk balance training in elderly COPD patients?",
+    answers: [
+      {
+        id: "a3",
+        mentorId: "p5",
+        mentorName: "Dr. Arjun Desai",
+        mentorShort: "Arjun D.",
+        mentorRole: "Senior Cardiopulmonary & Sports Physio",
+        mentorYrs: 7,
+        mentorSpecialty: "Cardiopulmonary & ICU Rehab",
+        text: "Provided hemodynamic stability is maintained (MAP > 65 mmHg, HR 60-110, SpO2 > 90% on low-flow O2), gentle active-assisted breathing and high-fowler positioning can begin within 2 to 4 hours post-extubation. Always check ABG before aggressive percussion.",
+        at: "12 hours ago",
+      },
+    ],
+    at: "1 day ago",
+  },
+];
+
+export const initialHuddleSessions: HuddleSession[] = [
+  {
+    id: "s1",
+    title: "Cracking Your First Clinical Interview & Ward Competency Test",
+    category: "Interview Masterclass",
+    hostType: "mentor",
+    hostName: "Dr. Arjun Desai (MPT, 7+ yrs exp)",
+    hostSub: "Senior FALE Mentor · Cardiopulmonary & Ortho",
+    when: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+    where: "Live Interactive (Google Meet)",
+    seats: 35,
+    bookedCount: 28,
+    isBooked: false,
+    description: "Real mock scenario breakdown with Bengaluru hospital interviewers. Handling clinical viva, drug calculation tests, and case viva without panic.",
+    forRoles: ["Physiotherapy", "Nursing", "Allied Health Students"],
+  },
+  {
+    id: "s2",
+    title: "Free Hospital CME: Early ICU Mobilisation & Ventilator Protocols",
+    category: "CME & Workshop",
+    hostType: "hospital",
+    hostName: "Manipal Hospital Whitefield",
+    hostSub: "Accredited Multi-speciality Teaching Hospital",
+    when: new Date(Date.now() + 12 * 24 * 60 * 60 * 1000).toISOString(),
+    where: "Main Auditorium, Whitefield Campus, Bengaluru",
+    seats: 45,
+    bookedCount: 45, // Full
+    isBooked: true,
+    description: "Hands-on simulated lab on weaning criteria, high-flow nasal cannula management, and bedside mobilization. Includes official CME certificate.",
+    forRoles: ["ICU Nurses", "Physiotherapists", "Respiratory Therapists"],
+  },
+  {
+    id: "s3",
+    title: "First 90 Days as a Medical Laboratory Technologist",
+    category: "Clinical Talk",
+    hostType: "mentor",
+    hostName: "Meera Varma (B.Sc MLT, 4+ yrs exp)",
+    hostSub: "Biochemistry & Pathology Section In-charge",
+    when: new Date(Date.now() + 9 * 24 * 60 * 60 * 1000).toISOString(),
+    where: "Live Clinical Stream",
+    seats: 30,
+    bookedCount: 19,
+    isBooked: false,
+    description: "Navigating quality control charts (Levy-Jennings), LIS calibration, specimen hemolyzation troubleshooting, and shift handovers.",
+    forRoles: ["Lab Technicians", "BMLT / DMLT Students"],
+  },
+];
+
+export const clinicalMentors = [
+  {
+    id: "m1",
+    name: "Dr. Arjun Desai",
+    role: "Senior Sports & Neuro Physiotherapist",
+    org: "Koramangala Multispeciality",
+    yrs: 7,
+    answersCount: 38,
+    specialties: ["Sports Rehab", "Neuro ICU", "Dry Needling"],
+    verified: true,
+  },
+  {
+    id: "m2",
+    name: "Joseph Thomas",
+    role: "Critical Care Nursing Specialist",
+    org: "Manipal Hospital",
+    yrs: 5,
+    answersCount: 44,
+    specialties: ["Ventilator Care", "Cardiac ICU", "Triage"],
+    verified: true,
+  },
+  {
+    id: "m3",
+    name: "Meera Varma",
+    role: "Diagnostic Lab Section Head",
+    org: "Indiranagar Diagnostics",
+    yrs: 4,
+    answersCount: 27,
+    specialties: ["Biochemistry", "Quality Control", "Hematology"],
+    verified: true,
+  },
+];
 
 

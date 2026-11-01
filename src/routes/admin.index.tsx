@@ -37,7 +37,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useApp, setState } from "@/lib/store";
+import { useApp, setState, approveHuddlePost, rejectHuddlePost } from "@/lib/store";
+import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/")({
@@ -50,22 +51,38 @@ export const Route = createFileRoute("/admin/")({
   component: AdminDashboard,
 });
 
-export function AdminDashboard() {
+function AdminDashboard() {
   const s = useApp();
   const navigate = useNavigate();
-  const [activeQueueTab, setActiveQueueTab] = useState<"all" | "postings" | "candidates" | "facilities" | "applications">("all");
+  const [activeQueueTab, setActiveQueueTab] = useState<"all" | "postings" | "candidates" | "facilities" | "applications" | "huddle">("all");
   const [queueSearch, setQueueSearch] = useState("");
 
   const pendingCandidateKYC = s.candidateKYC.filter((c) => c.status === "pending");
   const pendingFacilityKYC = s.facilityKYC.filter((f) => f.status === "pending");
   const pendingJobApprovals = s.jobApprovals.filter((j) => j.status === "pending");
   const pendingShortlisting = s.adminApplications.filter((a) => a.status === "pending_admin");
+  const pendingHuddleReview = s.huddlePosts.filter((p) => p.status === "review" || p.status === "hidden");
 
   const totalPending =
     pendingCandidateKYC.length +
     pendingFacilityKYC.length +
     pendingJobApprovals.length +
-    pendingShortlisting.length;
+    pendingShortlisting.length +
+    pendingHuddleReview.length;
+
+  const quickApproveHuddle = (id: string, authorName: string) => {
+    approveHuddlePost(id);
+    toast.success("Huddle Post Approved & Live!", {
+      description: `Post by ${authorName} is now published to the public Huddle feed.`,
+    });
+  };
+
+  const quickRejectHuddle = (id: string) => {
+    rejectHuddlePost(id);
+    toast.info("Post Removed from Huddle", {
+      description: "Post was permanently removed for privacy or guideline violations.",
+    });
+  };
 
   const quickApproveJob = (id: string, title: string) => {
     setState((state) => ({
@@ -117,6 +134,7 @@ export function AdminDashboard() {
     { name: "Hospital Verification", value: pendingFacilityKYC.length || 1, color: "#E04812", link: "/admin/facilities" },
     { name: "Job & Shift Approvals", value: pendingJobApprovals.length || 1, color: "#FF7E45", link: "/admin/postings" },
     { name: "Applicant Shortlisting", value: pendingShortlisting.length || 1, color: "#FFA47A", link: "/admin/applications" },
+    { name: "Huddle Moderation", value: pendingHuddleReview.length || 1, color: "#D13807", link: "/admin/huddle" },
   ];
 
   // Pie Chart 2 Data: Clinical Profession Breakdown (Exact Facility Dashboard Palette)
@@ -160,11 +178,20 @@ export function AdminDashboard() {
       })
     : [];
 
+  const filteredHuddle = (activeQueueTab === "all" || activeQueueTab === "huddle")
+    ? pendingHuddleReview.filter((p) => {
+        if (!queueSearch) return true;
+        const q = queueSearch.toLowerCase();
+        return p.authorName.toLowerCase().includes(q) || p.authorRole.toLowerCase().includes(q) || p.text.toLowerCase().includes(q);
+      })
+    : [];
+
   const totalFilteredCount =
     filteredJobs.length +
     filteredCandidates.length +
     filteredFacilities.length +
-    filteredApplications.length;
+    filteredApplications.length +
+    filteredHuddle.length;
 
   const [activeQueueIndex, setActiveQueueIndex] = useState<number | null>(null);
   const [activeProfessionIndex, setActiveProfessionIndex] = useState<number | null>(null);
@@ -630,6 +657,7 @@ export function AdminDashboard() {
               { id: "candidates", label: "KYC", desktopLabel: "Candidate KYC", count: pendingCandidateKYC.length },
               { id: "facilities", label: "Hospitals", desktopLabel: "Hospitals", count: pendingFacilityKYC.length },
               { id: "applications", label: "Shortlist", desktopLabel: "Applications", count: pendingShortlisting.length },
+              { id: "huddle", label: "Huddle", desktopLabel: "Huddle Review", count: pendingHuddleReview.length },
             ].map((t) => {
               const active = activeQueueTab === t.id;
               return (
@@ -936,6 +964,68 @@ export function AdminDashboard() {
                       >
                         <HiOutlineArrowTopRightOnSquare className="h-3.5 w-3.5" />
                       </Link>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+
+              {/* Huddle Review Items */}
+              {filteredHuddle.map((p) => (
+                <TableRow key={p.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
+                  <TableCell className="py-3.5">
+                    <span className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold border",
+                      p.status === "hidden"
+                        ? "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20"
+                        : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
+                    )}>
+                      <HiOutlineChatBubbleLeftRight className="h-3.5 w-3.5 shrink-0" />
+                      <span>{p.status === "hidden" ? "Reported Post" : "Clinical Case"}</span>
+                    </span>
+                  </TableCell>
+                  <TableCell className="py-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 flex items-center justify-center shrink-0 font-bold">
+                        {p.anon ? "AN" : p.authorName[0]}
+                      </div>
+                      <div className="max-w-md">
+                        <div className="font-bold text-foreground text-xs">{p.anon ? "Anonymous Author" : p.authorName} · {p.authorRole}</div>
+                        <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{p.text}</p>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-3.5">
+                    <div className="font-semibold text-foreground text-xs">
+                      {p.status === "hidden" ? "Flagged by community" : "De-identification review"}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      {p.type} · {p.field} Ward
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-3.5">
+                    <div className="flex items-center gap-1.5 text-xs text-foreground font-medium">
+                      <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span>{p.at}</span>
+                    </div>
+                    <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5 inline-block">1-hr Review SLA</span>
+                  </TableCell>
+                  <TableCell className="text-right py-3.5">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <Button
+                        size="sm"
+                        onClick={() => quickApproveHuddle(p.id, p.authorName)}
+                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-none gap-1.5"
+                      >
+                        <HiCheck className="h-3.5 w-3.5" /> Approve Live
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => quickRejectHuddle(p.id)}
+                        className="rounded-xl font-bold text-xs h-8 px-2.5 text-rose-600 border-rose-200 hover:bg-rose-50"
+                      >
+                        Remove
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>

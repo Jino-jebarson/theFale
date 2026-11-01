@@ -22,10 +22,13 @@ import {
   HiOutlineBuildingLibrary,
   HiOutlinePrinter,
   HiOutlineDocumentCheck,
+  HiOutlineAcademicCap,
+  HiOutlineXMark,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { Logo } from "@/components/fale/Logo";
-import { AppShell } from "@/components/fale/AppShell";
+import { AppShell, PageHead } from "@/components/fale/AppShell";
+import { StudentLockCard } from "@/components/fale/StudentLockCard";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -93,6 +96,13 @@ function CandidateEarningsPage() {
   const [payoutModalOpen, setPayoutModalOpen] = useState(false);
   const [selectedSlipTx, setSelectedSlipTx] = useState<CandidatePayoutTransaction | null>(null);
 
+  const candidateLevel =
+    store.candidateLevel ||
+    (store.profile["level"] as any) ||
+    (store.profile["cadreLevel"] as any) ||
+    (store.profile["exp"] === "Fresher" ? "fresher" : "professional");
+  const isStudent = candidateLevel === "student";
+
   const candidateName = String(store.profile["name"] || "Jino Jebarson R");
   const candidatePayoutMethod: CandidatePayoutMethod = store.candidatePayoutMethod || {
     type: "upi",
@@ -102,7 +112,66 @@ function CandidateEarningsPage() {
     verifiedAt: "Cashfree Instant VPA Validated",
   };
 
-  const payouts: CandidatePayoutTransaction[] = store.candidatePayouts || [];
+  const studentPayouts: CandidatePayoutTransaction[] = useMemo(
+    () => [
+      {
+        id: "pay-stu-101",
+        shiftId: "intern-1",
+        shiftTitle: "Clinical Physiotherapy Internship — Monthly Stipend",
+        hospitalName: "Apollo Hospitals",
+        dept: "Physiotherapy & Rehab",
+        shiftDate: "Oct 2026 Academic Rotation",
+        hours: 160,
+        rate: 112.5,
+        amount: 18000,
+        payoutDate: "Releasing 01 Nov 2026 · 10:00 AM",
+        status: "In Escrow (24h SLA)",
+        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${
+          candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
+        }`,
+        slipRef: "FALE-STU-8812",
+      },
+      {
+        id: "pay-stu-102",
+        shiftId: "intern-1",
+        shiftTitle: "Clinical Physiotherapy Internship — Monthly Stipend",
+        hospitalName: "Apollo Hospitals",
+        dept: "Physiotherapy & Rehab",
+        shiftDate: "Sep 2026 Academic Rotation",
+        hours: 160,
+        rate: 112.5,
+        amount: 18000,
+        payoutDate: "01 Oct 2026 · 10:30 AM",
+        status: "Disbursed",
+        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${
+          candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
+        }`,
+        utr: "CFUPI2026100199412",
+        slipRef: "FALE-STU-7901",
+      },
+      {
+        id: "pay-stu-103",
+        shiftId: "intern-acad",
+        shiftTitle: "Clinical Observership Travel & Book Allowance",
+        hospitalName: "Manipal Hospital",
+        dept: "Academic Research Desk",
+        shiftDate: "Aug 2026 Academic Rotation",
+        hours: 40,
+        rate: 125,
+        amount: 5000,
+        payoutDate: "15 Aug 2026 · 02:15 PM",
+        status: "Disbursed",
+        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${
+          candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
+        }`,
+        utr: "CFUPI2026081512044",
+        slipRef: "FALE-STU-6520",
+      },
+    ],
+    [candidatePayoutMethod]
+  );
+
+  const payouts: CandidatePayoutTransaction[] = isStudent ? studentPayouts : store.candidatePayouts || [];
 
   // Payout Form Modal State
   const [payoutType, setPayoutType] = useState<"upi" | "bank">(candidatePayoutMethod.type);
@@ -198,7 +267,7 @@ function CandidateEarningsPage() {
           ? "UPI ID verified via Cashfree VPA!"
           : "Bank Account verified via Cashfree Penny Drop!",
         {
-          description: `All future 24-hr shift payouts will be sent to ${payoutType === "upi" ? formUpiId : formBankName}.`,
+          description: `All future disbursements will be sent to ${payoutType === "upi" ? formUpiId : formBankName}.`,
         }
       );
     }, 1000);
@@ -208,227 +277,270 @@ function CandidateEarningsPage() {
     <AppShell>
       <div className="max-w-7xl mx-auto space-y-6 pb-16 min-w-0">
         
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/60 pb-5">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
-              Earnings &amp; 24-Hour Payouts
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Guaranteed shift remuneration, automated Cashfree disbursements, and tax slips for {candidateName}
+        {/* ================= PAGE HEADER (MATCHING HUDDLE) ================= */}
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-2xl font-extrabold tracking-tight sm:text-[28px] text-foreground whitespace-nowrap">
+                {isStudent ? "Earnings & Clinical Stipends" : "Earnings & 24-Hour Payouts"}
+              </h1>
+              <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0 bg-primary/10 text-primary border border-primary/20">
+                <HiOutlineBolt className="h-3.5 w-3.5" />
+                <span>24h Escrow SLA</span>
+              </span>
+            </div>
+            <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed max-w-3xl">
+              {isStudent
+                ? "Professional clinical earnings, locum shift payouts, and disbursement accounts."
+                : `Guaranteed shift remuneration, automated Cashfree disbursements, and tax slips for ${candidateName}.`}
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5">
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="rounded-xl text-xs font-semibold h-9 px-3.5 cursor-pointer gap-1.5"
-            >
-              <Link to="/shifts">
-                <HiOutlineBolt className="h-4 w-4 text-primary" />
-                <span>Find Shifts</span>
-              </Link>
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => setPayoutModalOpen(true)}
-              className="rounded-xl text-xs font-semibold h-9 px-4 cursor-pointer gap-1.5 bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs"
-            >
-              <HiOutlinePencilSquare className="h-4 w-4" />
-              <span>Update Payout Account</span>
-            </Button>
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-2.5 w-full sm:w-auto shrink-0">
+            {isStudent ? (
+              <Button
+                asChild
+                variant="outline"
+                className="h-10 border-border/80 text-foreground hover:bg-muted text-xs font-bold px-3 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto"
+              >
+                <Link to="/jobs" search={{ q: undefined }}>
+                  <HiOutlineSparkles className="h-4 w-4 text-primary" />
+                  <span>Explore Internships</span>
+                </Link>
+              </Button>
+            ) : (
+              <>
+                <Button
+                  asChild
+                  variant="outline"
+                  className="h-10 border-border/80 text-foreground hover:bg-muted text-xs font-bold px-3 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                >
+                  <Link to="/shifts">
+                    <HiOutlineBolt className="h-4 w-4 text-primary" />
+                    <span>Find Shifts</span>
+                  </Link>
+                </Button>
+                <Button
+                  onClick={() => setPayoutModalOpen(true)}
+                  className="h-10 bg-primary hover:bg-primary-hover text-white text-xs font-bold px-3 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                >
+                  <HiOutlinePencilSquare className="h-4 w-4" />
+                  <span>Update Account</span>
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
-        {/* 4 Telemetry Balance Cards */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
-          {/* Card 1: Total Disbursed */}
-          <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <HiOutlineBanknotes className="h-4 w-4" />
-              </span>
-              <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full whitespace-nowrap">
-                100% on-time
-              </span>
-            </div>
-            <div>
-              <span className="text-xs font-semibold text-muted-foreground block truncate">
-                Disbursed Earnings
-              </span>
-              <div className="text-lg sm:text-2xl font-bold font-mono tracking-tight text-foreground mt-1">
-                ₹{totalDisbursed.toLocaleString("en-IN")}
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                Received in bank / UPI
-              </p>
-            </div>
-          </div>
-
-          {/* Card 2: In Escrow (24h SLA) */}
-          <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <HiOutlineLockClosed className="h-4 w-4" />
-              </span>
-              <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full whitespace-nowrap">
-                Releasing &lt; 24h
-              </span>
-            </div>
-            <div>
-              <span className="text-xs font-semibold text-muted-foreground block truncate">
-                In 24-hr Escrow
-              </span>
-              <div className="text-lg sm:text-2xl font-bold font-mono tracking-tight text-foreground mt-1">
-                ₹{inEscrowAmount.toLocaleString("en-IN")}
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                From tonight's duty
-              </p>
-            </div>
-          </div>
-
-          {/* Card 3: This Month Take-Home */}
-          <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <HiOutlineArrowTrendingUp className="h-4 w-4" />
-              </span>
-              <span className="text-[10px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full whitespace-nowrap">
-                Oct 2026
-              </span>
-            </div>
-            <div>
-              <span className="text-xs font-semibold text-muted-foreground block truncate">
-                This Month's Earnings
-              </span>
-              <div className="text-lg sm:text-2xl font-bold font-mono tracking-tight text-foreground mt-1">
-                ₹{(totalDisbursed + inEscrowAmount).toLocaleString("en-IN")}
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                Gross locum earnings
-              </p>
-            </div>
-          </div>
-
-          {/* Card 4: Completed Duties */}
-          <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <HiOutlineClock className="h-4 w-4" />
-              </span>
-              <span className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full whitespace-nowrap">
-                Verified Cover
-              </span>
-            </div>
-            <div>
-              <span className="text-xs font-semibold text-muted-foreground block truncate">
-                Completed Duties
-              </span>
-              <div className="text-lg sm:text-2xl font-bold font-mono tracking-tight text-foreground mt-1">
-                {payouts.length} Shifts
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                Zero payment disputes
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* Active Payout Destination Strip */}
-        <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div className="space-y-1.5 min-w-0">
-              <div className="flex items-start sm:items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
-                    <HiOutlineCheckBadge className="h-4.5 w-4.5" />
+        {isStudent ? (
+          <StudentLockCard
+            title="Clinical Earnings Unlock After Graduation"
+            description="Shift earnings, automated bank disbursements, and tax certificates will unlock once you complete your graduation and verify your Council Registration."
+            item3Title="Instant Payouts"
+            item3Desc="Access automated 24-hr direct bank transfers and tax slips."
+          />
+        ) : (
+          <>
+            {/* 4 Telemetry Balance Cards (Matching Huddle) */}
+            <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
+              {/* Card 1: Total Disbursed */}
+              <div className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs hover:border-border transition-all flex flex-col justify-between space-y-3 sm:space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0">
+                    <HiOutlineBanknotes className="h-5 w-5" />
                   </span>
-                  <div className="min-w-0">
-                    <span className="text-xs sm:text-sm font-bold text-foreground block truncate">
-                      Active Cashfree 24-Hour Payout Destination
-                    </span>
-                    <span className="text-[10px] text-muted-foreground block truncate">
-                      {candidatePayoutMethod.type === "upi" ? "Instant 24x7 UPI Remittance" : "Direct Commercial Bank Mandate"}
+                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                    100% on-time
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
+                    {isStudent ? "Disbursed Stipends" : "Disbursed Earnings"}
+                  </span>
+                  <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono mt-1">
+                    ₹{totalDisbursed.toLocaleString("en-IN")}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {isStudent ? "Credited to bank / UPI" : "Received in bank / UPI"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Card 2: In Escrow */}
+              <div className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs hover:border-border transition-all flex flex-col justify-between space-y-3 sm:space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0">
+                    <HiOutlineLockClosed className="h-5 w-5" />
+                  </span>
+                  <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                    {isStudent ? "Next Cycle Ready" : "Releasing < 24h"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
+                    {isStudent ? "Next Stipend Cycle" : "In 24-hr Escrow"}
+                  </span>
+                  <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono mt-1">
+                    ₹{inEscrowAmount.toLocaleString("en-IN")}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {isStudent ? "Oct 2026 rotation" : "From tonight's duty"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Card 3: Monthly Rate */}
+              <div className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs hover:border-border transition-all flex flex-col justify-between space-y-3 sm:space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0">
+                    <HiOutlineArrowTrendingUp className="h-5 w-5" />
+                  </span>
+                  <span className="text-[10px] font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                    Oct 2026
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
+                    {isStudent ? "Monthly Stipend Rate" : "This Month's Earnings"}
+                  </span>
+                  <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono mt-1">
+                    ₹{(isStudent ? 18000 : totalDisbursed + inEscrowAmount).toLocaleString("en-IN")}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {isStudent ? "Accredited teaching hospital" : "Gross locum earnings"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Card 4: Rotations / Duties */}
+              <div className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs hover:border-border transition-all flex flex-col justify-between space-y-3 sm:space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0">
+                    <HiOutlineClock className="h-5 w-5" />
+                  </span>
+                  <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                    {isStudent ? "Faculty Verified" : "Verified Cover"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
+                    {isStudent ? "Completed Rotations" : "Completed Duties"}
+                  </span>
+                  <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono mt-1">
+                    {payouts.length} {isStudent ? "Rotations" : "Shifts"}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {isStudent ? "Academic logbook signed" : "Zero payment disputes"}
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Active Payout Destination Strip (Matching Huddle) */}
+            <section className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-5">
+                <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+                  <span className="grid h-10 w-10 sm:h-11 sm:w-11 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0 mt-0.5">
+                    <HiOutlineCheckBadge className="h-5 w-5 sm:h-6 sm:w-6" />
+                  </span>
+                  <div className="space-y-1.5 min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm sm:text-base font-extrabold text-foreground tracking-tight leading-snug">
+                        Active Cashfree 24-Hour Payout Destination
+                      </h3>
+                      <span className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold shrink-0">
+                        {candidatePayoutMethod.verifiedAt || "Cashfree VPA Validated"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground font-medium">
+                      {candidatePayoutMethod.type === "upi" ? "Instant 24x7 UPI Direct Remittance" : "Direct Commercial Bank Mandate"}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
+                      Shift earnings are disbursed automatically into this verified destination within 24 hours of timesheet signoff.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Destination Detail Box */}
+                <div className="bg-muted/40 p-3.5 sm:p-4 rounded-2xl border border-border/70 w-full lg:w-auto min-w-0 sm:min-w-[340px] space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider block">
+                        {candidatePayoutMethod.type === "upi" ? "Verified UPI ID" : `${candidatePayoutMethod.bankName}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId! : candidatePayoutMethod.accountNumber!, "payout", "Payout destination")}
+                        className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0 transition-colors p-0.5"
+                        title="Copy details"
+                      >
+                        {copiedKey === "payout" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPayoutModalOpen(true)}
+                      className="rounded-xl text-xs font-bold h-8 px-3 shrink-0 cursor-pointer border-primary/40 text-primary hover:bg-primary hover:text-white transition-all shadow-xs flex items-center gap-1.5"
+                    >
+                      <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                      <span>Change</span>
+                    </Button>
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <div className="font-mono font-bold text-foreground text-sm sm:text-base break-all">
+                      {candidatePayoutMethod.type === "upi"
+                        ? candidatePayoutMethod.upiId
+                        : `•••• •••• ${candidatePayoutMethod.accountNumber?.slice(-4)} (${candidatePayoutMethod.ifsc})`}
+                    </div>
+                    <span className="text-xs text-muted-foreground block">
+                      Matched Name: <span className="font-medium text-foreground">{candidatePayoutMethod.accountHolderName}</span>
                     </span>
                   </div>
                 </div>
-                <span className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
-                  {candidatePayoutMethod.verifiedAt || "Cashfree VPA Validated"}
-                </span>
               </div>
-              <p className="text-[11px] text-muted-foreground pt-0.5 leading-relaxed">
-                Funds are automatically disbursed by FALE Escrow within 24 hours of timesheet verification.
-              </p>
-            </div>
-
-            {/* Unified Destination Detail Box & Action */}
-            <div className="bg-muted/40 p-3 sm:py-2.5 sm:px-3.5 rounded-xl border border-border/70 text-xs flex items-center justify-between gap-3.5 w-full lg:w-auto min-w-0 sm:min-w-[320px] shadow-2xs">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider block">
-                    {candidatePayoutMethod.type === "upi" ? "Verified UPI ID" : `${candidatePayoutMethod.bankName}`}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId! : candidatePayoutMethod.accountNumber!, "payout", "Payout destination")}
-                    className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0 transition-colors p-0.5"
-                    title="Copy details"
-                  >
-                    {copiedKey === "payout" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-                <div className="font-mono font-bold text-foreground truncate mt-0.5 text-xs sm:text-sm">
-                  {candidatePayoutMethod.type === "upi"
-                    ? candidatePayoutMethod.upiId
-                    : `•••• •••• ${candidatePayoutMethod.accountNumber?.slice(-4)} (${candidatePayoutMethod.ifsc})`}
-                </div>
-                <span className="text-[10px] text-muted-foreground/80 block mt-0.5 truncate">
-                  Matched Name: {candidatePayoutMethod.accountHolderName}
-                </span>
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPayoutModalOpen(true)}
-                className="rounded-lg text-xs font-semibold h-8.5 px-3 shrink-0 cursor-pointer border-primary/40 text-primary hover:bg-primary hover:text-white transition-all shadow-2xs flex items-center justify-center gap-1.5"
-              >
-                <HiOutlinePencilSquare className="h-3.5 w-3.5" />
-                <span>Change</span>
-              </Button>
-            </div>
-          </div>
-        </section>
-
-        {/* Ledger & Statements */}
-        <section className="rounded-2xl border border-border/80 bg-card shadow-2xs overflow-hidden">
+            </section>
+        {/* Ledger & Statements (Matching Huddle) */}
+        <section className="rounded-3xl border border-border/80 bg-card shadow-xs overflow-hidden">
           {/* Header Controls */}
-          <div className="p-4 sm:p-5 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="p-4 sm:p-6 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             {/* Tab Pills with Smooth Horizontal Mobile Scroll */}
-            <div className="w-full sm:w-auto overflow-x-auto scrollbar-none pb-1 sm:pb-0 -mx-1 px-1">
-              <div className="inline-flex items-center gap-1 rounded-xl bg-muted/60 p-1 border border-border/60 min-w-max">
+            <div className="w-full sm:w-auto overflow-x-auto no-scrollbar -mx-1 px-1">
+              <div className="inline-flex items-center rounded-2xl bg-muted/60 p-1 border border-border/50 min-w-full sm:min-w-0">
                 {[
-                  { id: "all", label: "All Shift Payouts" },
-                  { id: "pending", label: "In Escrow (24h SLA)" },
-                  { id: "tds", label: "TDS & Tax Slips" },
+                  {
+                    id: "all",
+                    label: isStudent ? "All Stipend Disbursements" : "All Shift Payouts",
+                    mobileLabel: isStudent ? "Stipends" : "All Payouts",
+                  },
+                  {
+                    id: "pending",
+                    label: isStudent ? "In Escrow (Next Cycle)" : "In Escrow (24h SLA)",
+                    mobileLabel: isStudent ? "Next Cycle" : "In Escrow",
+                  },
+                  {
+                    id: "tds",
+                    label: isStudent ? "Tax Exemption & Slips" : "TDS & Tax Slips",
+                    mobileLabel: isStudent ? "Tax Exemption" : "Tax Slips",
+                  },
                 ].map((tab) => (
                   <button
                     type="button"
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id as typeof activeTab)}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer flex items-center gap-1.5",
+                      "whitespace-nowrap shrink-0 flex-1 sm:flex-initial rounded-xl px-2.5 sm:px-4 py-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none",
                       activeTab === tab.id
-                        ? "bg-card text-foreground shadow-2xs font-bold"
+                        ? "bg-card text-primary shadow-xs font-bold"
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    <span>{tab.label}</span>
+                    <span className="hidden sm:inline">{tab.label}</span>
+                    <span className="sm:hidden">{tab.mobileLabel}</span>
                     {tab.id === "pending" && inEscrowAmount > 0 && (
-                      <span className="text-[9px] bg-amber-500/15 text-amber-700 dark:text-amber-400 px-1.5 py-0.2 rounded-full font-bold">
+                      <span className="text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 px-1.5 py-0.2 rounded-full font-bold">
                         1 Active
                       </span>
                     )}
@@ -437,151 +549,288 @@ function CandidateEarningsPage() {
               </div>
             </div>
 
-            {/* Search */}
+            {/* Search Box matching Huddle */}
             {activeTab !== "tds" && (
-              <div className="relative w-full sm:w-60 shrink-0">
-                <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <div className="flex items-center gap-2 rounded-2xl bg-muted/40 border border-border/70 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all w-full sm:w-72">
+                <HiOutlineMagnifyingGlass className="h-4 w-4 text-muted-foreground shrink-0" />
                 <input
                   type="text"
-                  placeholder="Filter shift, hospital..."
+                  placeholder={isStudent ? "Filter rotation, hospital..." : "Filter shift, hospital..."}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-8.5 w-full rounded-xl border border-input bg-card pl-8 pr-3 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  className="h-9 w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-medium"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="Clear search"
+                  >
+                    <HiOutlineXMark className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
             )}
           </div>
 
-          {/* TAB 1: Payouts Ledger Table */}
+          {/* TAB 1: Payouts Ledger Table / Mobile Cards */}
           {activeTab !== "tds" && (
-            <div className="overflow-x-auto scrollbar-none">
-              <table className="w-full text-left text-xs min-w-[680px]">
-                <thead>
-                  <tr className="border-b border-border/60 bg-muted/30 text-muted-foreground font-semibold">
-                    <th className="py-3 px-4">Shift Date</th>
-                    <th className="py-3 px-4">Role &amp; Facility</th>
-                    <th className="py-3 px-4">Duration &amp; Rate</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">Disbursed Via</th>
-                    <th className="py-3 px-4 text-right">Net Remuneration</th>
-                    <th className="py-3 px-4 text-right">Advice Slip</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {filteredPayouts.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-10 text-center text-muted-foreground">
-                        No shift payouts found matching your filter.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredPayouts.map((tx) => (
-                      <tr key={tx.id} className="hover:bg-muted/20 transition-colors">
-                        <td className="py-3 px-4 whitespace-nowrap text-muted-foreground font-medium">
-                          {tx.shiftDate}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="font-semibold text-foreground">{tx.shiftTitle}</div>
-                          <div className="text-[11px] text-muted-foreground">{tx.hospitalName} · {tx.dept}</div>
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-muted-foreground">
-                          <div>{tx.hours} hrs @ ₹{tx.rate}/hr</div>
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap">
-                          <span
-                            className={cn(
-                              "inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold",
-                              tx.status === "Disbursed"
-                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                            )}
-                          >
-                            {tx.status}
+            <>
+              {/* Mobile View: High-density interactive cards */}
+              <div className="sm:hidden divide-y divide-border/60">
+                {filteredPayouts.length === 0 ? (
+                  <div className="py-12 px-4 text-center text-muted-foreground text-xs font-medium">
+                    {isStudent ? "No internship stipends found matching your filter." : "No shift payouts found matching your filter."}
+                  </div>
+                ) : (
+                  filteredPayouts.map((tx) => (
+                    <div key={tx.id} className="p-4 space-y-3 hover:bg-muted/10 transition-colors">
+                      {/* Top Row: Shift Role & Amount */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-bold text-sm text-foreground leading-snug">{tx.shiftTitle}</h4>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {tx.hospitalName} · {tx.dept}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-mono font-extrabold text-base text-foreground">
+                            ₹{tx.amount.toLocaleString("en-IN")}
+                          </div>
+                          <span className="text-[10px] text-muted-foreground font-medium block">
+                            {isStudent ? "Net Stipend" : "Net Remuneration"}
                           </span>
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-[11px] text-muted-foreground font-mono">
-                          <div>{tx.payoutMethodUsed}</div>
-                          {tx.utr && <div className="text-[10px] text-muted-foreground/70">UTR: {tx.utr}</div>}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono font-bold text-sm text-foreground">
-                          ₹{tx.amount.toLocaleString("en-IN")}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedSlipTx(tx)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-primary hover:bg-primary/10 font-bold transition-all cursor-pointer"
-                            title="View & Print Payout Advice Slip"
-                          >
-                            <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
-                            <span>Slip</span>
-                          </button>
+                        </div>
+                      </div>
+
+                      {/* Middle Row: Date, Hours/Rate, and Status */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-xs">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground bg-muted/60 border border-border/60 px-2 py-0.5 rounded-lg">
+                          <HiOutlineCalendarDays className="h-3 w-3 text-muted-foreground" />
+                          <span>{tx.shiftDate}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground bg-muted/40 border border-border/50 px-2 py-0.5 rounded-lg">
+                          <HiOutlineClock className="h-3 w-3" />
+                          <span>{tx.hours} hrs {isStudent ? "rotation" : `@ ₹${tx.rate}/hr`}</span>
+                        </span>
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ml-auto",
+                            tx.status === "Disbursed"
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                              : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
+                          )}
+                        >
+                          {tx.status}
+                        </span>
+                      </div>
+
+                      {/* Bottom Row: Disbursement Destination & Advice Slip Action */}
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/40 text-xs">
+                        <div className="min-w-0 flex-1 text-muted-foreground">
+                          <div className="text-[11px] font-mono truncate">{tx.payoutMethodUsed}</div>
+                          {tx.utr && <div className="text-[10px] text-muted-foreground/70 font-mono">UTR: {tx.utr}</div>}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSlipTx(tx)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer shrink-0"
+                          title="View & Print Payout Advice Slip"
+                        >
+                          <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
+                          <span>Advice Slip</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Desktop View: Full-featured Table */}
+              <div className="hidden sm:block overflow-x-auto scrollbar-none">
+                <table className="w-full text-left text-xs min-w-[700px]">
+                  <thead>
+                    <tr className="border-b border-border/80 bg-muted/30 text-muted-foreground font-bold text-[11px] uppercase tracking-wider">
+                      <th className="py-3.5 px-5">{isStudent ? "Rotation Period" : "Shift Date"}</th>
+                      <th className="py-3.5 px-5">{isStudent ? "Program & Teaching Hospital" : "Role & Facility"}</th>
+                      <th className="py-3.5 px-5">{isStudent ? "Academic Hours" : "Duration & Rate"}</th>
+                      <th className="py-3.5 px-5">Status</th>
+                      <th className="py-3.5 px-5">Disbursed Via</th>
+                      <th className="py-3.5 px-5 text-right">{isStudent ? "Net Stipend" : "Net Remuneration"}</th>
+                      <th className="py-3.5 px-5 text-right">Advice Slip</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {filteredPayouts.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center text-muted-foreground font-medium">
+                          {isStudent ? "No internship stipends found matching your filter." : "No shift payouts found matching your filter."}
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    ) : (
+                      filteredPayouts.map((tx) => (
+                        <tr key={tx.id} className="hover:bg-muted/20 transition-colors">
+                          <td className="py-4 px-5 whitespace-nowrap text-muted-foreground font-medium">
+                            {tx.shiftDate}
+                          </td>
+                          <td className="py-4 px-5">
+                            <div className="font-bold text-sm text-foreground">{tx.shiftTitle}</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">{tx.hospitalName} · {tx.dept}</div>
+                          </td>
+                          <td className="py-4 px-5 whitespace-nowrap text-muted-foreground font-medium">
+                            <div>{tx.hours} hrs {isStudent ? "rotation" : `@ ₹${tx.rate}/hr`}</div>
+                          </td>
+                          <td className="py-4 px-5 whitespace-nowrap">
+                            <span
+                              className={cn(
+                                "inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                tx.status === "Disbursed"
+                                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
+                              )}
+                            >
+                              {tx.status}
+                            </span>
+                          </td>
+                          <td className="py-4 px-5 whitespace-nowrap text-xs text-muted-foreground font-mono">
+                            <div>{tx.payoutMethodUsed}</div>
+                            {tx.utr && <div className="text-[10px] text-muted-foreground/70 mt-0.5">UTR: {tx.utr}</div>}
+                          </td>
+                          <td className="py-4 px-5 whitespace-nowrap text-right font-mono font-bold text-sm sm:text-base text-foreground">
+                            ₹{tx.amount.toLocaleString("en-IN")}
+                          </td>
+                          <td className="py-4 px-5 whitespace-nowrap text-right">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSlipTx(tx)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
+                              title="View & Print Payout Advice Slip"
+                            >
+                              <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
+                              <span>Slip</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
 
           {/* TAB 2: TDS & Form 16A Summaries */}
           {activeTab === "tds" && (
             <div>
-              <div className="px-4 py-3 bg-muted/20 border-b border-border/60 flex items-center justify-between text-xs text-muted-foreground">
-                <span>TDS applicable under <strong>Section 194J</strong> (Professional Healthcare Cover). Annual summary available for ITR filing.</span>
+              <div className="px-5 py-3.5 bg-muted/20 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-muted-foreground gap-3">
+                <span className="leading-relaxed">
+                  {isStudent ? (
+                    <>Academic stipends are 100% tax-free under <strong>Section 10(16)</strong> of the Income Tax Act. Zero TDS deducted.</>
+                  ) : (
+                    <>TDS applicable under <strong>Section 194J</strong> (Professional Healthcare Cover). Annual summary available for ITR filing.</>
+                  )}
+                </span>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => toast.success("Consolidated Form 16A summary scheduled for email delivery.")}
-                  className="h-7 text-xs text-primary font-semibold hover:bg-muted cursor-pointer"
+                  onClick={() => toast.success(isStudent ? "Stipend Tax-Exemption summary emailed." : "Consolidated Form 16A summary scheduled for email delivery.")}
+                  className="h-8 text-xs text-primary font-bold hover:bg-muted cursor-pointer shrink-0 self-start sm:self-auto"
                 >
-                  Email Form 16A Summary
+                  {isStudent ? "Email Exemption Slip" : "Email Form 16A Summary"}
                 </Button>
               </div>
 
-              <div className="overflow-x-auto scrollbar-none">
-                <table className="w-full text-left text-xs min-w-[640px]">
+              {/* Mobile Card List for TDS */}
+              <div className="sm:hidden divide-y divide-border/60">
+                {(isStudent
+                  ? [
+                      { id: "EDU-2026-Q3-01", period: "Oct 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
+                      { id: "EDU-2026-Q2-02", period: "Sep 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
+                      { id: "EDU-2026-Q2-01", period: "Aug 2026", gross: 5000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 5000, status: "Tax-Free Stipend" },
+                    ]
+                  : mockTdsRecords
+                ).map((t) => (
+                  <div key={t.id} className="p-4 space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="font-mono font-bold text-xs text-foreground block">{t.id}</span>
+                        <span className="text-xs text-muted-foreground mt-0.5 block">{t.period} · {t.tdsRate}</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-mono font-bold text-sm text-foreground">₹{t.netCredited.toLocaleString("en-IN")}</div>
+                        <div className="text-[10px] text-muted-foreground font-medium">Gross: ₹{t.gross.toLocaleString("en-IN")}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-border/40 text-xs">
+                      <span className="text-[11px] text-muted-foreground">
+                        TDS: <span className={t.tdsAmount === 0 ? "text-muted-foreground font-medium" : "text-destructive font-semibold"}>
+                          {t.tdsAmount === 0 ? "₹0" : `-₹${t.tdsAmount.toLocaleString("en-IN")}`}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toast.success(`Statement ${t.id} downloaded.`)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
+                      >
+                        <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
+                        <span>Download</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop Table for TDS */}
+              <div className="hidden sm:block overflow-x-auto scrollbar-none">
+                <table className="w-full text-left text-xs min-w-[660px]">
                   <thead>
-                    <tr className="border-b border-border/60 bg-muted/30 text-muted-foreground font-semibold">
-                      <th className="py-3 px-4">Statement #</th>
-                      <th className="py-3 px-4">Period</th>
-                      <th className="py-3 px-4 text-right">Gross Earnings</th>
-                      <th className="py-3 px-4 text-right">TDS Section</th>
-                      <th className="py-3 px-4 text-right">TDS Deducted</th>
-                      <th className="py-3 px-4 text-right">Net Received</th>
-                      <th className="py-3 px-4 text-right">Action</th>
+                    <tr className="border-b border-border/80 bg-muted/30 text-muted-foreground font-bold text-[11px] uppercase tracking-wider">
+                      <th className="py-3.5 px-5">Statement #</th>
+                      <th className="py-3.5 px-5">Period</th>
+                      <th className="py-3.5 px-5 text-right">{isStudent ? "Gross Stipend" : "Gross Earnings"}</th>
+                      <th className="py-3.5 px-5 text-right">Tax Section</th>
+                      <th className="py-3.5 px-5 text-right">TDS Deducted</th>
+                      <th className="py-3.5 px-5 text-right">Net Received</th>
+                      <th className="py-3.5 px-5 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
-                    {mockTdsRecords.map((t) => (
+                    {(isStudent
+                      ? [
+                          { id: "EDU-2026-Q3-01", period: "Oct 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
+                          { id: "EDU-2026-Q2-02", period: "Sep 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
+                          { id: "EDU-2026-Q2-01", period: "Aug 2026", gross: 5000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 5000, status: "Tax-Free Stipend" },
+                        ]
+                      : mockTdsRecords
+                    ).map((t) => (
                       <tr key={t.id} className="hover:bg-muted/20 transition-colors">
-                        <td className="py-3 px-4 whitespace-nowrap font-mono font-bold text-foreground">
+                        <td className="py-4 px-5 whitespace-nowrap font-mono font-bold text-foreground">
                           {t.id}
                         </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-muted-foreground font-medium">
+                        <td className="py-4 px-5 whitespace-nowrap text-muted-foreground font-medium">
                           {t.period}
                         </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono text-muted-foreground">
+                        <td className="py-4 px-5 whitespace-nowrap text-right font-mono text-muted-foreground font-medium">
                           ₹{t.gross.toLocaleString("en-IN")}
                         </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-medium text-foreground">
+                        <td className="py-4 px-5 whitespace-nowrap text-right font-medium text-foreground">
                           {t.tdsRate}
                         </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono text-destructive">
-                          -₹{t.tdsAmount.toLocaleString("en-IN")}
+                        <td className="py-4 px-5 whitespace-nowrap text-right font-mono text-destructive font-semibold">
+                          {t.tdsAmount === 0 ? "₹0" : `-₹${t.tdsAmount.toLocaleString("en-IN")}`}
                         </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono font-bold text-foreground">
+                        <td className="py-4 px-5 whitespace-nowrap text-right font-mono font-bold text-foreground">
                           ₹{t.netCredited.toLocaleString("en-IN")}
                         </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right">
+                        <td className="py-4 px-5 whitespace-nowrap text-right">
                           <button
                             type="button"
-                            onClick={() => toast.success(`Downloading TDS statement ${t.id}...`)}
-                            className="inline-flex items-center gap-1 text-primary hover:underline font-semibold cursor-pointer"
+                            onClick={() => toast.success(`Statement ${t.id} downloaded.`)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
                           >
                             <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
-                            <span>PDF</span>
+                            <span>Download</span>
                           </button>
                         </td>
                       </tr>
@@ -592,6 +841,8 @@ function CandidateEarningsPage() {
             </div>
           )}
         </section>
+        </>
+      )}
 
       </div>
 

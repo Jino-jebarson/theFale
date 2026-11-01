@@ -19,6 +19,7 @@ import {
   HiOutlineLifebuoy,
   HiOutlineCurrencyRupee,
   HiOutlineAcademicCap,
+  HiCheckCircle,
   HiOutlineMapPin,
   HiOutlineArrowRight,
   HiOutlineCheckCircle,
@@ -187,9 +188,10 @@ function SupportPage() {
   const [faqCategory, setFaqCategory] = useState<"all" | "candidate" | "facility" | "escrow" | "verification">("all");
   const [openFaq, setOpenFaq] = useState<string | null>("faq-1");
   const [helpfulFeedback, setHelpfulFeedback] = useState<Record<string, "yes" | "no">>({});
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Ticket Form state
-  const [userRole, setUserRole] = useState<"candidate" | "facility">(s.portal || "candidate");
+  const [userRole, setUserRole] = useState<"candidate" | "facility">(s.portal === "facility" ? "facility" : "candidate");
   const [fullName, setFullName] = useState(String(s.profile["name"] || s.profile["recruiter"] || ""));
   const [email, setEmail] = useState(String(s.profile["email"] || ""));
   const [phone, setPhone] = useState(String(s.profile["phone"] || ""));
@@ -282,9 +284,12 @@ function SupportPage() {
 
   const filteredFaqs = useMemo(() => {
     return faqs.filter((item) => {
-      return faqCategory === "all" || item.category === faqCategory;
+      const matchesCat = faqCategory === "all" || item.category === faqCategory;
+      const q = searchQuery.trim().toLowerCase();
+      const matchesQuery = !q || item.q.toLowerCase().includes(q) || item.a.toLowerCase().includes(q);
+      return matchesCat && matchesQuery;
     });
-  }, [faqCategory]);
+  }, [faqCategory, searchQuery]);
 
   return (
     <AppShell>

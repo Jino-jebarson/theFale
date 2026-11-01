@@ -25,11 +25,12 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { jobs } from "@/lib/data";
+import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/jobs/")({
-  validateSearch: (s: Record<string, unknown>) => ({
-    q: typeof s["q"] === "string" ? s["q"] || undefined : undefined,
+  validateSearch: (s: Record<string, unknown>): { q?: string | undefined } => ({
+    q: typeof s["q"] === "string" && s["q"] ? s["q"] : undefined,
   }),
   head: () => ({
     meta: [
@@ -84,7 +85,7 @@ const salaryOpts = [
 
 const expOpts = ["0–2 yrs", "2–5 yrs", "5+ yrs"];
 
-const typeOpts = ["Full-time", "Contract"];
+const typeOpts = ["Full-time", "Contract", "Internship"];
 
 const shiftOpts = ["Day", "Morning", "Rotational", "Night"];
 
@@ -107,16 +108,24 @@ const perkOpts = [
 ];
 
 const popularSearches = [
+  "Clinical Internships",
   "ICU Nurse",
-  "Emergency",
-  "Apollo Hospitals",
-  "Chennai",
+  "Physiotherapy",
+  "Manipal Hospitals",
   "Bengaluru",
-  "Hostel provided",
+  "Chennai",
   "Day shift",
 ];
 
 function Jobs() {
+  const s = useApp();
+  const candidateLevel =
+    s.candidateLevel ||
+    (s.profile["level"] as any) ||
+    (s.profile["cadreLevel"] as any) ||
+    (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
+  const isStudent = candidateLevel === "student";
+
   const { q: initialQ } = Route.useSearch();
   const navigate = Route.useNavigate();
   const [q, setQ] = useState(initialQ ?? "");
@@ -137,8 +146,16 @@ function Jobs() {
   const [sort, setSort] = useState<"match" | "recent" | "salary">("match");
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
 
+  const baseJobs = useMemo(() => {
+    return jobs.filter((j) => {
+      const isIntern = j.kind === "internship" || j.type === "Internship";
+      if (isStudent && !isIntern) return false;
+      return true;
+    });
+  }, [isStudent]);
+
   const list = useMemo(() => {
-    const r = jobs.filter((j) => {
+    const r = baseJobs.filter((j) => {
       if (q && !`${j.title} ${j.org} ${j.dept || ""} ${j.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase())) return false;
       if (city && !j.city.toLowerCase().includes(city.toLowerCase())) return false;
       if (cityF.length && !cityF.includes(j.city)) return false;
@@ -203,7 +220,7 @@ function Jobs() {
       if (sort === "recent") return age(a.posted) - age(b.posted);
       return b.match - a.match;
     });
-  }, [q, city, cityF, deptF, types, shiftF, salaryF, expF, orgF, qualF, perkF, sort]);
+  }, [baseJobs, q, city, cityF, deptF, types, shiftF, salaryF, expF, orgF, qualF, perkF, sort]);
 
   const toggle = (arr: string[], set: (v: string[]) => void, v: string) =>
     set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
@@ -224,19 +241,19 @@ function Jobs() {
   };
 
   const countFor = (category: string, opt: string) => {
-    if (category === "type") return jobs.filter((j) => j.type === opt).length;
-    if (category === "shift") return jobs.filter((j) => j.shift === opt).length;
-    if (category === "org") return jobs.filter((j) => j.org === opt).length;
-    if (category === "dept") return jobs.filter((j) => j.dept === opt).length;
-    if (category === "city") return jobs.filter((j) => j.city.toLowerCase() === opt.toLowerCase()).length;
+    if (category === "type") return baseJobs.filter((j) => j.type === opt).length;
+    if (category === "shift") return baseJobs.filter((j) => j.shift === opt).length;
+    if (category === "org") return baseJobs.filter((j) => j.org === opt).length;
+    if (category === "dept") return baseJobs.filter((j) => j.dept === opt).length;
+    if (category === "city") return baseJobs.filter((j) => j.city.toLowerCase() === opt.toLowerCase()).length;
     if (category === "qual") {
-      return jobs.filter((j) => j.qualification === opt || j.tags.some((t) => t.toLowerCase().includes(opt.toLowerCase()))).length;
+      return baseJobs.filter((j) => j.qualification === opt || j.tags.some((t) => t.toLowerCase().includes(opt.toLowerCase()))).length;
     }
-    if (category === "perk") return jobs.filter((j) => j.perks?.includes(opt)).length;
+    if (category === "perk") return baseJobs.filter((j) => j.perks?.includes(opt)).length;
     if (category === "exp") {
-      return jobs.filter((j) => {
+      return baseJobs.filter((j) => {
         if (opt === "0–2 yrs")
-          return j.exp.includes("0") || j.exp.includes("1") || j.exp.includes("0–2") || j.exp.includes("1–3") || j.exp.includes("0–3");
+          return j.exp.includes("0") || j.exp.includes("1") || j.exp.includes("0–2") || j.exp.includes("1–3") || j.exp.includes("0–3") || j.exp.toLowerCase().includes("student") || j.exp.toLowerCase().includes("intern");
         if (opt === "2–5 yrs")
           return j.exp.includes("2–5") || j.exp.includes("2–4") || j.exp.includes("3–6") || j.exp.includes("1–4");
         if (opt === "5+ yrs")
@@ -245,7 +262,7 @@ function Jobs() {
       }).length;
     }
     if (category === "salary") {
-      return jobs.filter((j) => {
+      return baseJobs.filter((j) => {
         const jobNumbers = j.salary.replace(/,/g, "").match(/\d+/g)?.map(Number) || [];
         const jobMax = jobNumbers[jobNumbers.length - 1] || 0;
         const jobMin = jobNumbers[0] || 0;
@@ -877,6 +894,18 @@ function Jobs() {
             <div className="flex flex-1 items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 min-w-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               <button
                 type="button"
+                onClick={() => toggle(types, setTypes, "Internship")}
+                className={cn(
+                  "rounded-xl px-2.5 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition-colors cursor-pointer border",
+                  types.includes("Internship")
+                    ? "border-primary bg-primary-soft text-primary"
+                    : "border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                )}
+              >
+                Internships
+              </button>
+              <button
+                type="button"
                 onClick={() => toggle(types, setTypes, "Full-time")}
                 className={cn(
                   "rounded-xl px-2.5 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition-colors cursor-pointer border",
@@ -942,13 +971,15 @@ function Jobs() {
           <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/60 pb-4">
             <div>
               <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground flex items-center gap-2">
-                <span>{list.length} jobs for you</span>
+                <span>{isStudent ? `${list.length} clinical internships for you` : `${list.length} jobs for you`}</span>
                 <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                   Active
                 </span>
               </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Verified listings from accredited healthcare institutions across India
+                {isStudent
+                  ? "Students can apply to accredited clinical internships. Full-time positions unlock upon graduation."
+                  : "Verified listings from accredited healthcare institutions across India"}
               </p>
             </div>
 

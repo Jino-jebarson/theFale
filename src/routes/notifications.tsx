@@ -38,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useApp } from "@/lib/store";
 
 export const Route = createFileRoute("/notifications")({
   head: () => ({
@@ -165,8 +166,87 @@ const initialNotifications: NotificationItem[] = [
   },
 ];
 
+const studentNotifications: NotificationItem[] = [
+  {
+    id: "stu_notif_1",
+    category: "jobs",
+    title: "Clinical Internship Interview Scheduled — Academic Viva",
+    hospital: "Apollo Speciality Hospitals",
+    hospitalCode: "AP",
+    hospitalGradient: "from-blue-600 to-indigo-700",
+    message: "HOD of Clinical Training Dr. Preetha Rao scheduled your interview for the 6-Month Rotational Internship (Physiotherapy / Clinical Sciences).",
+    time: "15m ago",
+    unread: true,
+    urgent: true,
+    matchScore: 96,
+    shiftTiming: "Tomorrow, 10:30 AM via FALE Clinical Viva Desk",
+    actionType: "confirm_interview",
+    actionLabel: "Confirm Viva Attendance",
+  },
+  {
+    id: "stu_notif_2",
+    category: "shifts",
+    title: "Monthly Student Stipend Credited (Sec 10(16) Tax-Free)",
+    hospital: "Apollo Hospitals Teaching Network",
+    hospitalCode: "AP",
+    hospitalGradient: "from-emerald-600 to-teal-700",
+    message: "Monthly educational stipend of ₹18,000 for October Rotation has been disbursed to your student savings account. Zero TDS under IT Act Section 10(16).",
+    time: "1h ago",
+    unread: true,
+    payout: "₹18,000 Disbursed",
+    statusText: "UTR: FALE-STU-88219 • ₹18,000 Credited",
+  },
+  {
+    id: "stu_notif_3",
+    category: "credentials",
+    title: "College Bona Fide & Student ID Authenticated",
+    hospital: "FALE Academic Registry",
+    hospitalCode: "FA",
+    hospitalGradient: "from-purple-600 to-indigo-700",
+    message: "Bona Fide certificate STU-2024-9182 authenticated with college registrar. Verified Student Intern Tier-1 badge active in your profile vault.",
+    time: "4h ago",
+    unread: true,
+    actionType: "view_doc",
+    actionLabel: "View in Vault",
+    actionLink: "/profile",
+  },
+  {
+    id: "stu_notif_4",
+    category: "cme",
+    title: "Student CME Logbook Module Accredited",
+    hospital: "FALE Clinical Academy",
+    hospitalCode: "FC",
+    hospitalGradient: "from-amber-500 to-orange-600",
+    message: "Completed 'Clinical Handover & Patient Safety Fundamentals'. +2.0 Student CME credit hours countersigned in your digital logbook.",
+    time: "1d ago",
+    unread: false,
+    actionType: "view_cert",
+    actionLabel: "View Certificate",
+    actionLink: "/learning/c4",
+  },
+  {
+    id: "stu_notif_5",
+    category: "jobs",
+    title: "Clinical Observership Shortlist Confirmed",
+    hospital: "Manipal Hospital, Whitefield",
+    hospitalCode: "MH",
+    hospitalGradient: "from-teal-600 to-emerald-700",
+    message: "Academic Medical Directorate accepted your credential dossier for the upcoming semester clinical observership and ward rotations.",
+    time: "2d ago",
+    unread: false,
+    matchScore: 93,
+    actionType: "view_hospital",
+    actionLabel: "Track Application",
+    actionLink: "/applications",
+  },
+];
+
 function NotificationsPage() {
-  const [items, setItems] = useState<NotificationItem[]>(initialNotifications);
+  const s = useApp();
+  const candidateLevel = s.candidateLevel || (s.profile["level"] as any) || (s.profile["cadreLevel"] as any) || (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
+  const isStudent = candidateLevel === "student";
+
+  const [items, setItems] = useState<NotificationItem[]>(() => isStudent ? studentNotifications : initialNotifications);
   const [selectedCategory, setSelectedCategory] = useState<NotificationCategory>("all");
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [acceptedShifts, setAcceptedShifts] = useState<string[]>([]);
@@ -274,7 +354,9 @@ function NotificationsPage() {
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              Real-time on-call shifts, hospital recruitment requests, and verified credentials.
+              {isStudent
+                ? "Real-time clinical internship invitations, educational stipend credits, and academic credential alerts."
+                : "Real-time on-call shifts, hospital recruitment requests, and verified credentials."}
             </p>
           </div>
 
@@ -320,13 +402,21 @@ function NotificationsPage() {
               </h2>
               <nav className="space-y-1">
                 {(
-                  [
-                    { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
-                    { id: "shifts", label: "On-Call Shifts", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
-                    { id: "jobs", label: "Interviews & Jobs", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
-                    { id: "cme", label: "CME & Accreditations", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
-                    { id: "credentials", label: "Verified Credentials", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
-                  ] as const
+                  isStudent
+                    ? [
+                        { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
+                        { id: "shifts", label: "Stipends & Rotations", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
+                        { id: "jobs", label: "Internships & Viva", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
+                        { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
+                        { id: "credentials", label: "Bona Fide Vault", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
+                      ]
+                    : [
+                        { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
+                        { id: "shifts", label: "On-Call Shifts", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
+                        { id: "jobs", label: "Interviews & Jobs", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
+                        { id: "cme", label: "CME & Accreditations", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
+                        { id: "credentials", label: "Verified Credentials", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
+                      ]
                 ).map((cat) => {
                   const Icon = cat.icon;
                   const active = selectedCategory === cat.id;
@@ -334,7 +424,7 @@ function NotificationsPage() {
                     <button
                       key={cat.id}
                       type="button"
-                      onClick={() => setSelectedCategory(cat.id)}
+                      onClick={() => setSelectedCategory(cat.id as NotificationCategory)}
                       className={cn(
                         "w-full flex items-center justify-between rounded-xl px-3 py-2 text-xs font-bold transition-all cursor-pointer",
                         active
@@ -371,16 +461,20 @@ function NotificationsPage() {
             <div className="surface p-4 rounded-3xl border border-border/80 space-y-3 shadow-card bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20 min-w-0">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-extrabold text-foreground flex items-center gap-1.5">
-                  <HiOutlineBolt className="h-4 w-4 text-amber-500" /> Recruiter Reach
+                  <HiOutlineBolt className="h-4 w-4 text-amber-500" /> {isStudent ? "Academic Reach" : "Recruiter Reach"}
                 </span>
                 <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0 font-bold text-[10px] px-2 py-0">
-                  Top 5%
+                  {isStudent ? "Top Intern" : "Top 5%"}
                 </Badge>
               </div>
               <div className="space-y-1">
-                <div className="text-xl font-black text-foreground">48 Profile Views</div>
+                <div className="text-xl font-black text-foreground">
+                  {isStudent ? "38 Faculty Views" : "48 Profile Views"}
+                </div>
                 <p className="text-[11px] text-muted-foreground leading-snug">
-                  Apollo, Fortis, and Kauvery hospital recruiters viewed your clinical dossier this week.
+                  {isStudent
+                    ? "Apollo, Manipal, and college clinical directors reviewed your student logbook this week."
+                    : "Apollo, Fortis, and Kauvery hospital recruiters viewed your clinical dossier this week."}
                 </p>
               </div>
               <Button
@@ -390,7 +484,7 @@ function NotificationsPage() {
                 className="w-full rounded-xl text-xs font-bold border-border/80 h-8"
               >
                 <Link to="/profile">
-                  <span>Boost Visibility</span>
+                  <span>{isStudent ? "Update Logbook" : "Boost Visibility"}</span>
                   <HiOutlineArrowRight className="ml-1 h-3.5 w-3.5" />
                 </Link>
               </Button>
@@ -412,7 +506,7 @@ function NotificationsPage() {
                 <div className="flex items-center justify-between py-1">
                   <span className="flex items-center gap-2 text-muted-foreground font-medium">
                     <HiOutlineDevicePhoneMobile className="h-4 w-4 text-primary" />
-                    <span>Urgent Shift SMS</span>
+                    <span>{isStudent ? "Stipend SMS Alerts" : "Urgent Shift SMS"}</span>
                   </span>
                   <Switch checked={urgentSms} onCheckedChange={setUrgentSms} className="scale-75" />
                 </div>
@@ -431,8 +525,32 @@ function NotificationsPage() {
           {/* MAIN COLUMN: NOTIFICATION FEED (APPLE + LINKEDIN STYLE)  */}
           {/* ======================================================= */}
           <main className="space-y-4 w-full min-w-0">
-            {/* Urgent Red Healthcare Priority Broadcast */}
-            {activeShiftAlerts > 0 && (
+            {/* Urgent Priority Broadcast */}
+            {isStudent ? (
+              <div className="relative overflow-hidden rounded-3xl border border-primary/30 bg-gradient-to-r from-primary/10 via-card to-primary/5 p-4 sm:p-5 shadow-xs flex items-start gap-3.5 min-w-0">
+                <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-primary" />
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary text-white font-black text-xs shadow-xs">
+                  🎓
+                </span>
+                <div className="space-y-1 flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-primary uppercase tracking-wider">
+                      Clinical Internship & Rotational Posting Alert
+                    </span>
+                    <Badge className="bg-primary-soft text-primary font-bold border-0 text-[10px] px-2 py-0">
+                      Accredited
+                    </Badge>
+                  </div>
+                  <p className="text-xs sm:text-sm font-semibold text-foreground leading-snug break-words">
+                    Apollo Hospitals and Manipal Health have opened 24 newly approved clinical training rotation slots with ₹18,000/mo educational stipend.
+                  </p>
+                  <div className="pt-1 flex flex-wrap items-center gap-3 text-xs">
+                    <span className="font-extrabold text-emerald-600 dark:text-emerald-400">₹18,000/mo Stipend</span>
+                    <span className="text-muted-foreground">• Section 10(16) IT Act Tax-Free</span>
+                  </div>
+                </div>
+              </div>
+            ) : activeShiftAlerts > 0 ? (
               <div className="relative overflow-hidden rounded-3xl border border-red-500/30 bg-gradient-to-r from-red-500/10 via-card to-red-500/5 p-4 sm:p-5 shadow-xs flex items-start gap-3.5 min-w-0">
                 <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-red-500" />
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-red-500 text-white font-black text-xs shadow-xs animate-pulse">
@@ -456,18 +574,26 @@ function NotificationsPage() {
                   </div>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Mobile Category Scroll Pills (Visible on mobile/tablet) */}
             <div className="flex lg:hidden items-center gap-1.5 overflow-x-auto scrollbar-none pb-1 w-full min-w-0">
               {(
-                [
-                  { id: "all", label: "All Alerts", count: items.length },
-                  { id: "shifts", label: "Shifts", count: items.filter((x) => x.category === "shifts").length },
-                  { id: "jobs", label: "Interviews", count: items.filter((x) => x.category === "jobs").length },
-                  { id: "cme", label: "CME Points", count: items.filter((x) => x.category === "cme").length },
-                  { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
-                ] as const
+                isStudent
+                  ? [
+                      { id: "all", label: "All Alerts", count: items.length },
+                      { id: "shifts", label: "Stipends", count: items.filter((x) => x.category === "shifts").length },
+                      { id: "jobs", label: "Internships", count: items.filter((x) => x.category === "jobs").length },
+                      { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length },
+                      { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
+                    ]
+                  : [
+                      { id: "all", label: "All Alerts", count: items.length },
+                      { id: "shifts", label: "Shifts", count: items.filter((x) => x.category === "shifts").length },
+                      { id: "jobs", label: "Interviews", count: items.filter((x) => x.category === "jobs").length },
+                      { id: "cme", label: "CME Points", count: items.filter((x) => x.category === "cme").length },
+                      { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
+                    ]
               ).map((cat) => (
                 <button
                   key={cat.id}

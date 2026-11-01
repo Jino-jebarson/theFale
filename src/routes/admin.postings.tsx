@@ -45,7 +45,7 @@ export const Route = createFileRoute("/admin/postings")({
   component: JobApprovalsAdmin,
 });
 
-export function JobApprovalsAdmin() {
+function JobApprovalsAdmin() {
   const s = useApp();
   const [filter, setFilter] = useState<"all" | "pending" | "approved" | "rejected">("pending");
   const [search, setSearch] = useState("");

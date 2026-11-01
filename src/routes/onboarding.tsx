@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { applyTheme, getEffectiveTheme } from "@/lib/theme";
 import {
   HiArrowLeft,
   HiArrowRight,
+  HiChevronRight,
   HiCheck,
   HiOutlineUser,
   HiOutlineEnvelope,
@@ -35,6 +36,14 @@ import {
   HiOutlineLockClosed,
 } from "react-icons/hi2";
 import { ImSpinner2 } from "react-icons/im";
+import {
+  RiVerifiedBadgeFill,
+  RiStethoscopeLine,
+  RiGraduationCapLine,
+  RiShieldCheckLine,
+  RiChatVoiceLine,
+  RiFileUserLine,
+} from "react-icons/ri";
 import { LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { Logo } from "@/components/fale/Logo";
@@ -82,10 +91,10 @@ interface OnboardingSearch {
 
 export const Route = createFileRoute("/onboarding")({
   validateSearch: (search: Record<string, unknown>): OnboardingSearch => {
-    return {
-      role: typeof search.role === "string" ? search.role : undefined,
-      portal: typeof search.portal === "string" ? search.portal : undefined,
-    };
+    const res: OnboardingSearch = {};
+    if (typeof search["role"] === "string" && search["role"]) res.role = search["role"];
+    if (typeof search["portal"] === "string" && search["portal"]) res.portal = search["portal"];
+    return res;
   },
   head: () => ({
     meta: [
@@ -100,7 +109,7 @@ export const Route = createFileRoute("/onboarding")({
   component: Onboarding,
 });
 
-export interface WorkExperienceItem {
+interface WorkExperienceItem {
   org: string;
   role: string;
   fm: string;
@@ -112,6 +121,44 @@ export interface WorkExperienceItem {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const YEARS = Array.from({ length: 40 }, (_, i) => String(new Date().getFullYear() - i));
+
+const STUDENT_COURSES = [
+  { label: "BPT (Physiotherapy)", role: "physiotherapist" },
+  { label: "MPT (Physiotherapy)", role: "physiotherapist" },
+  { label: "B.Sc Nursing", role: "nurse" },
+  { label: "GNM Nursing", role: "nurse" },
+  { label: "BMLT (Lab technology)", role: "lab_technician" },
+  { label: "DMLT (Lab technology)", role: "lab_technician" },
+  { label: "B.Sc Radiology / MIT", role: "radiographer" },
+  { label: "B.Pharm / D.Pharm", role: "pharmacist" },
+  { label: "B.Sc OT technology", role: "ot_technician" },
+  { label: "B.Sc Dialysis technology", role: "dialysis_technician" },
+];
+
+const STUDENT_PROOFS = [
+  { id: "college_id", label: "College ID card", desc: "Photo of the front, with your name and course" },
+  { id: "bonafide", label: "Bonafide certificate", desc: "From your college office, this academic year" },
+  { id: "univ_reg", label: "University registration number", desc: "We check it with your university" },
+] as const;
+
+const STUDENT_AREAS = [
+  "Jayanagar",
+  "Banashankari",
+  "JP Nagar",
+  "Koramangala",
+  "HSR Layout",
+  "Indiranagar",
+  "Whitefield",
+  "Hebbal",
+  "Yelahanka",
+  "Rajajinagar",
+  "Malleshwaram",
+  "Electronic City",
+  "Marathahalli",
+  "Basavanagudi",
+];
+
+const STUDENT_YEARS = ["1st year", "2nd year", "3rd year", "4th year", "Internship year"];
 
 function mIdx(m: string | undefined, y: string | undefined) {
   if (m === "" || m == null || !y) return null;
@@ -172,7 +219,170 @@ const facilitySteps = [
   { t: "Review", d: "Confirm & submit" },
 ];
 
+const studentSteps = [
+  { t: "Personal details", d: "About you & where you live" },
+  { t: "Course & college", d: "Academic enrollment" },
+  { t: "Proof of study", d: "College verification" },
+  { t: "Review & finish", d: "Confirm & access Huddle" },
+];
+
 type P = Record<string, string | boolean | string[]>;
+
+interface PathwayChooserProps {
+  onSelectStudent: () => void;
+  onSelectGraduate: () => void;
+}
+
+function CandidatePathwayChooser({
+  onSelectStudent,
+  onSelectGraduate,
+}: PathwayChooserProps) {
+  const [activeChoice, setActiveChoice] = useState<"student" | "grad">("student");
+
+  return (
+    <div className="mx-auto max-w-[620px] px-3.5 py-6 sm:px-4 sm:py-12 animate-in fade-in duration-300">
+      {/* Back to sign in navigation */}
+      <div className="mb-3.5 sm:mb-4">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground hover:text-primary transition-colors cursor-pointer group"
+        >
+          <HiArrowLeft className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-transform group-hover:-translate-x-1" />
+          <span>Back to sign in</span>
+        </Link>
+      </div>
+
+      {/* Main Container Card */}
+      <div className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-8 shadow-[0_4px_24px_-6px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.03)] space-y-5 sm:space-y-6">
+        {/* Header */}
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight leading-tight">
+            Are you still studying?
+          </h1>
+        </div>
+
+        {/* Stacked Selection Cards with brand colors and hover state */}
+        <div className="space-y-3 sm:space-y-3.5">
+          {/* OPTION 1: STUDENT */}
+          <button
+            type="button"
+            onClick={onSelectStudent}
+            onMouseEnter={() => setActiveChoice("student")}
+            className={cn(
+              "group w-full rounded-2xl p-3.5 sm:p-5 text-left transition-all duration-150 cursor-pointer border text-foreground",
+              activeChoice === "student"
+                ? "border-primary bg-primary-soft/25 ring-2 ring-primary/20 shadow-xs"
+                : "border-border/80 bg-card hover:border-primary/50 hover:bg-muted/30"
+            )}
+          >
+            <div className="flex items-center justify-between gap-2.5 sm:gap-3">
+              <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
+                <div className="h-11 w-11 sm:h-13 sm:w-13 rounded-xl sm:rounded-2xl bg-primary-soft text-primary flex items-center justify-center shrink-0 border border-primary/25 shadow-2xs group-hover:scale-105 transition-transform">
+                  <HiOutlineAcademicCap className="h-5.5 w-5.5 sm:h-7 sm:w-7" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-foreground text-[15px] sm:text-[17px] leading-snug">
+                    Yes, I’m a student
+                  </div>
+                  <p className="text-[11.5px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1 leading-normal truncate">
+                    Final year, student or still in college
+                  </p>
+                </div>
+              </div>
+              <div
+                className={cn(
+                  "grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg sm:rounded-xl shrink-0 transition-all",
+                  activeChoice === "student"
+                    ? "bg-primary text-white shadow-2xs"
+                    : "bg-muted/60 text-muted-foreground group-hover:bg-primary group-hover:text-white"
+                )}
+              >
+                <HiChevronRight className="h-4 w-4" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-1.5 sm:gap-3 mt-3 pt-3 border-t border-border/50 text-[11px] sm:text-[11.5px] text-muted-foreground font-medium">
+              <span className="inline-flex items-center gap-1.5">
+                <HiOutlineAcademicCap className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>Clinical Internships</span>
+              </span>
+              <span className="hidden sm:inline text-border">•</span>
+              <span className="inline-flex items-center gap-1.5">
+                <RiStethoscopeLine className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>Case Huddle</span>
+              </span>
+              <span className="hidden sm:inline text-border">•</span>
+              <span className="inline-flex items-center gap-1.5">
+                <HiOutlineSparkles className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>Verified Mentors</span>
+              </span>
+            </div>
+          </button>
+
+          {/* OPTION 2: GRADUATE */}
+          <button
+            type="button"
+            onClick={onSelectGraduate}
+            onMouseEnter={() => setActiveChoice("grad")}
+            className={cn(
+              "group w-full rounded-2xl p-3.5 sm:p-5 text-left transition-all duration-150 cursor-pointer border text-foreground",
+              activeChoice === "grad"
+                ? "border-primary bg-primary-soft/25 ring-2 ring-primary/20 shadow-xs"
+                : "border-border/80 bg-card hover:border-primary/50 hover:bg-muted/30"
+            )}
+          >
+            <div className="flex items-center justify-between gap-2.5 sm:gap-3">
+              <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
+                <div className="h-11 w-11 sm:h-13 sm:w-13 rounded-xl sm:rounded-2xl bg-primary-soft text-primary flex items-center justify-center shrink-0 border border-primary/25 shadow-2xs group-hover:scale-105 transition-transform">
+                  <HiOutlineBriefcase className="h-5.5 w-5.5 sm:h-7 sm:w-7" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-foreground text-[15px] sm:text-[17px] leading-snug">
+                    No, I’ve graduated
+                  </div>
+                  <p className="text-[11.5px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1 leading-normal truncate">
+                    Fresher or working professional
+                  </p>
+                </div>
+              </div>
+              <div
+                className={cn(
+                  "grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg sm:rounded-xl shrink-0 transition-all",
+                  activeChoice === "grad"
+                    ? "bg-primary text-white shadow-2xs"
+                    : "bg-muted/60 text-muted-foreground group-hover:bg-primary group-hover:text-white"
+                )}
+              >
+                <HiChevronRight className="h-4 w-4" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center gap-1.5 sm:gap-3 mt-3 pt-3 border-t border-border/50 text-[11px] sm:text-[11.5px] text-muted-foreground font-medium">
+              <span className="inline-flex items-center gap-1.5">
+                <HiOutlineBuildingOffice2 className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>Hospital Job Openings</span>
+              </span>
+              <span className="hidden sm:inline text-border">•</span>
+              <span className="inline-flex items-center gap-1.5">
+                <HiBolt className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>24h Payout Shifts</span>
+              </span>
+              <span className="hidden sm:inline text-border">•</span>
+              <span className="inline-flex items-center gap-1.5">
+                <HiOutlineShieldCheck className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>Council KYC</span>
+              </span>
+            </div>
+          </button>
+        </div>
+
+        {/* Informational Footnote */}
+        <div className="flex items-start sm:items-center gap-2 text-xs text-muted-foreground pt-0.5 sm:pt-1">
+          <HiOutlineInformationCircle className="h-4 w-4 text-primary shrink-0 mt-0.5 sm:mt-0" />
+          <span className="leading-relaxed">You can change this later when you graduate</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Onboarding() {
   const s = useApp();
@@ -191,7 +401,18 @@ function Onboarding() {
   }, [isFacilityParam, isCandidateParam, s.portal]);
 
   const f = isFacilityParam ? true : isCandidateParam ? false : s.portal === "facility";
-  const steps = f ? facilitySteps : candidateSteps;
+  const [candidateStage, setCandidateStage] = useState<"choose" | "student" | "graduate">(() => {
+    if (s.onboarded && s.candidateLevel === "student") return "student";
+    if (s.onboarded && (s.candidateLevel === "fresher" || s.candidateLevel === "professional")) return "graduate";
+    return "choose";
+  });
+
+  const steps = f
+    ? facilitySteps
+    : candidateStage === "student"
+    ? studentSteps
+    : candidateSteps;
+
   const [step, setStep] = useState(0);
   const [showExitModal, setShowExitModal] = useState(false);
   const [showDigiLockerModal, setShowDigiLockerModal] = useState(false);
@@ -237,6 +458,13 @@ function Onboarding() {
     return {
       mobile: s.contact.startsWith("+91") ? s.contact.replace("+91 ", "") : "",
       email: s.contact.includes("@") && !s.contact.endsWith("@account") ? s.contact : "",
+      course: "BPT (Physiotherapy)",
+      studyYear: "3rd year",
+      grad: "2026-12",
+      proof: "college_id",
+      univReg: "",
+      adult: true,
+      area: "Bengaluru",
       ...profile,
       fresher: isFresher,
     };
@@ -247,26 +475,27 @@ function Onboarding() {
   const arr = (k: string) => (p[k] as string[]) ?? [];
   const input = (k: string) => ({ value: str(k), onChange: (e: React.ChangeEvent<HTMLInputElement>) => set(k)(e.target.value) });
 
+
   const handleProfessionChange = (newRole: string) => {
     const allowedSkills = skillsByProfession[newRole] ?? [];
     const availableDepts = departmentsByProfession[newRole] ?? [];
     setP((prev) => {
-      const currentSkills = (prev.skills as string[]) ?? [];
+      const currentSkills = (prev["skills"] as string[]) ?? [];
       const allPredefinedSkills = Object.values(skillsByProfession).flat();
       const customSkills = currentSkills.filter((s) => !allPredefinedSkills.includes(s));
       const validSkills = Array.from(new Set([...currentSkills.filter((s) => allowedSkills.includes(s)), ...customSkills]));
-      const currentDept = String(prev.specialty || "");
+      const currentDept = String(prev["specialty"] || "");
       const validDept = availableDepts.includes(currentDept) ? currentDept : (availableDepts[0] ?? "");
       const defaultCouncil = councilByProfession[newRole] ?? "";
       const allowedQuals = qualificationsByProfession[newRole] ?? [];
-      const currentQual = String(prev.qual || "");
+      const currentQual = String(prev["qual"] || "");
       const validQual = allowedQuals.includes(currentQual) || currentQual === "Other" ? currentQual : "";
       return {
         ...prev,
         role: newRole,
         specialty: validDept,
         skills: validSkills,
-        council: prev.council && prev.council !== "Not applicable for my role" ? prev.council : defaultCouncil,
+        council: prev["council"] && prev["council"] !== "Not applicable for my role" ? prev["council"] : defaultCouncil,
         qual: validQual,
       };
     });
@@ -307,7 +536,7 @@ function Onboarding() {
   // Multi-experience state matching thefale_website (19).html
   const [exps, setExps] = useState<WorkExperienceItem[]>(() => {
     if (Array.isArray(p["exps"]) && p["exps"].length > 0) {
-      return p["exps"] as WorkExperienceItem[];
+      return (p["exps"] as unknown) as WorkExperienceItem[];
     }
     if (p["fresher"] || p["exp"] === "Fresher") {
       return [];
@@ -376,12 +605,129 @@ function Onboarding() {
       notice: isFresher ? "Immediately" : (str("notice") || "Immediately"),
       currentSalary: isFresher ? "" : str("currentSalary"),
     };
-    setState({ profile: profileToSave as Record<string, string | boolean>, docs });
+    setState({ profile: profileToSave as unknown as Record<string, string | boolean>, docs });
+  };
+
+  const handleFinishStudentOnboarding = () => {
+    const selectedCourseObj = STUDENT_COURSES.find((c) => c.label === str("course"));
+    const inferredRole = selectedCourseObj ? selectedCourseObj.role : "Student";
+    const proof = str("proof") || "college_id";
+    const proofDoc = proof === "univ_reg" ? `Verified Reg · ${str("univReg")}` : docs["Proof of study"] || "college-id-sample.jpg";
+    const proofLabel = proof === "college_id"
+      ? "College ID card"
+      : proof === "bonafide"
+      ? "Bonafide certificate"
+      : `Univ Reg (${str("univReg")})`;
+
+    const updatedProfile = {
+      ...p,
+      name: str("name").trim(),
+      role: inferredRole,
+      profession: inferredRole,
+      course: str("course"),
+      college: str("college").trim(),
+      studyYear: str("studyYear"),
+      grad: str("grad"),
+      area: str("area"),
+      city: str("area").split(",")[0]?.trim() || "Bengaluru",
+      proof,
+      univReg: str("univReg"),
+      mobile: str("mobile"),
+      email: str("email"),
+      fresher: true,
+      level: "student",
+      cadreLevel: "student",
+      collegeStatus: "pending",
+      regStatus: "none",
+      degStatus: "none",
+      otw: "off",
+    };
+
+    const finalDocs = {
+      ...docs,
+      "Proof of study": proofDoc,
+    };
+
+    setState({
+      onboarded: true,
+      candidateLevel: "student",
+      profile: updatedProfile as unknown as Record<string, string | boolean>,
+      docs: finalDocs,
+    });
+
+    toast.success("Student profile submitted for verification!", {
+      description: "Welcome to FALE Huddle & Clinical Mentorship. Proof under verification.",
+    });
+
+    navigate({ to: "/huddle" });
   };
 
   const next = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!f && step === 2 && !p["fresher"]) {
+    if (!f && candidateStage === "student") {
+      if (step === 0) {
+        if (!str("name").trim() || str("name").trim().length < 3) {
+          toast.error("Please enter your full name as on your college ID.");
+          return;
+        }
+        if (!str("area").trim()) {
+          toast.error("Please enter or select where you live / current city.");
+          return;
+        }
+        if (!str("mobile").trim()) {
+          toast.error("Please provide your mobile number.");
+          return;
+        }
+      } else if (step === 1) {
+        if (!str("course")) {
+          toast.error("Please select your enrolled medical or allied course.");
+          return;
+        }
+        if (!str("college").trim() || str("college").trim().length < 3) {
+          toast.error("Please enter your medical/allied college name.");
+          return;
+        }
+        if (!str("studyYear")) {
+          toast.error("Please select your current year of study.");
+          return;
+        }
+        if (!str("grad")) {
+          toast.error("Please pick your expected graduation month.");
+          return;
+        }
+      } else if (step === 2) {
+        const proof = str("proof") || "college_id";
+        if (proof === "univ_reg") {
+          const reg = str("univReg").trim();
+          if (!reg || reg.length < 4) {
+            toast.error("Please enter a valid university registration number.");
+            return;
+          }
+        } else {
+          if (!docs["Proof of study"]) {
+            toast.error(`Please upload your ${proof === "bonafide" ? "bonafide certificate" : "college ID card"} or click demo sample.`);
+            return;
+          }
+        }
+      } else if (step === 3) {
+        if (!p["adult"]) {
+          toast.error("You must confirm you are 18 or older to join FALE.");
+          return;
+        }
+        handleFinishStudentOnboarding();
+        return;
+      }
+
+      save();
+      if (step < steps.length - 1) {
+        setStep(step + 1);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      return;
+    }
+
+    const isStudent = p["cadreLevel"] === "student";
+    if (!f && step === 2 && !p["fresher"] && !isStudent) {
       if (!exps.length) {
         toast.error("Please add at least one work experience, or select 'I am a fresher'.");
         return;
@@ -399,7 +745,8 @@ function Onboarding() {
       toast.error("Please complete all required selections."); return;
     }
     if (step === (f ? 2 : 4)) {
-      const missing = neededDocs(f ? "facility" : "candidate", str("role")).filter((d) => !d.label.includes("optional") && !d.label.includes("if applicable") && !docs[d.label]);
+      const candidateLevel = (p["cadreLevel"] || "professional") as string;
+      const missing = neededDocs(f ? "facility" : "candidate", str("role"), candidateLevel).filter((d) => !d.label.includes("optional") && !d.label.includes("if applicable") && !docs[d.label]);
       if (missing.length) { toast.error(`Please upload: ${missing.map((m) => m.label).join(", ")}`); return; }
     }
     save();
@@ -417,19 +764,23 @@ function Onboarding() {
 
   const handleFinishOnboarding = (uploadedPhoto?: string) => {
     const finalPhoto = uploadedPhoto || photoPreview;
-    const isFresher = !!p["fresher"];
-    const formattedExp = isFresher ? "Fresher" : fmtM(totalExpMonths);
+    const isStudent = p["cadreLevel"] === "student" || p["level"] === "student";
+    const isFresher = !isStudent && (!!p["fresher"] || p["cadreLevel"] === "fresher");
+    const candidateLevel = isStudent ? "student" : isFresher ? "fresher" : "professional";
+    const formattedExp = isStudent ? "Student" : isFresher ? "Fresher" : fmtM(totalExpMonths);
     const profileToSave = {
       ...p,
       qual: p["qual"] === "Other" && p["qualOwn"] ? p["qualOwn"] : p["qual"],
       specialty: p["specialty"] === "Other" && p["deptOwn"] ? p["deptOwn"] : p["specialty"],
-      fresher: isFresher,
-      exps: isFresher ? [] : exps,
+      fresher: isFresher || isStudent,
+      level: candidateLevel,
+      cadreLevel: candidateLevel,
+      exps: isFresher || isStudent ? [] : exps,
       exp: formattedExp,
-      employer: isFresher ? "" : (exps[0]?.org || ""),
-      designation: isFresher ? "" : (exps[0]?.role || ""),
-      notice: isFresher ? "Immediately" : (str("notice") || "Immediately"),
-      currentSalary: isFresher ? "" : str("currentSalary"),
+      employer: isFresher || isStudent ? "" : (exps[0]?.org || ""),
+      designation: isFresher || isStudent ? "" : (exps[0]?.role || ""),
+      notice: isFresher || isStudent ? "Immediately" : (str("notice") || "Immediately"),
+      currentSalary: isFresher || isStudent ? "" : str("currentSalary"),
       ...(finalPhoto ? { avatar: finalPhoto } : {}),
     };
     const finalDocs = { ...docs };
@@ -438,12 +789,20 @@ function Onboarding() {
     }
     setState({
       onboarded: true,
-      profile: profileToSave as Record<string, string | boolean>,
+      candidateLevel,
+      profile: profileToSave as unknown as Record<string, string | boolean>,
       docs: finalDocs,
     });
     setShowPhotoModal(false);
-    toast.success("Profile submitted for verification", { description: "Review usually takes up to 48 hours." });
-    navigate({ to: f ? "/employer" : "/profile" });
+    if (isStudent) {
+      toast.success("Student profile submitted for verification!", {
+        description: "Your proof of study has been sent to FALE. You can browse internships and ask mentors now.",
+      });
+      navigate({ to: "/huddle" });
+    } else {
+      toast.success("Profile submitted for verification", { description: "Review usually takes up to 48 hours." });
+      navigate({ to: f ? "/employer" : "/profile" });
+    }
   };
 
   const handleFinishHospitalOnboarding = (primary?: string, gallery?: string[]) => {
@@ -546,6 +905,42 @@ function Onboarding() {
 
   const candidate: ReactNode[] = [
     <div className="space-y-8" key="c0">
+      {/* Active Pathway Status Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl border border-primary/20 bg-primary-soft/40 shadow-xs">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="h-9 w-9 rounded-xl bg-[#FFF4EC] text-[#FF5A1F] flex items-center justify-center shrink-0 border border-primary/20 mt-0.5">
+            <RiStethoscopeLine className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <span className="text-xs sm:text-[13px] font-black text-foreground">
+                Healthcare Graduate Pathway
+              </span>
+              <span className="rounded-full bg-primary text-white text-[10px] font-extrabold px-2.5 py-0.5 whitespace-nowrap shadow-2xs">
+                Jobs &amp; Shifts
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+              Full-time hospital hiring, fast locum shifts, and council-verified credentials
+            </p>
+          </div>
+        </div>
+        <div className="pt-1 sm:pt-0 flex sm:block shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setCandidateStage("choose");
+              setStep(0);
+            }}
+            className="w-full sm:w-auto rounded-xl border-primary/30 text-primary hover:bg-primary hover:text-white text-xs font-bold cursor-pointer transition-all h-8.5"
+          >
+            <HiArrowLeft className="h-3.5 w-3.5 mr-1" /> Change Pathway
+          </Button>
+        </div>
+      </div>
+
       {/* Resume Auto-Fill Standout Hero Card */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-primary/25 bg-gradient-to-r from-primary-soft/80 via-white to-amber-50/50 p-3.5 sm:p-6 shadow-sm w-full min-w-0">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4 min-w-0">
@@ -660,7 +1055,54 @@ function Onboarding() {
         />
       </FormSection>
 
-      {regulatedProfessions.includes(str("role") || "Doctor") ? (
+        {str("cadreLevel") === "student" ? (
+        <>
+          <div className="h-px bg-slate-100" />
+          <FormSection
+            icon={<HiOutlineAcademicCap className="h-4 w-4" />}
+            title="Student & College Details"
+            subtitle="Proof of active study replaces council registration for students"
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="College / Institute name"
+                required
+                {...input("college")}
+                placeholder="e.g. Manipal College of Nursing, Bengaluru"
+              />
+              <SelectField
+                label="Current study year / status"
+                required
+                options={["1st Year", "2nd Year", "3rd Year", "Final Year", "Compulsory Rotatory Intern"]}
+                value={str("studyYear") || "Final Year"}
+                onChange={set("studyYear")}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Expected graduation year"
+                required
+                {...input("gradYear")}
+                placeholder="e.g. 2027"
+              />
+              <Field
+                label="College student roll / PRN number (optional)"
+                {...input("rollNo")}
+                placeholder="e.g. REG-2024-991"
+              />
+            </div>
+            <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 text-xs text-sky-800 flex items-start gap-2.5">
+              <HiOutlineShieldCheck className="h-5 w-5 text-sky-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Council registration is waived for students</p>
+                <p className="mt-0.5 text-sky-700">
+                  You do not need state council registration yet. Upload your College ID card or Bonafide letter in Documents. Once verified, you can immediately post in Huddle, book mentorship sessions, and apply for paid hospital internships.
+                </p>
+              </div>
+            </div>
+          </FormSection>
+        </>
+      ) : regulatedProfessions.includes(str("role") || "Doctor") ? (
         <>
           <div className="h-px bg-slate-100" />
           <FormSection
@@ -828,23 +1270,35 @@ function Onboarding() {
         title="Work Experience"
         subtitle="Every job counts, including internships"
       >
-        <Toggle
-          label="I'm a fresher"
-          desc="No work experience yet. You can still apply to fresher roles and shifts."
-          checked={!!p["fresher"]}
-          onChange={(val) => {
-            setP((prev) => ({
-              ...prev,
-              fresher: val,
-              exp: val ? "Fresher" : (prev.exp === "Fresher" ? "" : prev.exp),
-            }));
-            if (val) {
-              setExps([]);
-            } else if (exps.length === 0) {
-              addExp();
-            }
-          }}
-        />
+        {str("cadreLevel") === "student" ? (
+          <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 text-xs text-sky-900 space-y-1">
+            <p className="font-bold">Student clinical postings & ward training</p>
+            <p className="text-sky-700">
+              As a student, you do not need formal hospital employment history. Your college clinical rotatory postings are sufficient. You can apply directly for hospital internships and clinical mentorship.
+            </p>
+          </div>
+        ) : (
+          <Toggle
+            label="I'm a fresher"
+            desc="No work experience yet. You can still apply to fresher roles and shifts."
+            checked={!!p["fresher"]}
+            onChange={(val) => {
+              setP((prev) => {
+                const prevExp = typeof prev["exp"] === "string" ? prev["exp"] : "";
+                return {
+                  ...prev,
+                  fresher: val,
+                  exp: val ? "Fresher" : (prevExp === "Fresher" ? "" : prevExp),
+                };
+              });
+              if (val) {
+                setExps([]);
+              } else if (exps.length === 0) {
+                addExp();
+              }
+            }}
+          />
+        )}
 
         {!p["fresher"] && (
           <div className="space-y-4 pt-1 animate-in fade-in duration-200">
@@ -1825,14 +2279,475 @@ function Onboarding() {
     </div>
   );
 
+  const studentBody: ReactNode[] = [
+    // Step 0: Personal details & where you live
+    <div className="space-y-6 sm:space-y-8" key="s0">
+      {/* Student Pathway Status Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl border border-primary/20 bg-primary-soft/40 shadow-xs">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="h-9 w-9 rounded-xl bg-[#FFF4EC] text-[#FF5A1F] flex items-center justify-center shrink-0 border border-primary/20 mt-0.5">
+            <RiGraduationCapLine className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <span className="text-xs sm:text-[13px] font-black text-foreground">
+                Healthcare Student Pathway
+              </span>
+              <span className="rounded-full bg-primary text-white text-[10px] font-extrabold px-2.5 py-0.5 whitespace-nowrap shadow-2xs">
+                Internships &amp; Mentorship
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+              Enrolled in medical or allied health college · Huddle ward discussions &amp; internships
+            </p>
+          </div>
+        </div>
+        <div className="pt-1 sm:pt-0 flex sm:block shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setCandidateStage("choose");
+              setStep(0);
+            }}
+            className="w-full sm:w-auto rounded-xl border-primary/30 text-primary hover:bg-primary hover:text-white text-xs font-bold cursor-pointer transition-all h-8.5"
+          >
+            <HiArrowLeft className="h-3.5 w-3.5 mr-1" /> Change Pathway
+          </Button>
+        </div>
+      </div>
+
+      <FormSection
+        icon={<HiOutlineUser className="h-4 w-4" />}
+        title="Student Information"
+        subtitle="As printed on your college ID card and enrollment registry"
+      >
+        <Field
+          label="Full name"
+          required
+          icon={<HiOutlineUser />}
+          {...input("name")}
+          placeholder="As on your college ID"
+          autoComplete="name"
+        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <PhoneField label="Mobile number" required {...input("mobile")} />
+          <Field
+            label="Email address"
+            required
+            type="email"
+            icon={<HiOutlineEnvelope />}
+            {...input("email")}
+            placeholder="e.g. rahul@college.edu or rahul@gmail.com"
+          />
+        </div>
+      </FormSection>
+
+      <div className="h-px bg-slate-100" />
+
+      <FormSection
+        icon={<HiOutlineMapPin className="h-4 w-4" />}
+        title="Where you live"
+        subtitle="Helps recommend verified student internships and nearby hospital postings"
+      >
+        {addressBlock}
+      </FormSection>
+    </div>,
+
+    // Step 1: Course & college details
+    <div className="space-y-6 sm:space-y-8" key="s1">
+      <FormSection
+        icon={<RiGraduationCapLine className="h-4 w-4" />}
+        title="Academic Enrollment"
+        subtitle="Select your healthcare discipline and recognized institution"
+      >
+        <SelectField
+          label="Course"
+          required
+          icon={<HiOutlineAcademicCap />}
+          options={STUDENT_COURSES.map((c) => c.label)}
+          value={str("course") || (STUDENT_COURSES[0]?.label ?? "BPT (Physiotherapy)")}
+          onChange={set("course")}
+        />
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="College"
+            required
+            icon={<HiOutlineBuildingLibrary />}
+            {...input("college")}
+            placeholder="e.g. Sample Allied Health College"
+          />
+
+          <SelectField
+            label="Year of study"
+            required
+            icon={<HiOutlineCalendar />}
+            options={STUDENT_YEARS}
+            value={str("studyYear") || STUDENT_YEARS[0]}
+            onChange={set("studyYear")}
+            placeholder="Select year of study"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <DateField
+            label="Expected to graduate"
+            required
+            placeholder="Select expected graduation date"
+            value={str("grad")}
+            onChange={set("grad")}
+            min={`${new Date().getFullYear() - 1}-01-01`}
+            max={`${new Date().getFullYear() + 10}-12-31`}
+          />
+          <p className="text-[11px] text-slate-400">
+            Hospitals use this to invite final years and interns to full-time interviews ahead of exam results.
+          </p>
+        </div>
+      </FormSection>
+    </div>,
+
+    // Step 2: Proof of study
+    <div className="space-y-6 sm:space-y-8" key="s2">
+      <div className="rounded-2xl border border-primary/20 bg-primary-soft/60 p-4 text-xs text-slate-700 space-y-1">
+        <div className="flex items-center gap-2 font-bold text-slate-900">
+          <HiOutlineInformationCircle className="h-4 w-4 text-primary shrink-0" />
+          <span>Manual Human Verification</span>
+        </div>
+        <p className="text-slate-600 leading-relaxed text-[11px]">
+          A FALE credentialing officer verifies your student document within 24 hours. Once verified, you get the blue Verified Student badge on Huddle.
+        </p>
+      </div>
+
+      <FormSection
+        icon={<HiOutlineShieldCheck className="h-4 w-4" />}
+        title="Proof of Study"
+        subtitle="Choose one method to verify your college status"
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {STUDENT_PROOFS.map((proof) => {
+            const isSelected = (str("proof") || "college_id") === proof.id;
+            return (
+              <button
+                key={proof.id}
+                type="button"
+                onClick={() => set("proof")(proof.id)}
+                className={cn(
+                  "p-3.5 sm:p-4 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between relative select-none",
+                  isSelected
+                    ? "border-[#FF5A1F] bg-[#FFF4EC] shadow-sm ring-2 ring-[#FF5A1F]/15 dark:bg-primary/10 dark:border-primary"
+                    : "border-slate-200 bg-white hover:border-[#FF5A1F]/40 hover:bg-[#FFF4EC]/20 dark:border-border dark:bg-card dark:hover:border-primary/40"
+                )}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={cn(
+                        "text-xs font-bold leading-snug",
+                        isSelected
+                          ? "text-[#FF5A1F] dark:text-primary"
+                          : "text-slate-900 dark:text-foreground"
+                      )}
+                    >
+                      {proof.label}
+                    </span>
+                    {isSelected ? (
+                      <div className="h-5 w-5 rounded-full bg-[#FF5A1F] text-white flex items-center justify-center shrink-0 shadow-2xs">
+                        <HiCheck className="h-3.5 w-3.5 stroke-[2.5]" />
+                      </div>
+                    ) : (
+                      <div className="h-5 w-5 rounded-full border-2 border-slate-300 dark:border-border shrink-0" />
+                    )}
+                  </div>
+                  <p
+                    className={cn(
+                      "text-[11px] mt-1.5 leading-snug",
+                      isSelected
+                        ? "text-slate-700 dark:text-slate-300 font-medium"
+                        : "text-slate-500 dark:text-muted-foreground"
+                    )}
+                  >
+                    {proof.desc}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Dynamic Proof Field */}
+        {(str("proof") || "college_id") === "univ_reg" ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+            <Field
+              label="Registration number"
+              required
+              icon={<HiOutlineAcademicCap />}
+              {...input("univReg")}
+              placeholder="e.g. 21BPT0456"
+            />
+            <p className="text-[11px] text-slate-500">
+              We verify your enrollment record directly with the affiliating university registrar.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <UploadBox
+              label="Upload a photo or PDF"
+              hint="Up to 5 MB"
+              file={docs["Proof of study"]}
+              onFile={(fileName: string | undefined) => {
+                setDocs((prev) => {
+                  const copy = { ...prev };
+                  if (fileName) {
+                    copy["Proof of study"] = fileName;
+                  } else {
+                    delete copy["Proof of study"];
+                  }
+                  return copy;
+                });
+              }}
+            />
+
+            {!docs["Proof of study"] && (
+              <div className="flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sampleName = str("proof") === "bonafide" ? "bonafide-certificate.pdf" : "college-id-card.jpg";
+                    setDocs((prev) => ({ ...prev, "Proof of study": sampleName }));
+                    toast.success(`Attached ${sampleName} for demo`);
+                  }}
+                  className="text-xs font-semibold text-primary hover:underline cursor-pointer inline-flex items-center gap-1"
+                >
+                  <HiOutlineSparkles className="h-3.5 w-3.5" />
+                  Use a sample file for this demo
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </FormSection>
+    </div>,
+
+    // Step 3: Review & statutory declaration
+    <div className="space-y-6 sm:space-y-8" key="s3">
+      {/* Student Pathway Profile Summary Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5 rounded-2xl border border-primary/20 bg-primary-soft/40 shadow-xs">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <div className="h-12 w-12 rounded-2xl bg-primary-soft text-primary font-black text-lg flex items-center justify-center shrink-0 border border-primary/25">
+            {initials(str("name") || "ST")}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-extrabold text-slate-900 leading-snug">{str("name") || "Student Candidate"}</h3>
+              <span className="rounded-full bg-primary/10 text-primary border border-primary/20 px-2.5 py-0.5 text-[11px] font-bold">
+                Healthcare Student
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">{str("course") || "Healthcare Course"} · {str("studyYear") || "Student"}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Structured Section Cards matching Candidate and Facility review */}
+      <div className="space-y-4">
+        {/* Card 0: Personal Details & Location */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+              <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary mt-0.5">
+                <HiOutlineUser className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Personal Details &amp; Residence</h3>
+                <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Contact details &amp; where you live</p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setStep(0)}
+              className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+            >
+              <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+            </Button>
+          </div>
+
+          <div className="grid gap-2.5 sm:gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+              <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Full Name</span>
+              <p className="mt-0.5 text-xs sm:text-sm font-bold text-slate-900">{str("name") || "—"}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+              <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Mobile Phone</span>
+              <p className="mt-0.5 flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-800">
+                <HiOutlinePhone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                +91 {str("mobile") || "—"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 sm:col-span-2">
+              <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
+              <p className="mt-0.5 flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-800 break-all">
+                <HiOutlineEnvelope className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                {str("email") || "—"}
+              </p>
+            </div>
+          </div>
+
+          {/* Location box */}
+          <div className="mt-3">
+            <div className="flex items-start gap-2.5 sm:gap-3 rounded-xl border border-slate-200/80 bg-slate-50/80 p-3">
+              <HiOutlineMapPin className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+              <div className="text-xs text-slate-700 min-w-0 flex-1">
+                <span className="font-semibold text-slate-900 break-words">{str("address") || str("area") || "Address on file"}</span>
+                {(str("city") || str("state") || str("pincode")) && (
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    {[str("city"), str("state"), str("pincode")].filter(Boolean).join(", ")}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 1: Academic Enrollment */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+              <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-600 mt-0.5">
+                <RiGraduationCapLine className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Academic Enrollment</h3>
+                <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Healthcare course, college &amp; expected graduation</p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setStep(1)}
+              className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+            >
+              <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+            </Button>
+          </div>
+
+          <div className="grid gap-2.5 sm:gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 sm:col-span-2">
+              <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Course / Discipline</span>
+              <p className="mt-0.5 text-xs sm:text-sm font-bold text-slate-900">{str("course") || "Healthcare Course"}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+              <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">College / Institution</span>
+              <p className="mt-0.5 text-xs sm:text-sm font-bold text-slate-900">{str("college") || "—"}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+              <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Year of Study</span>
+              <p className="mt-0.5 text-xs sm:text-sm font-semibold text-slate-800">{str("studyYear") || "1st year"}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3 sm:col-span-2">
+              <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Expected Graduation</span>
+              <p className="mt-0.5 text-xs sm:text-sm font-bold text-primary">{str("grad") || "—"}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2: Proof of Study */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-6 shadow-xs hover:border-slate-300 transition-all">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+              <div className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600 mt-0.5">
+                <HiOutlineShieldCheck className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">Proof of Study</h3>
+                <p className="text-[11px] sm:text-xs text-slate-500 leading-normal mt-0.5">Verification document &amp; registry credentials</p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setStep(2)}
+              className="shrink-0 self-start gap-1 rounded-xl border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-primary-soft hover:text-primary hover:border-primary/30 transition-all cursor-pointer shadow-2xs h-8 whitespace-nowrap"
+            >
+              <HiOutlinePencilSquare className="h-3.5 w-3.5" /> Edit
+            </Button>
+          </div>
+
+          <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5 sm:p-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white border border-slate-200 text-emerald-600 shadow-2xs">
+                <HiOutlineDocumentCheck className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] sm:text-[10.5px] font-bold uppercase tracking-wider text-slate-400 block">
+                  {str("proof") === "univ_reg" ? "University Registration Number" : str("proof") === "bonafide" ? "Bonafide Certificate" : "College ID Card"}
+                </span>
+                <p className="text-xs sm:text-sm font-bold text-slate-900 truncate mt-0.5">
+                  {str("proof") === "univ_reg" ? str("univReg") || "—" : docs["Proof of study"] || "college-id-card.jpg"}
+                </p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200/60 px-2.5 py-1 text-[11px] font-bold text-emerald-700 shrink-0">
+              <HiCheck className="h-3.5 w-3.5 stroke-[2.5]" /> Attached
+            </span>
+          </div>
+
+          <div className="mt-3 rounded-xl border border-primary/20 bg-primary-soft/40 p-3 text-xs text-slate-600 space-y-0.5">
+            <div className="flex items-center gap-1.5 font-bold text-slate-900 text-[11px]">
+              <HiOutlineInformationCircle className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span>Manual Human Verification</span>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-snug">
+              A FALE credentialing officer will review and verify your student proof within 24 hours.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Statutory 18+ Adult Declaration */}
+      <div className="rounded-2xl border border-primary/25 bg-gradient-to-r from-primary-soft/40 via-white to-emerald-50/30 p-4 sm:p-6 shadow-sm">
+        <label className="flex items-start gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={!!p["adult"]}
+            onChange={(e) => set("adult")(e.target.checked)}
+            required
+            className="mt-1 h-5 w-5 accent-primary rounded cursor-pointer shrink-0"
+          />
+          <div className="space-y-1 min-w-0 flex-1">
+            <span className="text-sm font-bold text-slate-900 block">
+              I am 18 or older &amp; Student Credential Declaration
+            </span>
+            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-normal">
+              The Fale is for adults only. I confirm that I am currently enrolled in the specified college and course. I authorize FALE credentialing officers to verify my enrollment credentials directly with my college registrar.
+            </p>
+          </div>
+        </label>
+      </div>
+    </div>,
+  ];
+
   const body = f
     ? [facility[0], facility[1], <div className="space-y-8" key="f2-wrap">{facility[2]}{docsStep}</div>, facility[3], review][step]
+    : candidateStage === "student"
+    ? studentBody[step]
     : [...candidate, docsStep, review][step];
 
   const pct = Math.round(((step + 1) / steps.length) * 100);
 
   return (
-    <div className="light min-h-screen bg-[#f8fafc] text-slate-900" data-theme="light">
+    <div
+      className={cn(
+        "light min-h-screen text-slate-900 transition-colors",
+        candidateStage === "choose" ? "bg-white" : "bg-[#f8fafc]"
+      )}
+      data-theme="light"
+    >
       {/* Top Professional Sticky Header (Apple/LinkedIn inspired) */}
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
@@ -1840,13 +2755,19 @@ function Onboarding() {
             <Logo />
             <div className="hidden sm:block h-5 w-px bg-slate-200" />
             <span className="hidden sm:inline-block text-xs font-semibold uppercase tracking-wider text-slate-500">
-              {f ? "Healthcare Facility Setup" : "Healthcare Professional Onboarding"}
+              {f
+                ? "Healthcare Facility Setup"
+                : candidateStage === "choose"
+                ? "Career Gateway"
+                : candidateStage === "student"
+                ? "Healthcare Student Onboarding"
+                : "Healthcare Professional Onboarding"}
             </span>
           </div>
 
           <div className="flex items-center gap-3">
             {/* Candidate Resume Auto-fill trigger in header */}
-            {!f && (
+            {!f && candidateStage === "graduate" && (
               <Button
                 type="button"
                 variant="outline"
@@ -1860,43 +2781,83 @@ function Onboarding() {
             )}
 
             {/* Auto-saved badge */}
-            <div className="hidden sm:flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1 text-xs font-semibold text-emerald-800">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-              </span>
-              Auto-saved
-            </div>
+            {candidateStage !== "choose" && (
+              <div className="hidden sm:flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/80 px-3 py-1 text-xs font-semibold text-emerald-800">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                </span>
+                Auto-saved
+              </div>
+            )}
 
-            <button
-              type="button"
-              aria-label="Exit setup"
-              title="Exit profile setup"
-              onClick={() => setShowExitModal(true)}
-              className="group p-2 text-primary hover:text-primary-hover hover:bg-primary-soft/70 rounded-xl transition-all cursor-pointer"
-            >
-              <LogOut className="h-5 w-5 stroke-[2.2] transition-transform group-hover:translate-x-0.5" />
-            </button>
+            {candidateStage === "choose" ? (
+              <Link
+                to="/"
+                aria-label="Back to sign in"
+                title="Back to sign in"
+                className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-all cursor-pointer border border-slate-200"
+              >
+                <HiArrowLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />
+                <span>Sign in</span>
+              </Link>
+            ) : (
+              <button
+                type="button"
+                aria-label="Exit setup"
+                title="Exit profile setup"
+                onClick={() => setShowExitModal(true)}
+                className="group p-2 text-primary hover:text-primary-hover hover:bg-primary-soft/70 rounded-xl transition-all cursor-pointer"
+              >
+                <LogOut className="h-5 w-5 stroke-[2.2] transition-transform group-hover:translate-x-0.5" />
+              </button>
+            )}
           </div>
         </div>
         {/* Mobile progress line */}
-        <div className="h-1 bg-slate-100 lg:hidden">
-          <div
-            className="h-full bg-primary transition-all duration-300"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
+        {candidateStage !== "choose" && (
+          <div className="h-1 bg-slate-100 lg:hidden">
+            <div
+              className="h-full bg-primary transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        )}
       </header>
 
-      {/* Main Grid: Stepper Sidebar + Master Form Card */}
-      <div className="mx-auto grid max-w-6xl gap-6 lg:gap-8 px-3.5 py-6 sm:px-6 sm:py-8 lg:grid-cols-[290px_minmax(0,1fr)] items-start">
+      {!f && candidateStage === "choose" ? (
+        <CandidatePathwayChooser
+          onSelectStudent={() => {
+            setCandidateStage("student");
+            setStep(0);
+            setP((prev) => ({
+              ...prev,
+              cadreLevel: "student",
+              level: "student",
+              fresher: true,
+              exp: "Student",
+            }));
+          }}
+          onSelectGraduate={() => {
+            setCandidateStage("graduate");
+            setStep(0);
+            setP((prev) => ({
+              ...prev,
+              cadreLevel: "professional",
+              level: "professional",
+            }));
+          }}
+        />
+      ) : (
+        /* Main Grid: Stepper Sidebar + Master Form Card */
+        <div className="mx-auto grid max-w-6xl gap-6 lg:gap-8 px-3.5 py-6 sm:px-6 sm:py-8 lg:grid-cols-[290px_minmax(0,1fr)] items-start">
         {/* Left Stepper Sidebar - Sticky on page scroll without separate scrollbar */}
         <aside className="hidden lg:block select-none self-start sticky top-[84px] space-y-4 z-20">
           <div className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05),0_1px_3px_rgba(0,0,0,0.03)]">
             {/* Header with progress */}
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-primary">
-                {f ? "Facility Setup" : "Your Profile"}
+                {f ? "Facility Setup" : candidateStage === "student" ? "Student Profile" : "Your Profile"}
               </span>
               <span className="inline-flex items-center rounded-full bg-primary-soft border border-primary/20 px-2.5 py-0.5 text-xs font-bold text-primary">
                 {pct}% complete
@@ -1995,7 +2956,11 @@ function Onboarding() {
                   Step {step + 1} of {steps.length}
                 </span>
                 <span className="text-xs font-semibold text-slate-400">
-                  {f ? "Employer Verification" : "Profile Setup"}
+                  {f
+                    ? "Employer Verification"
+                    : candidateStage === "student"
+                    ? "Student Verification"
+                    : "Profile Setup"}
                 </span>
               </div>
               <h1 className="mt-3 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
@@ -2018,7 +2983,15 @@ function Onboarding() {
                 variant="outline"
                 size="lg"
                 className="w-full sm:w-auto gap-2 rounded-xl border-slate-300 font-semibold text-slate-700 hover:bg-slate-50 active:scale-[0.98] transition-all cursor-pointer"
-                onClick={() => (step ? setStep(step - 1) : navigate({ to: "/" }))}
+                onClick={() => {
+                  if (step > 0) {
+                    setStep(step - 1);
+                  } else if (!f && candidateStage !== "choose") {
+                    setCandidateStage("choose");
+                  } else {
+                    navigate({ to: "/" });
+                  }
+                }}
               >
                 <HiArrowLeft className="h-4 w-4" /> Back
               </Button>
@@ -2046,7 +3019,11 @@ function Onboarding() {
                 )}
 
                 <span className="relative z-10 font-semibold tracking-wide">
-                  {step === steps.length - 1 ? "Submit for verification" : "Save & continue"}
+                  {step === steps.length - 1
+                    ? candidateStage === "student"
+                      ? "Create my account"
+                      : "Submit for verification"
+                    : "Save & continue"}
                 </span>
 
                 <span
@@ -2072,6 +3049,7 @@ function Onboarding() {
           </div>
         </form>
       </div>
+      )}
 
       {/* Exit Confirmation Modal */}
       {showExitModal && (

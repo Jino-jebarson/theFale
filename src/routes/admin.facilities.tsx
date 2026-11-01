@@ -46,7 +46,7 @@ export const Route = createFileRoute("/admin/facilities")({
   component: FacilityKYCAdmin,
 });
 
-export function FacilityKYCAdmin() {
+function FacilityKYCAdmin() {
   const s = useApp();
   const [filter, setFilter] = useState<"all" | "pending" | "verified" | "rejected">("pending");
   const [search, setSearch] = useState("");

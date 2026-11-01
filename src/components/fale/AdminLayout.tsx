@@ -19,6 +19,8 @@ import {
   HiOutlineComputerDesktop,
   HiCheck,
   HiOutlineBell,
+  HiOutlineChatBubbleLeftRight,
+  HiChatBubbleLeftRight,
 } from "react-icons/hi2";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
@@ -58,6 +60,9 @@ export function AdminLayout({
   const pendingFacilityKYC = s.facilityKYC.filter((f) => f.status === "pending").length;
   const pendingJobApprovals = s.jobApprovals.filter((j) => j.status === "pending").length;
   const pendingShortlisting = s.adminApplications.filter((a) => a.status === "pending_admin").length;
+  const pendingHuddleModeration = s.huddlePosts.filter(
+    (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
+  ).length;
 
   const adminNav = [
     {
@@ -99,6 +104,14 @@ export function AdminLayout({
       icon: HiOutlineUserGroup,
       active: HiUserGroup,
       badge: pendingShortlisting,
+    },
+    {
+      to: "/admin/huddle",
+      label: "Huddle Moderation",
+      shortLabel: "Huddle",
+      icon: HiOutlineChatBubbleLeftRight,
+      active: HiChatBubbleLeftRight,
+      badge: pendingHuddleModeration,
     },
   ] as const;
 

@@ -565,12 +565,15 @@ export function DateField({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const parsedDate = value ? new Date(value) : null;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
   const initialYear = parsedDate && !isNaN(parsedDate.getTime())
     ? parsedDate.getFullYear()
-    : max ? parseInt(max.split("-")[0], 10) : 2000;
+    : currentYear;
   const initialMonth = parsedDate && !isNaN(parsedDate.getTime())
     ? parsedDate.getMonth()
-    : 0;
+    : currentMonth;
 
   const [viewYear, setViewYear] = useState(initialYear);
   const [viewMonth, setViewMonth] = useState(initialMonth);

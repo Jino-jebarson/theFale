@@ -10,6 +10,8 @@ import {
   HiOutlineCheckCircle,
   HiArrowRight,
   HiOutlineShieldCheck,
+  HiOutlineAcademicCap,
+  HiOutlineLockClosed,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill } from "react-icons/ri";
 import { toast } from "sonner";
@@ -48,6 +50,13 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
   const app = s.applied.find((a) => a.jobId === job.id);
   const isApplied = Boolean(app && app.status !== "Withdrawn");
 
+  const isStudent =
+    s.candidateLevel === "student" ||
+    s.profile["cadreLevel"] === "student" ||
+    s.profile["level"] === "student";
+  const isInternship = job.kind === "internship" || job.type === "Internship";
+  const isRestrictedForStudent = isStudent && !isInternship;
+
   const toggleSave = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -62,6 +71,12 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
   const quickApply = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (isRestrictedForStudent) {
+      toast.info("Internships only for students", {
+        description: "Full-time hospital jobs unlock once you graduate with council registration.",
+      });
+      return;
+    }
     const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     setState((x) => ({
       applied: [{ jobId: job.id, status: "Applied", date: now }, ...x.applied.filter((a) => a.jobId !== job.id)],
@@ -88,7 +103,7 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
               {job.org}
             </h4>
             <p className="text-[11px] text-muted-foreground truncate">
-              {job.city} · {job.type}
+              {job.city} · {isInternship ? "Internship Track" : job.type}
               {job.dept && ` · ${job.dept}`}
             </p>
           </div>
@@ -96,6 +111,12 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
 
         {/* Right: Match & Bookmark */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {isInternship && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-black text-primary">
+              <HiOutlineAcademicCap className="h-3 w-3" />
+              <span>Internship</span>
+            </span>
+          )}
           <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
             {job.match}% Match
@@ -132,7 +153,7 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
         {/* Clean, quiet skills */}
         {!compact && (
           <div className="mt-2.5 flex items-center gap-1.5 flex-wrap text-xs text-muted-foreground">
-            {job.tags.slice(0, 2).map((tag) => (
+            {job.tags.slice(0, 3).map((tag) => (
               <span
                 key={tag}
                 className="rounded-md bg-muted/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
@@ -153,8 +174,10 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
       {/* Metrics & Action Bar */}
       <div className="mt-5 pt-4 border-t border-border/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
         <div className="flex flex-wrap items-baseline gap-2.5 text-xs text-muted-foreground">
-          <span className="text-sm font-bold text-foreground">{job.salary}</span>
-          <span className="text-[11px]">/ month</span>
+          <span className="text-sm font-bold text-foreground">
+            {job.stipend || job.salary}
+          </span>
+          {!job.stipend && <span className="text-[11px]">/ month</span>}
           <span className="text-muted-foreground/40">•</span>
           <span className="font-medium text-foreground/80">{job.exp}</span>
           {job.shift && (
@@ -180,6 +203,14 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
             <span className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 px-3.5 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
               <HiOutlineCheckCircle className="h-4 w-4" />
               <span>Applied</span>
+            </span>
+          ) : isRestrictedForStudent ? (
+            <span
+              title="Students can apply to internships. Full-time hospital roles unlock upon graduation with council registration."
+              className="inline-flex items-center gap-1 rounded-xl bg-muted border border-border/80 px-3 py-1.5 text-xs font-semibold text-muted-foreground cursor-not-allowed select-none"
+            >
+              <HiOutlineLockClosed className="h-3.5 w-3.5" />
+              <span>Internships only for students</span>
             </span>
           ) : (
             <button

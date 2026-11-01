@@ -42,7 +42,7 @@ export const Route = createFileRoute("/admin/applications")({
   component: ApplicationsAdmin,
 });
 
-export function ApplicationsAdmin() {
+function ApplicationsAdmin() {
   const s = useApp();
   const [filter, setFilter] = useState<"all" | "pending_admin" | "shortlisted" | "rejected">("pending_admin");
   const [search, setSearch] = useState("");

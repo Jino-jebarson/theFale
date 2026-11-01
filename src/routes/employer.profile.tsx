@@ -175,7 +175,7 @@ function HospitalProfileScreen() {
             <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent pointer-events-none" />
             <div className="absolute top-4 right-4 flex items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-background/90 backdrop-blur-md px-3 py-1 text-xs font-semibold text-foreground border border-border/60">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
                 <span>Verified Hospital</span>
               </span>
             </div>
@@ -215,7 +215,7 @@ function HospitalProfileScreen() {
                     <span className="hidden sm:inline">•</span>
                     <span>{bedCapacity} Beds ({icuBeds} ICU)</span>
                     <span className="hidden sm:inline">•</span>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                    <span className="text-primary font-medium flex items-center gap-1">
                       <HiOutlineShieldCheck className="h-3.5 w-3.5" />
                       NABH &amp; JCI Accredited
                     </span>
@@ -289,10 +289,10 @@ function HospitalProfileScreen() {
             </div>
 
             <div className="p-3 bg-card">
-              <span className="text-[10px] uppercase font-bold text-emerald-800 dark:text-emerald-300 block">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground block">
                 Accreditation Standard
               </span>
-              <span className="text-base sm:text-lg font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 block">
+              <span className="text-base sm:text-lg font-bold font-mono text-primary mt-0.5 block">
                 NABH &amp; JCI
               </span>
             </div>
@@ -427,14 +427,14 @@ function HospitalProfileScreen() {
             <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs space-y-3.5">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 shrink-0">
+                  <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary-soft text-primary shrink-0">
                     <HiOutlineShieldCheck className="h-4 w-4" />
                   </div>
                   <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
                     Nurse-to-Patient Staffing Commitment
                   </h3>
                 </div>
-                <span className="shrink-0 text-[10px] font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-2.5 py-0.5 rounded-full">
+                <span className="shrink-0 text-[10px] font-bold text-primary bg-primary-soft border border-primary/20 px-2.5 py-0.5 rounded-full">
                   NABH Standard
                 </span>
               </div>
@@ -482,14 +482,14 @@ function HospitalProfileScreen() {
             <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs space-y-3.5">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
                 <div className="flex items-center gap-2 min-w-0">
-                  <div className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 shrink-0">
+                  <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary-soft text-primary shrink-0">
                     <HiOutlineDocumentCheck className="h-4 w-4" />
                   </div>
                   <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
                     Quality Accreditations &amp; Certifications
                   </h3>
                 </div>
-                <span className="shrink-0 text-[10px] font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded-full">
+                <span className="shrink-0 text-[10px] font-bold text-primary bg-primary-soft border border-primary/20 px-2 py-0.5 rounded-full">
                   100% Verified
                 </span>
               </div>
@@ -504,7 +504,7 @@ function HospitalProfileScreen() {
                       <span className="text-xs font-bold text-foreground leading-snug">
                         {acc.title}
                       </span>
-                      <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 shrink-0">
+                      <span className="text-[9px] font-bold text-primary bg-primary-soft px-2 py-0.5 rounded-full border border-primary/20 shrink-0">
                         {acc.badge}
                       </span>
                     </div>
@@ -594,14 +594,14 @@ function HospitalProfileScreen() {
             </div>
 
             {/* Escrow & Council Compliance Card */}
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 shadow-2xs space-y-2">
+            <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 shadow-2xs space-y-2">
               <div className="flex items-center gap-2">
-                <HiOutlineShieldCheck className="h-4.5 w-4.5 text-emerald-600" />
-                <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                <HiOutlineShieldCheck className="h-4.5 w-4.5 text-primary" />
+                <span className="text-xs font-bold text-foreground">
                   FALE Nodal Escrow Partner
                 </span>
               </div>
-              <p className="text-[11px] text-emerald-800/90 dark:text-emerald-300/90 leading-relaxed">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
                 NABH 5th Edition &amp; JCI Certified. All clinician shifts posted by {hospitalName} are protected by automated 24-hr escrow signoffs and State Medical/Nursing Council verification.
               </p>
             </div>

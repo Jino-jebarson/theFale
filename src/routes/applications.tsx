@@ -14,6 +14,8 @@ import {
   HiOutlineArrowTopRightOnSquare,
   HiOutlineClock,
   HiOutlineDocumentCheck,
+  HiOutlineAcademicCap,
+  HiOutlineSparkles,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
@@ -40,32 +42,42 @@ export const Route = createFileRoute("/applications")({
 
 const stages = ["Applied", "Under review", "Interview", "Offer", "Hired"] as const;
 
-function getStatusDetails(status: string, date: string, org: string) {
+function getStatusDetails(status: string, date: string, org: string, isStudent = false) {
   switch (status) {
     case "Applied":
       return {
         badgeColor: "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border-blue-200 dark:border-blue-900/40",
-        summary: `Application submitted to ${org} clinical talent desk on ${date}. Screening in progress.`,
+        summary: isStudent
+          ? `Application submitted to ${org} Clinical Training Desk on ${date}. Student screening in progress.`
+          : `Application submitted to ${org} clinical talent desk on ${date}. Screening in progress.`,
       };
     case "Under review":
       return {
         badgeColor: "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border-amber-200 dark:border-amber-900/40",
-        summary: `${org} reviewed your clinical profile & registration. Departmental review underway.`,
+        summary: isStudent
+          ? `${org} clinical faculty & supervisor reviewed your college bonafide and coursework.`
+          : `${org} reviewed your clinical profile & registration. Departmental review underway.`,
       };
     case "Interview":
       return {
         badgeColor: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/40",
-        summary: `Shortlisted for clinical interview by ${org}. Scheduling details sent via email/SMS.`,
+        summary: isStudent
+          ? `Shortlisted for clinical viva & rounds discussion by ${org} Department Head.`
+          : `Shortlisted for clinical interview by ${org}. Scheduling details sent via email/SMS.`,
       };
     case "Offer":
       return {
         badgeColor: "bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border-purple-200 dark:border-purple-900/40",
-        summary: `Formal offer letter extended by ${org}. Review compensation details and joining terms.`,
+        summary: isStudent
+          ? `Formal clinical internship offer letter extended by ${org} with monthly stipend terms.`
+          : `Formal offer letter extended by ${org}. Review compensation details and joining terms.`,
       };
     case "Hired":
       return {
         badgeColor: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/40",
-        summary: `Offer accepted! Clinical credentialing and onboarding confirmed.`,
+        summary: isStudent
+          ? `Internship confirmed! Hospital clinical onboarding and trainee ID issued.`
+          : `Offer accepted! Clinical credentialing and onboarding confirmed.`,
       };
     case "Withdrawn":
       return {
@@ -86,14 +98,35 @@ function Applications() {
   const [q, setQ] = useState("");
   const [withdrawingApp, setWithdrawingApp] = useState<{ jobId: string; title: string; org: string } | null>(null);
 
+  const candidateLevel =
+    s.candidateLevel ||
+    (s.profile["level"] as any) ||
+    (s.profile["cadreLevel"] as any) ||
+    (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
+  const isStudent = candidateLevel === "student";
+
+  const studentInternshipApps = useMemo(() => {
+    const customInternships = s.applied.filter((a) => {
+      const j = jobs.find((x) => x.id === a.jobId);
+      return j && j.kind === "internship";
+    });
+    if (customInternships.length > 0) return customInternships;
+    return [
+      { jobId: "intern-1", status: "Interview", date: "12 Oct 2026" },
+      { jobId: "intern-2", status: "Under review", date: "09 Oct 2026" },
+    ];
+  }, [s.applied]);
+
+  const effectiveApplied = isStudent ? studentInternshipApps : s.applied;
+
   const activeApps = useMemo(
-    () => s.applied.filter((a) => !["Not selected", "Withdrawn"].includes(a.status)),
-    [s.applied]
+    () => effectiveApplied.filter((a) => !["Not selected", "Withdrawn"].includes(a.status)),
+    [effectiveApplied]
   );
 
   const closedApps = useMemo(
-    () => s.applied.filter((a) => ["Not selected", "Withdrawn"].includes(a.status)),
-    [s.applied]
+    () => effectiveApplied.filter((a) => ["Not selected", "Withdrawn"].includes(a.status)),
+    [effectiveApplied]
   );
 
   const list = useMemo(() => {
@@ -143,10 +176,12 @@ function Applications() {
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-foreground">
-            Every step, in one place.
+            {isStudent ? "My Clinical Applications & Internships" : "Every step, in one place."}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Follow your healthcare job applications from first hello to your first day.
+            {isStudent
+              ? "Track your clinical internship applications, proctor reviews, and academic offers."
+              : "Follow your healthcare job applications from first hello to your first day."}
           </p>
         </div>
       </div>
@@ -213,7 +248,7 @@ function Applications() {
           if (!j) return null;
           const idx = stages.indexOf(a.status as (typeof stages)[number]);
           const isWithdrawn = a.status === "Withdrawn";
-          const details = getStatusDetails(a.status, a.date, j.org);
+          const details = getStatusDetails(a.status, a.date, j.org, isStudent);
 
           return (
             <div
@@ -225,33 +260,8 @@ function Applications() {
                 <OrgMark name={j.org} className="h-12 w-12 sm:h-13 sm:w-13 text-sm shrink-0" />
 
                 <div className="flex-1 min-w-0">
-                  {/* Top Bar: Status Badge & Withdraw Action */}
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold border",
-                        details.badgeColor
-                      )}
-                    >
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
-                      {a.status}
-                    </span>
-
-                    {tab === "Active" && (
-                      <button
-                        type="button"
-                        onClick={() => setWithdrawingApp({ jobId: a.jobId, title: j.title, org: j.org })}
-                        title="Withdraw this application"
-                        className="inline-flex items-center gap-1 rounded-xl border border-border/80 bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground transition-all hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:border-rose-900/60 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 active:scale-[0.98] cursor-pointer"
-                      >
-                        <HiOutlineArrowUturnLeft className="h-3.5 w-3.5" />
-                        <span>Withdraw</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Title - Full Width */}
-                  <div className="mt-1.5">
+                  {/* Title and Withdraw Action */}
+                  <div className="flex items-start justify-between gap-3">
                     <Link
                       to="/jobs/$id"
                       params={{ id: j.id }}
@@ -260,6 +270,18 @@ function Applications() {
                       <span>{j.title}</span>
                       <HiOutlineArrowTopRightOnSquare className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-primary" />
                     </Link>
+
+                    {tab === "Active" && (
+                      <button
+                        type="button"
+                        onClick={() => setWithdrawingApp({ jobId: a.jobId, title: j.title, org: j.org })}
+                        title="Withdraw this application"
+                        className="inline-flex items-center gap-1 rounded-xl border border-border/80 bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground transition-all hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:border-rose-900/60 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 active:scale-[0.98] cursor-pointer shrink-0"
+                      >
+                        <HiOutlineArrowUturnLeft className="h-3.5 w-3.5" />
+                        <span>Withdraw</span>
+                      </button>
+                    )}
                   </div>
 
                   {/* Hospital & Department */}
@@ -284,12 +306,12 @@ function Applications() {
 
                     <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground">
                       <HiOutlineBriefcase className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span>{j.type}</span>
+                      <span>{j.kind === "internship" ? "Academic Track" : j.type}</span>
                     </span>
 
                     <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground">
                       <HiOutlineCurrencyRupee className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span>{j.salary}</span>
+                      <span>{j.kind === "internship" ? `Stipend: ${j.salary}` : j.salary}</span>
                     </span>
 
                     <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground">
@@ -459,12 +481,14 @@ function Applications() {
             <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
               {q
                 ? "No applications matched your search query."
+                : isStudent
+                ? "Explore accredited clinical internships with monthly stipends and apply directly."
                 : "Explore verified healthcare opportunities and apply directly with 1 click."}
             </p>
             <div className="mt-4">
               <Link to="/jobs" search={{ q: undefined }}>
                 <Button size="sm" className="rounded-xl font-bold h-9 px-4">
-                  Browse Verified Jobs
+                  {isStudent ? "Browse Clinical Internships" : "Browse Verified Jobs"}
                 </Button>
               </Link>
             </div>

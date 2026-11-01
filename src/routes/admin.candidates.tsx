@@ -52,7 +52,7 @@ export const Route = createFileRoute("/admin/candidates")({
   component: CandidateKYCAdmin,
 });
 
-export function CandidateKYCAdmin() {
+function CandidateKYCAdmin() {
   const s = useApp();
   const [filter, setFilter] = useState<"all" | "pending" | "verified" | "rejected">("pending");
   const [search, setSearch] = useState("");

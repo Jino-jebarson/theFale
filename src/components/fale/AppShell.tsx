@@ -9,6 +9,7 @@ import {
   HiOutlineIdentification, HiIdentification, HiOutlineBuildingOffice2, HiBuildingOffice2,
   HiOutlineDocumentCheck, HiDocumentCheck, HiOutlineShieldCheck, HiOutlineUser,
   HiOutlineBanknotes, HiBanknotes,
+  HiOutlineChatBubbleLeftRight, HiChatBubbleLeftRight,
 } from "react-icons/hi2";
 import { RiBuilding4Line, RiStethoscopeLine, RiVerifiedBadgeFill } from "react-icons/ri";
 import { Logo } from "./Logo";
@@ -30,6 +31,7 @@ const candidateNav = [
   { to: "/earnings", label: "Earnings", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
   { to: "/applications", label: "Applications", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
   { to: "/learning", label: "Learning", icon: HiOutlineAcademicCap, active: HiAcademicCap, badge: 0 },
+  { to: "/huddle", label: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: 0 },
 ] as const;
 
 const facilityNav = [
@@ -39,6 +41,7 @@ const facilityNav = [
   { to: "/employer/applicants", label: "Shortlisted", icon: HiOutlineUserGroup, active: HiUserGroup, badge: 0 },
   { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
   { to: "/employer/wallet", label: "Wallet & Escrow", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
+  { to: "/huddle", label: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: 0 },
 ] as const;
 
 export function initials(name?: string) {
@@ -99,6 +102,10 @@ function AccountMenuContent({
               ? "Clinical Verification Board"
               : portal === "facility"
                 ? String(profile["org"] || "Your Organization")
+                : profile["level"] === "student"
+                ? `Student · ${profile["course"] || profile["role"] || "Healthcare"}`
+                : profile["level"] === "fresher"
+                ? `Fresher · ${profile["role"] || "Healthcare"}`
                 : String(profile["role"] || "Verified Clinician")}
           </p>
         </div>
@@ -128,12 +135,18 @@ function AccountMenuContent({
             onClick={() => onNavigate("/profile")}
             className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
           >
-            <span className="grid h-8 w-8 place-items-center rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 shrink-0">
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
               <HiOutlineUser className="h-4 w-4" />
             </span>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-foreground">Doctor Profile & Verified CV</p>
-              <p className="text-[10px] text-muted-foreground">Council registrations & DigiLocker KYC</p>
+              <p className="text-xs font-bold text-foreground">
+                {profile["level"] === "student" ? "Profile" : "Profile & Verified CV"}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                {profile["level"] === "student"
+                  ? "College affiliation & verification"
+                  : "Council registrations & DigiLocker KYC"}
+              </p>
             </div>
           </button>
         )}
@@ -221,14 +234,14 @@ function AccountMenuContent({
           className={cn(
             "w-full flex items-center gap-2.5 rounded-2xl p-2.5 text-xs cursor-pointer transition-all border text-left",
             portal === "candidate"
-              ? "bg-sky-500/10 border-sky-500/30 text-foreground font-bold shadow-2xs"
+              ? "bg-primary/10 border-primary/30 text-foreground font-bold shadow-2xs"
               : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
           )}
         >
           <span
             className={cn(
               "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
-              portal === "candidate" ? "bg-sky-500 text-white" : "bg-muted text-muted-foreground"
+              portal === "candidate" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
             )}
           >
             <RiStethoscopeLine className="h-4 w-4" />
@@ -237,12 +250,12 @@ function AccountMenuContent({
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-bold">Candidate Portal</span>
               {portal === "candidate" && (
-                <span className="text-[9px] font-extrabold text-sky-600 dark:text-sky-400 uppercase tracking-wider">Active</span>
+                <span className="text-[9px] font-extrabold text-primary uppercase tracking-wider">Active</span>
               )}
             </div>
             <p className="text-[10px] text-muted-foreground truncate">Apply for jobs & instant shifts</p>
           </div>
-          {portal === "candidate" && <HiCheck className="h-4 w-4 text-sky-600 dark:text-sky-400 shrink-0" />}
+          {portal === "candidate" && <HiCheck className="h-4 w-4 text-primary shrink-0" />}
         </button>
 
         {/* Admin Operations */}
@@ -442,7 +455,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className="min-h-screen pb-20 md:pb-0 w-full max-w-full overflow-x-clip"
+      className="min-h-screen pb-20 md:pb-0 w-full max-w-full"
       style={{ "--header-offset": headerVisible ? "4rem" : "0rem" } as React.CSSProperties}
     >
       <header

@@ -258,7 +258,7 @@
     min-height: 100%;
     overflow-x: clip;
     overflow-y: visible;
-    position: relative;
+    position: static;
   }
 
   #root {

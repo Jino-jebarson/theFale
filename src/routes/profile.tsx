@@ -69,6 +69,9 @@ function Profile() {
   const employer = String(p["employer"] || "Madras Medical College & Government General Hospital");
   const qual = String(p["qual"] || "MBBS");
   const institution = String(p["institution"] || "Madras Medical College, Chennai");
+  const candidateLevel = String(p["level"] || p["cadreLevel"] || (p["exp"] === "Fresher" ? "fresher" : "professional"));
+  const isStudent = candidateLevel === "student";
+  const collegeName = String(p["college"] || institution);
   const openToWork = p["openToWork"] !== false;
   const salary = String(p["salary"] || "₹45,000–₹75,000");
   const availability = String(p["availability"] || "Immediate (Within 7 days)");
@@ -97,14 +100,26 @@ function Profile() {
     : ["English", "Tamil", "Hindi"];
 
   // Default verified documents if none uploaded yet
-  const userDocs = Object.keys(s.docs).length > 0
-    ? s.docs
-    : {
-      "MBBS Degree Certificate": "mbbs_degree_verified.pdf",
-      "State Medical Council Registration": "tnmc_license_2023.pdf",
-      "Government Identity (Aadhaar/Passport)": "gov_identity_verified.pdf",
-      "AHA ACLS & BLS Provider Credential": "acls_provider_card.pdf",
-    };
+  const studentDocs = {
+    "College Bona Fide Certificate": "bonafide_letter_verified.pdf",
+    "Student ID Card (College)": "college_student_id.pdf",
+    "Clinical Posting Logbook": "clinical_logbook_attested.pdf",
+    "AHA BLS Provider Credential": "bls_student_provider.pdf",
+  };
+
+  const professionalDocs = {
+    "MBBS Degree Certificate": "mbbs_degree_verified.pdf",
+    "State Medical Council Registration": "tnmc_license_2023.pdf",
+    "Government Identity (Aadhaar/Passport)": "gov_identity_verified.pdf",
+    "AHA ACLS & BLS Provider Credential": "acls_provider_card.pdf",
+  };
+
+  const userDocs =
+    Object.keys(s.docs).length > 0
+      ? s.docs
+      : isStudent
+      ? studentDocs
+      : professionalDocs;
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard?.writeText(text);
@@ -162,7 +177,7 @@ function Profile() {
             {/* Top row inside cover: Badges & Quick Actions */}
             <div className="relative z-10 flex items-center justify-between gap-1.5 sm:gap-2 min-w-0">
               <span className="inline-flex items-center gap-1 sm:gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 sm:px-3 sm:py-1 text-[11px] sm:text-xs font-bold text-white backdrop-blur-md border border-white/20 shadow-xs shrink min-w-0 truncate">
-                <HiOutlineShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-300 shrink-0" />
+                <HiOutlineShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary shrink-0" />
                 <span className="hidden sm:inline">Tier-1 Verified Practitioner</span>
                 <span className="sm:hidden">Tier-1 Verified</span>
               </span>
@@ -180,7 +195,7 @@ function Profile() {
                 <Button
                   size="sm"
                   asChild
-                  className="rounded-xl font-bold text-xs bg-white text-primary hover:bg-white/90 shadow-md h-7.5 sm:h-9 px-2.5 sm:px-3.5"
+                  className="rounded-xl font-bold text-xs bg-primary text-white hover:bg-primary-hover shadow-brand h-7.5 sm:h-9 px-2.5 sm:px-3.5"
                 >
                   <Link to="/onboarding">
                     <HiOutlinePencilSquare className="h-3.5 w-3.5 sm:mr-1.5" />
@@ -199,7 +214,7 @@ function Profile() {
               <div className="relative">
                 <div className="relative grid h-20 w-20 sm:h-28 sm:w-28 place-items-center rounded-2xl sm:rounded-3xl border-4 border-card bg-primary-soft text-2xl sm:text-4xl font-black text-primary shadow-lg">
                   {initials(name)}
-                  <span className="absolute -bottom-1 -right-1 grid h-6 w-6 sm:h-7 sm:w-7 place-items-center rounded-full bg-emerald-500 text-white border-2 border-card shadow-xs">
+                  <span className="absolute -bottom-1 -right-1 grid h-6 w-6 sm:h-7 sm:w-7 place-items-center rounded-full bg-primary text-white border-2 border-card shadow-xs">
                     <HiCheckCircle className="h-4 w-4 sm:h-5 sm:w-5" />
                   </span>
                 </div>
@@ -228,25 +243,33 @@ function Profile() {
                 <h1 className="text-xl sm:text-3xl font-extrabold text-foreground tracking-tight break-words">
                   {name}
                 </h1>
-                <Badge className="bg-primary-soft text-primary font-bold border-primary/20 text-[11px] sm:text-xs px-2 py-0.5">
-                  {qual}
-                </Badge>
-                <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-bold border-0 text-[11px] sm:text-xs px-2 py-0.5 flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  NMC Verified
-                </Badge>
+                {!isStudent && (
+                  <>
+                    <Badge className="bg-primary-soft text-primary font-bold border-primary/20 text-[11px] sm:text-xs px-2 py-0.5">
+                      {qual}
+                    </Badge>
+                    <Badge className="bg-primary-soft text-primary font-bold border border-primary/20 text-[11px] sm:text-xs px-2 py-0.5 flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                      Council Verified
+                    </Badge>
+                  </>
+                )}
               </div>
 
               <p className="text-xs sm:text-base font-semibold text-muted-foreground flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <span>{role} · {specialty}</span>
+                <span>{isStudent ? `${qual || "Clinical Candidate"} · ${collegeName}` : `${role} · ${specialty}`}</span>
                 <span className="text-border">•</span>
-                <span className="text-xs text-primary font-bold">{exp}</span>
+                <span className="text-xs text-primary font-bold">{isStudent ? "Internship Ready" : exp}</span>
               </p>
 
-              {/* Council Registration Summary */}
+              {/* Council or Student Registration Summary */}
               <p className="text-[11px] sm:text-xs text-muted-foreground flex items-start sm:items-center gap-1.5 pt-0.5 break-words">
                 <HiOutlineIdentification className="h-4 w-4 text-primary shrink-0 mt-0.5 sm:mt-0" />
-                <span>{council} • Reg: <strong className="text-foreground font-mono">{regNo}</strong></span>
+                {isStudent ? (
+                  <span>College Affiliation: <strong className="text-foreground">{collegeName}</strong> (Verification active)</span>
+                ) : (
+                  <span>{council} • Reg: <strong className="text-foreground font-mono">{regNo}</strong></span>
+                )}
               </p>
             </div>
 
@@ -302,7 +325,7 @@ function Profile() {
         <div className={cn(
           "rounded-2xl sm:rounded-3xl border transition-all duration-300 p-4 sm:p-6 shadow-xs w-full min-w-0",
           openToWork
-            ? "border-emerald-500/40 bg-gradient-to-br from-card via-card to-emerald-50/40 dark:to-emerald-950/20"
+            ? "border-primary/40 bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20"
             : "border-border/80 bg-card"
         )}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
@@ -311,7 +334,7 @@ function Profile() {
                 <div className="flex items-center gap-2 min-w-0">
                   <span className={cn(
                     "h-2.5 w-2.5 rounded-full shrink-0",
-                    openToWork ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"
+                    openToWork ? "bg-primary animate-pulse" : "bg-muted-foreground"
                   )} />
                   <h3 className="font-extrabold text-sm sm:text-base text-foreground truncate">
                     Open to Work & Clinical Offers
@@ -323,7 +346,7 @@ function Profile() {
                   <Switch
                     checked={openToWork}
                     onCheckedChange={handleToggleOpenToWork}
-                    className="data-[state=checked]:bg-emerald-600 scale-90"
+                    className="scale-90"
                   />
                 </div>
               </div>
@@ -343,13 +366,12 @@ function Profile() {
               <Switch
                 checked={openToWork}
                 onCheckedChange={handleToggleOpenToWork}
-                className="data-[state=checked]:bg-emerald-600"
               />
             </div>
           </div>
 
           {openToWork && (
-            <div className="mt-3.5 pt-3.5 border-t border-emerald-500/20 grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 text-xs">
+            <div className="mt-3.5 pt-3.5 border-t border-primary/20 grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 text-xs">
               <div className="space-y-0.5">
                 <span className="text-muted-foreground font-semibold text-[11px]">Preferred Locations</span>
                 <p className="font-bold text-foreground">{preferredCities.join(", ")}</p>
@@ -360,7 +382,7 @@ function Profile() {
               </div>
               <div className="space-y-0.5">
                 <span className="text-muted-foreground font-semibold text-[11px]">Availability</span>
-                <p className="font-bold text-emerald-600 dark:text-emerald-400">{availability}</p>
+                <p className="font-bold text-primary">{availability}</p>
               </div>
             </div>
           )}
@@ -374,11 +396,11 @@ function Profile() {
           <div className="surface p-3.5 sm:p-5 rounded-2xl border border-border/80 shadow-xs space-y-1.5 sm:space-y-2 min-w-0">
             <div className="flex items-center justify-between text-muted-foreground">
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider truncate">CME Credits</span>
-              <HiOutlineTrophy className="h-4 w-4 text-amber-500 shrink-0" />
+              <HiOutlineTrophy className="h-4 w-4 text-primary shrink-0" />
             </div>
             <div className="space-y-0.5">
               <div className="text-lg sm:text-2xl font-black text-foreground">18.5 <span className="text-xs font-semibold text-muted-foreground">Pts</span></div>
-              <p className="text-[10px] sm:text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold truncate">AHA & IRC Accredited</p>
+              <p className="text-[10px] sm:text-[11px] text-primary font-semibold truncate">AHA & IRC Accredited</p>
             </div>
           </div>
 
@@ -386,7 +408,7 @@ function Profile() {
           <div className="surface p-3.5 sm:p-5 rounded-2xl border border-border/80 shadow-xs space-y-1.5 sm:space-y-2 min-w-0">
             <div className="flex items-center justify-between text-muted-foreground">
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider truncate">Credentials</span>
-              <HiOutlineShieldCheck className="h-4 w-4 text-emerald-500 shrink-0" />
+              <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
             </div>
             <div className="space-y-0.5">
               <div className="text-lg sm:text-2xl font-black text-foreground">4 / 4 <span className="text-xs font-semibold text-muted-foreground">Verified</span></div>
@@ -410,7 +432,7 @@ function Profile() {
           <div className="surface p-3.5 sm:p-5 rounded-2xl border border-border/80 shadow-xs space-y-1.5 sm:space-y-2 min-w-0">
             <div className="flex items-center justify-between text-muted-foreground">
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider truncate">Hospital Views</span>
-              <HiOutlineEye className="h-4 w-4 text-blue-500 shrink-0" />
+              <HiOutlineEye className="h-4 w-4 text-primary shrink-0" />
             </div>
             <div className="space-y-0.5">
               <div className="text-lg sm:text-2xl font-black text-foreground">48 <span className="text-xs font-semibold text-muted-foreground">Views</span></div>
@@ -438,8 +460,8 @@ function Profile() {
                 className="rounded-none border-b-2 border-transparent px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-bold data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary whitespace-nowrap"
               >
                 <HiOutlineIdentification className="mr-1.5 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">Council & Education</span>
-                <span className="sm:hidden">Council</span>
+                <span className="hidden sm:inline">{isStudent ? "College & Verification" : "Council & Education"}</span>
+                <span className="sm:hidden">{isStudent ? "College" : "Council"}</span>
               </TabsTrigger>
               <TabsTrigger
                 value="documents"
@@ -462,8 +484,8 @@ function Profile() {
                 className="rounded-none border-b-2 border-transparent px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-bold data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary whitespace-nowrap"
               >
                 <HiOutlineBriefcase className="mr-1.5 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">Shift & Job Preferences</span>
-                <span className="sm:hidden">Preferences</span>
+                <span className="hidden sm:inline">{isStudent ? "Internship Preferences" : "Shift & Job Preferences"}</span>
+                <span className="sm:hidden">{isStudent ? "Internships" : "Preferences"}</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -474,10 +496,12 @@ function Profile() {
             <div className="surface p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-border/80 space-y-2.5 sm:space-y-3 min-w-0">
               <h3 className="font-extrabold text-sm sm:text-base text-foreground flex items-center gap-2">
                 <HiOutlineDocumentCheck className="h-4 w-4 text-primary shrink-0" />
-                Clinical Profile & Practice Summary
+                {isStudent ? "Academic & Clinical Profile Summary" : "Clinical Profile & Practice Summary"}
               </h3>
               <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed break-words">
-                Dedicated {role} specializing in {specialty}. Trained in acute patient resuscitation, comprehensive bedside diagnostics, and interdisciplinary patient stabilization according to international AHA and Indian Resuscitation Council standards. Actively pursuing continuing medical education and clinical shift practice across NABH-accredited tertiary care centers.
+                {isStudent
+                  ? `Active healthcare student enrolled in ${qual} at ${collegeName}. Trained in foundational clinical competencies, patient safety standards, and supervised ward procedures. Actively seeking accredited clinical internships and observerships with senior consultant mentorship across teaching hospitals.`
+                  : `Dedicated ${role} specializing in ${specialty}. Trained in acute patient resuscitation, comprehensive bedside diagnostics, and interdisciplinary patient stabilization according to international AHA and Indian Resuscitation Council standards. Actively pursuing continuing medical education and clinical shift practice across NABH-accredited tertiary care centers.`}
               </p>
             </div>
 
@@ -512,21 +536,23 @@ function Profile() {
                 <div className="flex items-center justify-between border-b border-border/70 pb-3 gap-2">
                   <h3 className="font-extrabold text-sm sm:text-base text-foreground flex items-center gap-2 truncate">
                     <HiOutlineBriefcase className="h-4 w-4 text-primary shrink-0" />
-                    Clinical Experience
+                    {isStudent ? "Academic Postings" : "Clinical Experience"}
                   </h3>
-                  <Badge variant="outline" className="text-xs font-bold shrink-0">{exp}</Badge>
+                  <Badge variant="outline" className="text-xs font-bold shrink-0">{isStudent ? "Student Trainee" : exp}</Badge>
                 </div>
                 <div className="space-y-3">
                   <div className="flex items-start gap-3 min-w-0">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-blue-500/10 text-primary font-bold text-xs">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary-soft text-primary font-bold text-xs">
                       <HiOutlineBuildingOffice2 className="h-5 w-5" />
                     </span>
                     <div className="space-y-1 min-w-0 flex-1">
-                      <h4 className="font-bold text-sm text-foreground truncate">{specialty} Clinical Post</h4>
+                      <h4 className="font-bold text-sm text-foreground truncate">
+                        {isStudent ? "Supervised Ward Rotations" : `${specialty} Clinical Post`}
+                      </h4>
                       <p className="text-xs text-muted-foreground break-words">{employer}</p>
                       <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 pt-0.5">
                         <HiOutlineClock className="h-3.5 w-3.5 text-primary shrink-0" />
-                        <span>Present • Full-time clinical residency</span>
+                        <span>{isStudent ? "Ongoing Academic Rotations" : "Present • Full-time clinical residency"}</span>
                       </p>
                     </div>
                   </div>
@@ -538,23 +564,23 @@ function Profile() {
                 <div className="flex items-center justify-between border-b border-border/70 pb-3 gap-2">
                   <h3 className="font-extrabold text-sm sm:text-base text-foreground flex items-center gap-2 truncate">
                     <HiOutlineAcademicCap className="h-4 w-4 text-primary shrink-0" />
-                    Academic Degrees
+                    {isStudent ? "College Affiliation" : "Academic Degrees"}
                   </h3>
-                  <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0 text-xs font-bold shrink-0">
+                  <Badge className="bg-primary-soft text-primary border border-primary/20 text-xs font-bold shrink-0">
                     Verified
                   </Badge>
                 </div>
                 <div className="space-y-3">
                   <div className="flex items-start gap-3 min-w-0">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-600 font-bold text-xs">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary-soft text-primary font-bold text-xs">
                       <HiOutlineAcademicCap className="h-5 w-5" />
                     </span>
                     <div className="space-y-1 min-w-0 flex-1">
-                      <h4 className="font-bold text-sm text-foreground break-words">{qual} (Bachelor of Medicine & Surgery)</h4>
-                      <p className="text-xs text-muted-foreground break-words">{institution}</p>
+                      <h4 className="font-bold text-sm text-foreground break-words">{qual}</h4>
+                      <p className="text-xs text-muted-foreground break-words">{collegeName}</p>
                       <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 pt-0.5">
-                        <HiOutlineCheckCircle className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                        <span>National Medical Commission Recognized</span>
+                        <HiOutlineCheckCircle className="h-3.5 w-3.5 text-primary shrink-0" />
+                        <span>{isStudent ? "University Bona Fide Student" : "National Medical Commission Recognized"}</span>
                       </p>
                     </div>
                   </div>
@@ -563,68 +589,115 @@ function Profile() {
             </div>
           </TabsContent>
 
-          {/* TAB 2: COUNCIL & EDUCATION */}
+          {/* TAB 2: COUNCIL & EDUCATION / COLLEGE VERIFICATION */}
           <TabsContent value="qualifications" className="space-y-4 sm:space-y-6 mt-0 w-full min-w-0">
             <div className="surface p-4 sm:p-7 rounded-2xl sm:rounded-3xl border border-border/80 space-y-4 sm:space-y-6 min-w-0">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 border-b border-border/70 pb-4">
                 <div>
                   <span className="rounded-full bg-primary/10 px-2.5 py-0.5 sm:px-3 sm:py-1 text-[11px] sm:text-xs font-bold text-primary">
-                    Government Clinical Licensure
+                    {isStudent ? "University Bona Fide Enrollment" : "Government Clinical Licensure"}
                   </span>
                   <h3 className="text-base sm:text-xl font-extrabold text-foreground mt-1.5">
-                    State Medical Council Registration
+                    {isStudent ? "College Affiliation & Student Enrollment" : "State Medical Council Registration"}
                   </h3>
                 </div>
-                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border-0 px-2.5 sm:px-3 py-1 text-xs flex items-center gap-1.5 self-start sm:self-auto shrink-0">
-                  <HiCheckCircle className="h-4 w-4 text-emerald-600" />
-                  Active & Good Standing
+                <Badge className="bg-primary-soft text-primary font-bold border border-primary/20 px-2.5 sm:px-3 py-1 text-xs flex items-center gap-1.5 self-start sm:self-auto shrink-0">
+                  <HiCheckCircle className="h-4 w-4 text-primary" />
+                  {isStudent ? "Enrolled & Good Standing" : "Active & Good Standing"}
                 </Badge>
               </div>
 
-              {/* Council License Showcase Card */}
-              <div className="rounded-2xl border-2 border-primary/20 bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20 p-4 sm:p-6 space-y-4 min-w-0">
-                <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 text-xs">
-                  <div className="space-y-1 min-w-0">
-                    <span className="text-muted-foreground font-semibold text-[11px]">Registered Council</span>
-                    <p className="text-xs sm:text-sm font-bold text-foreground break-words">{council}</p>
+              {isStudent ? (
+                /* Student Enrollment Showcase Card */
+                <div className="rounded-2xl border-2 border-primary/20 bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20 p-4 sm:p-6 space-y-4 min-w-0">
+                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 text-xs">
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Affiliated College</span>
+                      <p className="text-xs sm:text-sm font-bold text-foreground break-words">{collegeName}</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Student Roll / Reg No</span>
+                      <p className="text-xs sm:text-sm font-mono font-bold text-primary break-all">STU-2024-9182</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Expected Graduation</span>
+                      <p className="text-xs sm:text-sm font-bold text-foreground">June 2027</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Degree Program</span>
+                      <p className="text-xs sm:text-sm font-bold text-foreground">{qual}</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Internship Posting</span>
+                      <p className="text-xs sm:text-sm font-bold text-primary">Approved for Clinical Postings</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Council Registration</span>
+                      <p className="text-xs sm:text-sm font-bold text-primary">Unlocks on Degree Completion</p>
+                    </div>
                   </div>
-                  <div className="space-y-1 min-w-0">
-                    <span className="text-muted-foreground font-semibold text-[11px]">Registration License No</span>
-                    <p className="text-xs sm:text-sm font-mono font-bold text-primary break-all">{regNo}</p>
-                  </div>
-                  <div className="space-y-1 min-w-0">
-                    <span className="text-muted-foreground font-semibold text-[11px]">Valid Through</span>
-                    <p className="text-xs sm:text-sm font-bold text-foreground">{regValid}</p>
-                  </div>
-                  <div className="space-y-1 min-w-0">
-                    <span className="text-muted-foreground font-semibold text-[11px]">Practicing Qualification</span>
-                    <p className="text-xs sm:text-sm font-bold text-foreground">{qual} ({specialty})</p>
-                  </div>
-                  <div className="space-y-1 min-w-0">
-                    <span className="text-muted-foreground font-semibold text-[11px]">Verification Standard</span>
-                    <p className="text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400">NMC Schedule 1 Verified</p>
-                  </div>
-                  <div className="space-y-1 min-w-0">
-                    <span className="text-muted-foreground font-semibold text-[11px]">Disciplinary Status</span>
-                    <p className="text-xs sm:text-sm font-bold text-foreground">Clean Record / No Enquiries</p>
-                  </div>
-                </div>
 
-                <div className="pt-3 border-t border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] text-muted-foreground">
-                  <span className="flex items-center gap-1.5">
-                    <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
-                    Digitally signed certificate timestamped on FALE Healthcare Registry
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => copyToClipboard(regNo, "Registration number")}
-                    className="h-8 text-xs font-bold rounded-xl w-full sm:w-auto"
-                  >
-                    Copy Reg Number
-                  </Button>
+                  <div className="pt-3 border-t border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                    <span className="flex items-center gap-1.5">
+                      <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
+                      Academic bona fide timestamped on FALE Healthcare Registry
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => copyToClipboard("STU-2024-9182", "Student roll number")}
+                      className="h-8 text-xs font-bold rounded-xl w-full sm:w-auto"
+                    >
+                      Copy Student ID
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* Council License Showcase Card */
+                <div className="rounded-2xl border-2 border-primary/20 bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20 p-4 sm:p-6 space-y-4 min-w-0">
+                  <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 text-xs">
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Registered Council</span>
+                      <p className="text-xs sm:text-sm font-bold text-foreground break-words">{council}</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Registration License No</span>
+                      <p className="text-xs sm:text-sm font-mono font-bold text-primary break-all">{regNo}</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Valid Through</span>
+                      <p className="text-xs sm:text-sm font-bold text-foreground">{regValid}</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Practicing Qualification</span>
+                      <p className="text-xs sm:text-sm font-bold text-foreground">{qual} ({specialty})</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Verification Standard</span>
+                      <p className="text-xs sm:text-sm font-bold text-primary">NMC Schedule 1 Verified</p>
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <span className="text-muted-foreground font-semibold text-[11px]">Disciplinary Status</span>
+                      <p className="text-xs sm:text-sm font-bold text-foreground">Clean Record / No Enquiries</p>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                    <span className="flex items-center gap-1.5">
+                      <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
+                      Digitally signed certificate timestamped on FALE Healthcare Registry
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => copyToClipboard(regNo, "Registration number")}
+                      className="h-8 text-xs font-bold rounded-xl w-full sm:w-auto"
+                    >
+                      Copy Reg Number
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </TabsContent>
 
@@ -671,7 +744,7 @@ function Profile() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1.5">
                         <h4 className="text-xs sm:text-sm font-bold text-foreground truncate">{docTitle}</h4>
-                        <span className="rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold shrink-0">
+                        <span className="rounded-full bg-primary-soft text-primary border border-primary/20 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold shrink-0">
                           Verified
                         </span>
                       </div>
@@ -711,7 +784,7 @@ function Profile() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/70 pb-4">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-bold text-amber-700 dark:text-amber-300">
+                    <span className="rounded-full bg-primary-soft text-primary border border-primary/20 px-2.5 py-0.5 text-xs font-bold">
                       FALE Clinical Academy
                     </span>
                     <span className="text-xs text-muted-foreground font-semibold">
@@ -746,8 +819,8 @@ function Profile() {
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 font-bold text-primary text-[10px] truncate max-w-[150px]">
                         {c.accreditationBadge}
                       </span>
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400 text-[10px] sm:text-[11px] flex items-center gap-1 shrink-0">
-                        <HiCheckCircle className="h-3.5 w-3.5" /> +{c.cmeCredits} CME Pts
+                      <span className="font-bold text-primary text-[10px] sm:text-[11px] flex items-center gap-1 shrink-0">
+                        <HiCheckCircle className="h-3.5 w-3.5 text-primary" /> +{c.cmeCredits} CME Pts
                       </span>
                     </div>
 
@@ -785,10 +858,12 @@ function Profile() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/70 pb-4">
                 <div>
                   <h3 className="text-base sm:text-xl font-extrabold text-foreground">
-                    Clinical Career & Shift Preferences
+                    {isStudent ? "Clinical Internship & Posting Preferences" : "Clinical Career & Shift Preferences"}
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Hospitals use these matching parameters to propose instant on-call shifts and permanent appointments.
+                    {isStudent
+                      ? "Teaching hospitals and mentor departments use these parameters to match supervised internships and clinical rotations."
+                      : "Hospitals use these matching parameters to propose instant on-call shifts and permanent appointments."}
                   </p>
                 </div>
                 <Button
@@ -808,7 +883,7 @@ function Profile() {
               <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 text-xs w-full min-w-0">
                 <div className="rounded-2xl border border-border/70 p-3.5 sm:p-4 space-y-1.5 bg-muted/20 min-w-0">
                   <span className="text-muted-foreground font-semibold uppercase tracking-wider text-[10px]">
-                    Target Cities & Hospitals
+                    {isStudent ? "Target Cities & Teaching Centers" : "Target Cities & Hospitals"}
                   </span>
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {preferredCities.map((c) => (
@@ -821,26 +896,38 @@ function Profile() {
 
                 <div className="rounded-2xl border border-border/70 p-3.5 sm:p-4 space-y-1 bg-muted/20 min-w-0">
                   <span className="text-muted-foreground font-semibold uppercase tracking-wider text-[10px]">
-                    Expected Compensation
+                    {isStudent ? "Target Monthly Stipend" : "Expected Compensation"}
                   </span>
-                  <p className="text-sm sm:text-base font-extrabold text-foreground pt-0.5">{salary} <span className="text-xs font-normal text-muted-foreground">/ month</span></p>
-                  <p className="text-[10px] sm:text-[11px] text-muted-foreground">Based on current benchmark for {specialty}</p>
+                  <p className="text-sm sm:text-base font-extrabold text-foreground pt-0.5">
+                    {isStudent ? "₹15,000–₹22,000" : salary} <span className="text-xs font-normal text-muted-foreground">/ month</span>
+                  </p>
+                  <p className="text-[10px] sm:text-[11px] text-muted-foreground">
+                    {isStudent ? "Based on accredited teaching hospital benchmarks" : `Based on current benchmark for ${specialty}`}
+                  </p>
                 </div>
 
                 <div className="rounded-2xl border border-border/70 p-3.5 sm:p-4 space-y-1 bg-muted/20 min-w-0">
                   <span className="text-muted-foreground font-semibold uppercase tracking-wider text-[10px]">
-                    Shift Availability
+                    {isStudent ? "Rotation Schedule" : "Shift Availability"}
                   </span>
-                  <p className="text-xs sm:text-sm font-bold text-foreground pt-0.5">{employmentType} & Rotational</p>
-                  <p className="text-[10px] sm:text-[11px] text-muted-foreground">Comfortable with Day, Night, and Emergency Trauma coverage</p>
+                  <p className="text-xs sm:text-sm font-bold text-foreground pt-0.5">
+                    {isStudent ? "Day Clinical Rotations & Observership" : `${employmentType} & Rotational`}
+                  </p>
+                  <p className="text-[10px] sm:text-[11px] text-muted-foreground">
+                    {isStudent ? "Aligned with university academic calendar" : "Comfortable with Day, Night, and Emergency Trauma coverage"}
+                  </p>
                 </div>
 
                 <div className="rounded-2xl border border-border/70 p-3.5 sm:p-4 space-y-1 bg-muted/20 min-w-0">
                   <span className="text-muted-foreground font-semibold uppercase tracking-wider text-[10px]">
-                    Notice Period / Start Date
+                    {isStudent ? "Joining Availability" : "Notice Period / Start Date"}
                   </span>
-                  <p className="text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400 pt-0.5">{availability}</p>
-                  <p className="text-[10px] sm:text-[11px] text-muted-foreground">Ready for immediate hospital orientation</p>
+                  <p className="text-xs sm:text-sm font-bold text-primary pt-0.5">
+                    {isStudent ? "Immediate / Next Academic Term" : availability}
+                  </p>
+                  <p className="text-[10px] sm:text-[11px] text-muted-foreground">
+                    {isStudent ? "College bonafide and NOC ready" : "Ready for immediate hospital orientation"}
+                  </p>
                 </div>
               </div>
             </div>

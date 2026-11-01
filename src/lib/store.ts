@@ -1,4 +1,12 @@
 import { useSyncExternalStore } from "react";
+import {
+  type HuddlePost,
+  type HuddleQuestion,
+  type HuddleSession,
+  initialHuddlePosts,
+  initialHuddleQuestions,
+  initialHuddleSessions,
+} from "./data";
 
 export type Portal = "candidate" | "facility" | "admin";
 
@@ -165,6 +173,10 @@ export interface AppState {
   lockedEscrow?: number;
   walletTransactions?: WalletTransaction[];
   hospitalBankAccount?: HospitalBankAccount;
+  candidateLevel?: "student" | "fresher" | "professional";
+  huddlePosts: HuddlePost[];
+  huddleQuestions: HuddleQuestion[];
+  huddleSessions: HuddleSession[];
   candidatePayoutMethod?: CandidatePayoutMethod;
   candidatePayouts?: CandidatePayoutTransaction[];
 }
@@ -175,6 +187,9 @@ const initial: AppState = {
   contact: "",
   signedIn: false,
   onboarded: false,
+  huddlePosts: initialHuddlePosts,
+  huddleQuestions: initialHuddleQuestions,
+  huddleSessions: initialHuddleSessions,
   profile: {},
   docs: {},
   saved: [],
@@ -626,7 +641,28 @@ function load() {
   loaded = true;
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) state = { ...initial, ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      state = {
+        ...initial,
+        ...parsed,
+        huddlePosts:
+          Array.isArray(parsed.huddlePosts) && parsed.huddlePosts.length > 0
+            ? parsed.huddlePosts.map((p: any, idx: number) => ({
+                ...p,
+                at: p.at && String(p.at).trim() ? p.at : idx % 2 === 0 ? "2 days ago" : "1 week ago",
+                replies: Array.isArray(p.replies)
+                  ? p.replies.map((r: any, rIdx: number) => ({
+                      ...r,
+                      at: r.at && String(r.at).trim() ? r.at : rIdx % 2 === 0 ? "1 day ago" : "2 days ago",
+                    }))
+                  : [],
+              }))
+            : initial.huddlePosts,
+        huddleQuestions: Array.isArray(parsed.huddleQuestions) && parsed.huddleQuestions.length > 0 ? parsed.huddleQuestions : initial.huddleQuestions,
+        huddleSessions: Array.isArray(parsed.huddleSessions) && parsed.huddleSessions.length > 0 ? parsed.huddleSessions : initial.huddleSessions,
+      };
+    }
   } catch {
     /* ignore */
   }
@@ -667,3 +703,232 @@ export function useApp(): AppState {
     () => initial,
   );
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// HUDDLE COMMUNITY ACTIONS
+// ──────────────────────────────────────────────────────────────────────
+
+export function toggleHelpfulPost(postId: string) {
+  setState((prev) => ({
+    huddlePosts: prev.huddlePosts.map((p) => {
+      if (p.id !== postId) return p;
+      const isHelpful = !p.userHelpful;
+      return {
+        ...p,
+        userHelpful: isHelpful,
+        helpfulCount: isHelpful ? p.helpfulCount + 1 : Math.max(0, p.helpfulCount - 1),
+      };
+    }),
+  }));
+}
+
+export function addHuddlePost(postData: {
+  type: HuddlePost["type"];
+  field: HuddlePost["field"];
+  authorName: string;
+  authorRole: string;
+  authorLevel?: "student" | "fresher" | "professional" | "hospital" | undefined;
+  anon: boolean;
+  text: string;
+  image?: string | undefined;
+  isHospital?: boolean | undefined;
+}) {
+  const newPost: HuddlePost = {
+    id: `hp-${Date.now()}`,
+    type: postData.type,
+    field: postData.field,
+    authorId: "current-user",
+    authorName: postData.authorName,
+    authorShort: postData.authorName
+      .split(" ")
+      .map((w, i) => (i === 0 ? w : w[0] + "."))
+      .join(" "),
+    authorRole: postData.authorRole,
+    authorLevel: postData.authorLevel || "professional",
+    anon: postData.anon,
+    text: postData.text,
+    helpfulCount: 0,
+    userHelpful: false,
+    replies: [],
+    reports: [],
+    // Clinical Cases or attached images undergo FALE Admin Review first
+    status: postData.type === "Case" || Boolean(postData.image) ? "review" : "live",
+    at: "Just now",
+    image: postData.image,
+    isHospital: postData.isHospital,
+  };
+
+  setState((prev) => ({
+    huddlePosts: [newPost, ...prev.huddlePosts],
+  }));
+
+  return newPost;
+}
+
+export function addHuddleReply(
+  postId: string,
+  replyData: {
+    authorName: string;
+    authorRole: string;
+    text: string;
+    authorLevel?: "student" | "fresher" | "professional";
+  }
+) {
+  const newReply = {
+    id: `hr-${Date.now()}`,
+    authorId: "current-user",
+    authorName: replyData.authorName,
+    authorShort: replyData.authorName
+      .split(" ")
+      .map((w, i) => (i === 0 ? w : w[0] + "."))
+      .join(" "),
+    authorRole: replyData.authorRole,
+    authorLevel: replyData.authorLevel || "professional",
+    text: replyData.text,
+    at: "Just now",
+    helpfulCount: 0,
+  };
+
+  setState((prev) => ({
+    huddlePosts: prev.huddlePosts.map((p) =>
+      p.id === postId ? { ...p, replies: [...p.replies, newReply] } : p
+    ),
+  }));
+}
+
+export function reportHuddlePost(postId: string, reason?: string) {
+  setState((prev) => ({
+    huddlePosts: prev.huddlePosts.map((p) =>
+      p.id === postId
+        ? {
+            ...p,
+            reports: [...p.reports, reason ? `current-user: ${reason}` : "current-user"],
+            status: "hidden" as const, // Automatically hidden from community view and flagged to admin
+          }
+        : p
+    ),
+  }));
+}
+
+export function askMentorQuestion(questionData: {
+  topic: HuddleQuestion["topic"];
+  askerName: string;
+  askerLevel: HuddleQuestion["askerLevel"];
+  askerProfession: string;
+  text: string;
+}) {
+  const newQuestion: HuddleQuestion = {
+    id: `hq-${Date.now()}`,
+    topic: questionData.topic,
+    askerId: "current-user",
+    askerName: questionData.askerName,
+    askerShort: questionData.askerName
+      .split(" ")
+      .map((w, i) => (i === 0 ? w : w[0] + "."))
+      .join(" "),
+    askerLevel: questionData.askerLevel,
+    askerProfession: questionData.askerProfession,
+    text: questionData.text,
+    answers: [],
+    at: "Just now",
+  };
+
+  setState((prev) => ({
+    huddleQuestions: [newQuestion, ...prev.huddleQuestions],
+  }));
+
+  return newQuestion;
+}
+
+export function answerMentorQuestion(
+  questionId: string,
+  answerData: {
+    mentorName: string;
+    mentorRole: string;
+    mentorYrs: number;
+    mentorSpecialty: string;
+    text: string;
+  }
+) {
+  const newAnswer = {
+    id: `ha-${Date.now()}`,
+    mentorId: "current-user",
+    mentorName: answerData.mentorName,
+    mentorShort: answerData.mentorName
+      .split(" ")
+      .map((w, i) => (i === 0 ? w : w[0] + "."))
+      .join(" "),
+    mentorRole: answerData.mentorRole,
+    mentorYrs: answerData.mentorYrs,
+    mentorSpecialty: answerData.mentorSpecialty,
+    text: answerData.text,
+    at: "Just now",
+  };
+
+  setState((prev) => ({
+    huddleQuestions: prev.huddleQuestions.map((q) =>
+      q.id === questionId ? { ...q, answers: [...q.answers, newAnswer] } : q
+    ),
+  }));
+}
+
+export function toggleBookSession(sessionId: string) {
+  setState((prev) => ({
+    huddleSessions: prev.huddleSessions.map((s) => {
+      if (s.id !== sessionId) return s;
+      const isCurrentlyBooked = Boolean(s.isBooked);
+      return {
+        ...s,
+        isBooked: !isCurrentlyBooked,
+        bookedCount: isCurrentlyBooked
+          ? Math.max(0, s.bookedCount - 1)
+          : Math.min(s.seats, s.bookedCount + 1),
+      };
+    }),
+  }));
+}
+
+export function approveHuddlePost(postId: string) {
+  setState((prev) => ({
+    huddlePosts: prev.huddlePosts.map((p) =>
+      p.id === postId ? { ...p, status: "live" as const, reports: [] } : p
+    ),
+  }));
+}
+
+export function rejectHuddlePost(postId: string) {
+  setState((prev) => ({
+    huddlePosts: prev.huddlePosts.filter((p) => p.id !== postId),
+  }));
+}
+
+export function dismissHuddleReport(postId: string) {
+  setState((prev) => ({
+    huddlePosts: prev.huddlePosts.map((p) =>
+      p.id === postId ? { ...p, status: "live" as const, reports: [] } : p
+    ),
+  }));
+}
+
+export function deleteHuddlePost(postId: string) {
+  setState((prev) => ({
+    huddlePosts: prev.huddlePosts.filter((p) => p.id !== postId),
+  }));
+}
+
+export function warnHuddleAuthor(postId: string, warningReason: string) {
+  setState((prev) => ({
+    huddlePosts: prev.huddlePosts.map((p) =>
+      p.id === postId ? { ...p, warningIssued: warningReason } : p
+    ),
+  }));
+}
+
+export function togglePostPinned(postId: string) {
+  setState((prev) => ({
+    huddlePosts: prev.huddlePosts.map((p) =>
+      p.id === postId ? { ...p, pinned: !p.pinned } : p
+    ),
+  }));
+}
+

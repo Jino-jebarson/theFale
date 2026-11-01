@@ -35,8 +35,8 @@ function Verify() {
 
   const submit = (value = code) => {
     if (value !== "123456") { toast.error("That code doesn't match. Try 123456 in this preview."); return; }
-    setState({ signedIn: true });
-    navigate({ to: s.onboarded ? (s.portal === "facility" ? "/employer" : "/home") : "/onboarding" });
+    setState({ signedIn: true, candidateLevel: undefined, onboarded: false });
+    navigate({ to: "/onboarding", search: { role: s.portal === "facility" ? "employer" : "candidate" } });
   };
 
   return (
