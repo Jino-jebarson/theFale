@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   HiOutlineBell,
@@ -39,6 +39,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/store";
+import { isApiEnabled } from "@/lib/api";
+import {
+  getNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+} from "@/lib/adapters/notificationAdapter";
 
 export const Route = createFileRoute("/notifications")({
   head: () => ({
@@ -246,11 +252,46 @@ function NotificationsPage() {
   const candidateLevel = s.candidateLevel || (s.profile["level"] as any) || (s.profile["cadreLevel"] as any) || (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
 
-  const [items, setItems] = useState<NotificationItem[]>(() => isStudent ? studentNotifications : initialNotifications);
+  const [items, setItems] = useState<NotificationItem[]>(() =>
+    isApiEnabled ? [] : isStudent ? studentNotifications : initialNotifications
+  );
+  const [loading, setLoading] = useState(isApiEnabled);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<NotificationCategory>("all");
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [acceptedShifts, setAcceptedShifts] = useState<string[]>([]);
   const [confirmedInterviews, setConfirmedInterviews] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    getNotifications()
+      .then((apiNotifs) => {
+        setItems(
+          (apiNotifs || []).map((n) => ({
+            id: n.id,
+            category: ((n as any).category?.toLowerCase() as any) || "jobs",
+            title: n.title,
+            hospital: "FALE Healthcare Network",
+            hospitalCode: "FL",
+            hospitalGradient: "from-blue-600 to-indigo-700",
+            message: n.message,
+            time: (n as any).createdAt
+              ? new Date((n as any).createdAt).toLocaleDateString("en-IN")
+              : "Recently",
+            unread: !n.read,
+            urgent: false,
+          }))
+        );
+        setLoadError(null);
+      })
+      .catch((err) => {
+        console.error("Failed to load notifications:", err);
+        setLoadError("Unable to load notifications.");
+        setItems([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   // Dispatch preferences
   const [whatsappAlerts, setWhatsappAlerts] = useState(true);
@@ -267,11 +308,17 @@ function NotificationsPage() {
   });
 
   const markAllAsRead = () => {
+    if (isApiEnabled) {
+      markAllNotificationsRead().catch(console.error);
+    }
     setItems((prev) => prev.map((item) => ({ ...item, unread: false })));
     toast.success("All notifications marked as read!");
   };
 
   const toggleItemRead = (id: string) => {
+    if (isApiEnabled) {
+      markNotificationRead(id).catch(console.error);
+    }
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, unread: !item.unread } : item))
     );
@@ -404,19 +451,19 @@ function NotificationsPage() {
                 {(
                   isStudent
                     ? [
-                        { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
-                        { id: "shifts", label: "Stipends & Rotations", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
-                        { id: "jobs", label: "Internships & Viva", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
-                        { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
-                        { id: "credentials", label: "Bona Fide Vault", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
-                      ]
+                      { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
+                      { id: "shifts", label: "Stipends & Rotations", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
+                      { id: "jobs", label: "Internships & Viva", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
+                      { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
+                      { id: "credentials", label: "Bona Fide Vault", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
+                    ]
                     : [
-                        { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
-                        { id: "shifts", label: "On-Call Shifts", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
-                        { id: "jobs", label: "Interviews & Jobs", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
-                        { id: "cme", label: "CME & Accreditations", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
-                        { id: "credentials", label: "Verified Credentials", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
-                      ]
+                      { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
+                      { id: "shifts", label: "On-Call Shifts", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
+                      { id: "jobs", label: "Interviews & Jobs", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
+                      { id: "cme", label: "CME & Accreditations", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
+                      { id: "credentials", label: "Verified Credentials", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
+                    ]
                 ).map((cat) => {
                   const Icon = cat.icon;
                   const active = selectedCategory === cat.id;
@@ -581,19 +628,19 @@ function NotificationsPage() {
               {(
                 isStudent
                   ? [
-                      { id: "all", label: "All Alerts", count: items.length },
-                      { id: "shifts", label: "Stipends", count: items.filter((x) => x.category === "shifts").length },
-                      { id: "jobs", label: "Internships", count: items.filter((x) => x.category === "jobs").length },
-                      { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length },
-                      { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
-                    ]
+                    { id: "all", label: "All Alerts", count: items.length },
+                    { id: "shifts", label: "Stipends", count: items.filter((x) => x.category === "shifts").length },
+                    { id: "jobs", label: "Internships", count: items.filter((x) => x.category === "jobs").length },
+                    { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length },
+                    { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
+                  ]
                   : [
-                      { id: "all", label: "All Alerts", count: items.length },
-                      { id: "shifts", label: "Shifts", count: items.filter((x) => x.category === "shifts").length },
-                      { id: "jobs", label: "Interviews", count: items.filter((x) => x.category === "jobs").length },
-                      { id: "cme", label: "CME Points", count: items.filter((x) => x.category === "cme").length },
-                      { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
-                    ]
+                    { id: "all", label: "All Alerts", count: items.length },
+                    { id: "shifts", label: "Shifts", count: items.filter((x) => x.category === "shifts").length },
+                    { id: "jobs", label: "Interviews", count: items.filter((x) => x.category === "jobs").length },
+                    { id: "cme", label: "CME Points", count: items.filter((x) => x.category === "cme").length },
+                    { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
+                  ]
               ).map((cat) => (
                 <button
                   key={cat.id}
@@ -619,248 +666,261 @@ function NotificationsPage() {
 
             {/* Notifications Feed Stream */}
             <div className="space-y-3 w-full min-w-0">
-              {filteredItems.map((n) => {
-                const isShiftAccepted = acceptedShifts.includes(n.id);
-                const isInterviewConfirmed = confirmedInterviews.includes(n.id);
-
-                return (
-                  <article
-                    key={n.id}
-                    onClick={() => toggleItemRead(n.id)}
-                    className={cn(
-                      "group relative surface rounded-2xl sm:rounded-3xl border transition-all duration-200 p-4 sm:p-5.5 cursor-pointer shadow-card space-y-3 min-w-0",
-                      n.unread
-                        ? "border-primary/40 bg-gradient-to-r from-primary/[0.04] via-card to-card"
-                        : "border-border/70 hover:border-border/90 bg-card/90"
-                    )}
-                  >
-                    {/* Unread Left Border Highlight (Apple standard) */}
-                    {n.unread && (
-                      <span className="absolute left-0 top-3 bottom-3 w-1 bg-primary rounded-r-full" />
-                    )}
-
-                    {/* Header Row: Hospital Emblem Avatar + Meta + Action Menu */}
-                    <div className="flex items-start justify-between gap-3 min-w-0">
-                      {/* Hospital Emblem Avatar */}
-                      <div className="flex items-start gap-3 min-w-0 flex-1">
-                        <div className="relative shrink-0">
-                          <div className={cn(
-                            "grid h-11 w-11 sm:h-12 sm:w-12 place-items-center rounded-2xl font-black text-xs sm:text-sm text-white shadow-xs bg-gradient-to-br",
-                            n.hospitalGradient
-                          )}>
-                            {n.hospitalCode}
-                          </div>
-                          {/* Category Badge Ring on Avatar */}
-                          <span className={cn(
-                            "absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border-2 border-card shadow-xs",
-                            getSubBadgeBg(n.category)
-                          )}>
-                            {getSubBadgeIcon(n.category)}
-                          </span>
-                        </div>
-
-                        <div className="space-y-1 min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                            <span className="text-xs font-bold text-foreground truncate max-w-[200px] sm:max-w-none">
-                              {n.hospital}
-                            </span>
-                            {n.matchScore && (
-                              <Badge className="bg-primary-soft text-primary font-bold border-0 text-[10px] px-1.5 py-0 flex items-center gap-1 shrink-0 whitespace-nowrap">
-                                <HiOutlineSparkles className="h-3 w-3" />
-                                {n.matchScore}% Match
-                              </Badge>
-                            )}
-                            {n.urgent && (
-                              <Badge className="bg-red-500/15 text-red-700 dark:text-red-300 font-bold border-0 text-[10px] px-1.5 py-0 shrink-0 whitespace-nowrap">
-                                Urgent
-                              </Badge>
-                            )}
-                            <span className="text-[11px] text-muted-foreground ml-auto shrink-0 font-medium">
-                              {n.time}
-                            </span>
-                          </div>
-
-                          <h3 className="text-sm sm:text-base font-extrabold text-foreground break-words leading-snug">
-                            {n.title}
-                          </h3>
-                        </div>
-                      </div>
-
-                      {/* Dropdown Options (LinkedIn 3-dots style) */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger
-                          onClick={(e) => e.stopPropagation()}
-                          className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 outline-none focus-visible:ring-1"
-                        >
-                          <HiOutlineEllipsisHorizontal className="h-5 w-5" />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem onClick={() => toggleItemRead(n.id)}>
-                            {n.unread ? (
-                              <>
-                                <HiOutlineCheckCircle className="mr-2 h-4 w-4" /> Mark as read
-                              </>
-                            ) : (
-                              <>
-                                <HiOutlineBell className="mr-2 h-4 w-4" /> Mark as unread
-                              </>
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => toast.info(`Muted alerts from ${n.hospital}`)}>
-                            <HiOutlineBellSlash className="mr-2 h-4 w-4" /> Mute this hospital
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={(e) => deleteItem(n.id, e as unknown as React.MouseEvent)}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            <HiOutlineTrash className="mr-2 h-4 w-4" /> Delete notification
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-
-                    {/* Message Body */}
-                    <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed pl-0 sm:pl-14 pr-1 break-words">
-                      {n.message}
-                    </p>
-
-                    {/* Rich Meta Box (Shift Timing / Payout / Calendar) */}
-                    {(n.payout || n.shiftTiming) && (
-                      <div className="ml-0 sm:ml-14 rounded-2xl bg-muted/40 p-2.5 sm:p-3 border border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                        {n.shiftTiming && (
-                          <span className="flex items-center gap-1.5 text-foreground font-semibold">
-                            <HiOutlineCalendarDays className="h-4 w-4 text-primary shrink-0" />
-                            <span>{n.shiftTiming}</span>
-                          </span>
-                        )}
-                        {n.payout && (
-                          <span className="font-black text-emerald-600 dark:text-emerald-400">
-                            {n.payout}
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Interactive Action Row */}
-                    <div className="ml-0 sm:ml-14 pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                        {/* Shift Accept Action */}
-                        {n.actionType === "accept_shift" && (
-                          isShiftAccepted ? (
-                            <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border-0 px-3 py-1 text-xs flex items-center gap-1.5">
-                              <HiCheckCircle className="h-4 w-4 text-emerald-600" />
-                              Shift Accepted • Pass Active
-                            </Badge>
-                          ) : (
-                            <Button
-                              size="sm"
-                              onClick={(e) => handleAcceptShift(n.id, n.hospital, e)}
-                              className="w-full sm:w-auto rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 px-4 shadow-xs"
-                            >
-                              Accept Shift
-                            </Button>
-                          )
-                        )}
-
-                        {/* Interview Confirmation Action */}
-                        {n.actionType === "confirm_interview" && (
-                          isInterviewConfirmed ? (
-                            <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border-0 px-3 py-1 text-xs flex items-center gap-1.5">
-                              <HiCheckCircle className="h-4 w-4 text-emerald-600" />
-                              Confirmed • Added to Calendar
-                            </Badge>
-                          ) : (
-                            <Button
-                              size="sm"
-                              onClick={(e) => handleConfirmInterview(n.id, n.hospital, e)}
-                              className="w-full sm:w-auto rounded-xl font-bold bg-primary text-primary-foreground shadow-xs hover:bg-primary/95 text-xs h-8 px-4"
-                            >
-                              Confirm Interview
-                            </Button>
-                          )
-                        )}
-
-                        {/* CME Certificate Link */}
-                        {n.actionType === "view_cert" && n.actionLink && (
-                          <Button
-                            size="sm"
-                            asChild
-                            variant="outline"
-                            className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5 text-primary hover:text-primary hover:bg-primary-soft"
-                          >
-                            <Link to={n.actionLink}>
-                              <HiOutlineDocumentCheck className="h-4 w-4" />
-                              <span>View Certificate</span>
-                            </Link>
-                          </Button>
-                        )}
-
-                        {/* Vault Credential Link */}
-                        {n.actionType === "view_doc" && n.actionLink && (
-                          <Button
-                            size="sm"
-                            asChild
-                            variant="outline"
-                            className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5"
-                          >
-                            <Link to={n.actionLink}>
-                              <HiOutlineShieldCheck className="h-4 w-4 text-purple-600" />
-                              <span>View in Vault</span>
-                            </Link>
-                          </Button>
-                        )}
-
-                        {/* Recruiter / Application Link */}
-                        {n.actionType === "view_hospital" && n.actionLink && (
-                          <Button
-                            size="sm"
-                            asChild
-                            variant="outline"
-                            className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5"
-                          >
-                            <Link to={n.actionLink}>
-                              <HiOutlineEye className="h-4 w-4 text-primary" />
-                              <span>Track Application</span>
-                            </Link>
-                          </Button>
-                        )}
-
-                        {n.statusText && (
-                          <span className="text-[11px] font-mono text-muted-foreground font-semibold">
-                            {n.statusText}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Quick Dismiss Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => deleteItem(n.id, e)}
-                        className="text-xs text-muted-foreground hover:text-destructive transition-colors flex items-center gap-1 cursor-pointer self-end sm:self-auto ml-auto sm:ml-0"
-                        title="Dismiss alert"
-                      >
-                        <HiOutlineXMark className="h-4 w-4" />
-                        <span>Dismiss</span>
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-
-              {/* Clean Empty State */}
-              {filteredItems.length === 0 && (
+              {loading ? (
                 <div className="surface p-8 sm:p-14 text-center rounded-3xl border border-border/70 space-y-3">
-                  <span className="grid h-12 w-12 place-items-center rounded-2xl bg-muted mx-auto text-muted-foreground">
-                    <HiOutlineCheckCircle className="h-6 w-6 text-emerald-500" />
-                  </span>
-                  <h3 className="font-extrabold text-base text-foreground">
-                    You're all caught up!
-                  </h3>
-                  <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
-                    No active notifications in this category. As hospitals review your qualifications or dispatch emergency shifts, updates will appear here instantly.
-                  </p>
+                  <HiOutlineClock className="mx-auto h-8 w-8 text-primary animate-spin" />
+                  <p className="text-sm font-semibold text-muted-foreground">Loading clinical notifications...</p>
                 </div>
+              ) : loadError ? (
+                <div className="surface p-8 text-center rounded-3xl border border-border/70 text-rose-500">
+                  <p className="text-sm font-semibold">{loadError}</p>
+                </div>
+              ) : (
+                <>
+                  {filteredItems.map((n) => {
+                    const isShiftAccepted = acceptedShifts.includes(n.id);
+                    const isInterviewConfirmed = confirmedInterviews.includes(n.id);
+
+                    return (
+                      <article
+                        key={n.id}
+                        onClick={() => toggleItemRead(n.id)}
+                        className={cn(
+                          "group relative surface rounded-2xl sm:rounded-3xl border transition-all duration-200 p-4 sm:p-5.5 cursor-pointer shadow-card space-y-3 min-w-0",
+                          n.unread
+                            ? "border-primary/40 bg-gradient-to-r from-primary/[0.04] via-card to-card"
+                            : "border-border/70 hover:border-border/90 bg-card/90"
+                        )}
+                      >
+                        {/* Unread Left Border Highlight (Apple standard) */}
+                        {n.unread && (
+                          <span className="absolute left-0 top-3 bottom-3 w-1 bg-primary rounded-r-full" />
+                        )}
+
+                        {/* Header Row: Hospital Emblem Avatar + Meta + Action Menu */}
+                        <div className="flex items-start justify-between gap-3 min-w-0">
+                          {/* Hospital Emblem Avatar */}
+                          <div className="flex items-start gap-3 min-w-0 flex-1">
+                            <div className="relative shrink-0">
+                              <div className={cn(
+                                "grid h-11 w-11 sm:h-12 sm:w-12 place-items-center rounded-2xl font-black text-xs sm:text-sm text-white shadow-xs bg-gradient-to-br",
+                                n.hospitalGradient
+                              )}>
+                                {n.hospitalCode}
+                              </div>
+                              {/* Category Badge Ring on Avatar */}
+                              <span className={cn(
+                                "absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border-2 border-card shadow-xs",
+                                getSubBadgeBg(n.category)
+                              )}>
+                                {getSubBadgeIcon(n.category)}
+                              </span>
+                            </div>
+
+                            <div className="space-y-1 min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                <span className="text-xs font-bold text-foreground truncate max-w-[200px] sm:max-w-none">
+                                  {n.hospital}
+                                </span>
+                                {n.matchScore && (
+                                  <Badge className="bg-primary-soft text-primary font-bold border-0 text-[10px] px-1.5 py-0 flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                    <HiOutlineSparkles className="h-3 w-3" />
+                                    {n.matchScore}% Match
+                                  </Badge>
+                                )}
+                                {n.urgent && (
+                                  <Badge className="bg-red-500/15 text-red-700 dark:text-red-300 font-bold border-0 text-[10px] px-1.5 py-0 shrink-0 whitespace-nowrap">
+                                    Urgent
+                                  </Badge>
+                                )}
+                                <span className="text-[11px] text-muted-foreground ml-auto shrink-0 font-medium">
+                                  {n.time}
+                                </span>
+                              </div>
+
+                              <h3 className="text-sm sm:text-base font-extrabold text-foreground break-words leading-snug">
+                                {n.title}
+                              </h3>
+                            </div>
+                          </div>
+
+                          {/* Dropdown Options (LinkedIn 3-dots style) */}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              onClick={(e) => e.stopPropagation()}
+                              className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 outline-none focus-visible:ring-1"
+                            >
+                              <HiOutlineEllipsisHorizontal className="h-5 w-5" />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem onClick={() => toggleItemRead(n.id)}>
+                                {n.unread ? (
+                                  <>
+                                    <HiOutlineCheckCircle className="mr-2 h-4 w-4" /> Mark as read
+                                  </>
+                                ) : (
+                                  <>
+                                    <HiOutlineBell className="mr-2 h-4 w-4" /> Mark as unread
+                                  </>
+                                )}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => toast.info(`Muted alerts from ${n.hospital}`)}>
+                                <HiOutlineBellSlash className="mr-2 h-4 w-4" /> Mute this hospital
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => deleteItem(n.id, e as unknown as React.MouseEvent)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <HiOutlineTrash className="mr-2 h-4 w-4" /> Delete notification
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+
+                        {/* Message Body */}
+                        <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed pl-0 sm:pl-14 pr-1 break-words">
+                          {n.message}
+                        </p>
+
+                        {/* Rich Meta Box (Shift Timing / Payout / Calendar) */}
+                        {(n.payout || n.shiftTiming) && (
+                          <div className="ml-0 sm:ml-14 rounded-2xl bg-muted/40 p-2.5 sm:p-3 border border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                            {n.shiftTiming && (
+                              <span className="flex items-center gap-1.5 text-foreground font-semibold">
+                                <HiOutlineCalendarDays className="h-4 w-4 text-primary shrink-0" />
+                                <span>{n.shiftTiming}</span>
+                              </span>
+                            )}
+                            {n.payout && (
+                              <span className="font-black text-emerald-600 dark:text-emerald-400">
+                                {n.payout}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Interactive Action Row */}
+                        <div className="ml-0 sm:ml-14 pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                            {/* Shift Accept Action */}
+                            {n.actionType === "accept_shift" && (
+                              isShiftAccepted ? (
+                                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border-0 px-3 py-1 text-xs flex items-center gap-1.5">
+                                  <HiCheckCircle className="h-4 w-4 text-emerald-600" />
+                                  Shift Accepted • Pass Active
+                                </Badge>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  onClick={(e) => handleAcceptShift(n.id, n.hospital, e)}
+                                  className="w-full sm:w-auto rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 px-4 shadow-xs"
+                                >
+                                  Accept Shift
+                                </Button>
+                              )
+                            )}
+
+                            {/* Interview Confirmation Action */}
+                            {n.actionType === "confirm_interview" && (
+                              isInterviewConfirmed ? (
+                                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border-0 px-3 py-1 text-xs flex items-center gap-1.5">
+                                  <HiCheckCircle className="h-4 w-4 text-emerald-600" />
+                                  Confirmed • Added to Calendar
+                                </Badge>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  onClick={(e) => handleConfirmInterview(n.id, n.hospital, e)}
+                                  className="w-full sm:w-auto rounded-xl font-bold bg-primary text-primary-foreground shadow-xs hover:bg-primary/95 text-xs h-8 px-4"
+                                >
+                                  Confirm Interview
+                                </Button>
+                              )
+                            )}
+
+                            {/* CME Certificate Link */}
+                            {n.actionType === "view_cert" && n.actionLink && (
+                              <Button
+                                size="sm"
+                                asChild
+                                variant="outline"
+                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5 text-primary hover:text-primary hover:bg-primary-soft"
+                              >
+                                <Link to={n.actionLink}>
+                                  <HiOutlineDocumentCheck className="h-4 w-4" />
+                                  <span>View Certificate</span>
+                                </Link>
+                              </Button>
+                            )}
+
+                            {/* Vault Credential Link */}
+                            {n.actionType === "view_doc" && n.actionLink && (
+                              <Button
+                                size="sm"
+                                asChild
+                                variant="outline"
+                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5"
+                              >
+                                <Link to={n.actionLink}>
+                                  <HiOutlineShieldCheck className="h-4 w-4 text-purple-600" />
+                                  <span>View in Vault</span>
+                                </Link>
+                              </Button>
+                            )}
+
+                            {/* Recruiter / Application Link */}
+                            {n.actionType === "view_hospital" && n.actionLink && (
+                              <Button
+                                size="sm"
+                                asChild
+                                variant="outline"
+                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5"
+                              >
+                                <Link to={n.actionLink}>
+                                  <HiOutlineEye className="h-4 w-4 text-primary" />
+                                  <span>Track Application</span>
+                                </Link>
+                              </Button>
+                            )}
+
+                            {n.statusText && (
+                              <span className="text-[11px] font-mono text-muted-foreground font-semibold">
+                                {n.statusText}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Quick Dismiss Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => deleteItem(n.id, e)}
+                            className="text-xs text-muted-foreground hover:text-destructive transition-colors flex items-center gap-1 cursor-pointer self-end sm:self-auto ml-auto sm:ml-0"
+                            title="Dismiss alert"
+                          >
+                            <HiOutlineXMark className="h-4 w-4" />
+                            <span>Dismiss</span>
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+
+                  {/* Clean Empty State */}
+                  {filteredItems.length === 0 && (
+                    <div className="surface p-8 sm:p-14 text-center rounded-3xl border border-border/70 space-y-3">
+                      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-muted mx-auto text-muted-foreground">
+                        <HiOutlineCheckCircle className="h-6 w-6 text-emerald-500" />
+                      </span>
+                      <h3 className="font-extrabold text-base text-foreground">
+                        You're all caught up!
+                      </h3>
+                      <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                        No active notifications in this category. As hospitals review your qualifications or dispatch emergency shifts, updates will appear here instantly.
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </main>

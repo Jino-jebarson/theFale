@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   HiOutlineBanknotes,
@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { Logo } from "@/components/fale/Logo";
 import { AppShell, PageHead } from "@/components/fale/AppShell";
 import { StudentLockCard } from "@/components/fale/StudentLockCard";
+import { EmptyEarningsGraphic } from "@/components/fale/EmptyEarningsGraphic";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -47,6 +48,16 @@ import {
 import { useApp, setState, type CandidatePayoutMethod, type CandidatePayoutTransaction } from "@/lib/store";
 import { generatePayoutAdvicePdf, printPayoutAdvicePdf } from "@/lib/payoutSlipPdf";
 import { cn } from "@/lib/utils";
+import { isApiEnabled, paiseToRupees } from "@/lib/api";
+import { getMyClaims, type ShiftClaimDto } from "@/lib/adapters/shiftAdapter";
+import { getCandidateProfile, savePayoutMethod as apiSavePayoutMethod } from "@/lib/adapters/candidateAdapter";
+
+export interface UiPayoutTransaction extends CandidatePayoutTransaction {
+  grossAmount?: number;
+  platformFee?: number;
+  tdsAmount?: number;
+  rawClaim?: ShiftClaimDto;
+}
 
 export const Route = createFileRoute("/earnings")({
   head: () => ({
@@ -94,7 +105,7 @@ function CandidateEarningsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [payoutModalOpen, setPayoutModalOpen] = useState(false);
-  const [selectedSlipTx, setSelectedSlipTx] = useState<CandidatePayoutTransaction | null>(null);
+  const [selectedSlipTx, setSelectedSlipTx] = useState<UiPayoutTransaction | null>(null);
 
   const candidateLevel =
     store.candidateLevel ||
@@ -103,10 +114,119 @@ function CandidateEarningsPage() {
     (store.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
 
-  const candidateName = String(store.profile["name"] || "Jino Jebarson R");
+  const [apiPayouts, setApiPayouts] = useState<UiPayoutTransaction[] | null>(null);
+  const [loading, setLoading] = useState(isApiEnabled);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    Promise.all([
+      getMyClaims().catch(() => []),
+      getCandidateProfile().catch(() => null),
+    ])
+      .then(([claims, profile]) => {
+        if (profile) {
+          setState((prev) => ({
+            candidateLevel: profile.isStudent ? "student" : (profile.candidateLevel?.toLowerCase() as any),
+            candidatePayoutMethod: profile.payoutMethod
+              ? {
+                  type: (profile.payoutMethod.methodType?.toLowerCase() as any) || "upi",
+                  upiId: profile.payoutMethod.upiId,
+                  accountNumber: profile.payoutMethod.accountNumber || profile.payoutMethod.accountNumberLast4,
+                  accountNumberLast4: profile.payoutMethod.accountNumberLast4,
+                  bankName: profile.payoutMethod.bankName,
+                  ifsc: profile.payoutMethod.ifsc,
+                  accountHolderName: profile.payoutMethod.accountHolderName || profile.name,
+                  status: (profile.payoutMethod.status as any) || "Verified",
+                  verifiedAt: profile.payoutMethod.verifiedAt ? "Cashfree VPA Validated" : "Cashfree Instant VPA Validated",
+                }
+              : prev.candidatePayoutMethod,
+            profile: {
+              ...prev.profile,
+              name: profile.name || prev.profile["name"],
+              email: profile.email || prev.profile["email"],
+              phone: profile.phone || prev.profile["phone"],
+              city: profile.city || prev.profile["city"],
+              regNumber: profile.regNumber || prev.profile["regNumber"],
+            },
+          }));
+
+          if (profile.payoutMethod) {
+            setPayoutType((profile.payoutMethod.methodType?.toLowerCase() as any) || "upi");
+            if (profile.payoutMethod.upiId) setFormUpiId(profile.payoutMethod.upiId);
+            if (profile.payoutMethod.accountHolderName) setFormHolderName(profile.payoutMethod.accountHolderName);
+            if (profile.payoutMethod.bankName) setFormBankName(profile.payoutMethod.bankName);
+            if (profile.payoutMethod.accountNumber) setFormAccNumber(profile.payoutMethod.accountNumber);
+            if (profile.payoutMethod.ifsc) setFormIfsc(profile.payoutMethod.ifsc);
+          }
+        }
+
+        const pm = profile?.payoutMethod;
+        const defaultMethodDesc = pm
+          ? pm.methodType === "upi"
+            ? `Cashfree Instant UPI · ${pm.upiId}`
+            : `Cashfree Direct Bank · ${pm.bankName || "Bank"} (****${pm.accountNumberLast4 || "XXXX"})`
+          : "Cashfree Instant Escrow";
+
+        const mapped: UiPayoutTransaction[] = claims.map((c) => {
+          const gross = c.grossAmountPaise ? paiseToRupees(c.grossAmountPaise) : 0;
+          const fee = c.platformFeePaise ? paiseToRupees(c.platformFeePaise) : 0;
+          const tds = c.tdsAmountPaise ? paiseToRupees(c.tdsAmountPaise) : 0;
+          const amt = c.netAmountPaise
+            ? paiseToRupees(c.netAmountPaise)
+            : c.payoutPaise
+              ? paiseToRupees(c.payoutPaise)
+              : gross ? gross - fee - tds : 0;
+
+          const isDisbursed = c.payoutStatus === "DISBURSED";
+          const isPendingDisbursement = c.payoutStatus === "PENDING_DISBURSEMENT" || c.status === "COMPLETED";
+
+          return {
+            id: c.id,
+            shiftId: c.shiftId,
+            shiftTitle: c.shiftTitle || "Locum Duty Shift",
+            hospitalName: c.facilityName || "Partner Hospital",
+            dept: c.shiftDepartment || "Clinical",
+            shiftDate: c.startAt
+              ? new Date(c.startAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+              : c.claimedAt
+                ? new Date(c.claimedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                : "Recent",
+            hours: c.hours || 8,
+            rate: amt ? Math.round(amt / (c.hours || 8)) : 0,
+            amount: amt,
+            grossAmount: gross || (amt + fee + tds),
+            platformFee: fee,
+            tdsAmount: tds,
+            payoutDate: isDisbursed
+              ? (c.completedAt ? new Date(c.completedAt).toLocaleDateString("en-IN") : "Disbursed")
+              : isPendingDisbursement
+                ? "Releasing Soon (Pending UTR)"
+                : "In Escrow (24h SLA)",
+            status: isDisbursed ? "Disbursed" : "In Escrow (24h SLA)",
+            payoutMethodUsed: defaultMethodDesc,
+            utr: c.utr || (isDisbursed ? `CFUTR${c.id.slice(0, 8).toUpperCase()}` : undefined),
+            slipRef: c.payoutSlipRef || `FALE-PAY-${c.id.slice(0, 6).toUpperCase()}`,
+            rawClaim: c,
+          };
+        });
+
+        setApiPayouts(mapped);
+        setLoadError(null);
+      })
+      .catch((err) => {
+        console.error("Failed to load claims:", err);
+        setLoadError("Unable to load earnings and payouts.");
+        setApiPayouts([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const candidateName = String(store.profile["name"] || (isApiEnabled ? "Clinician" : "Jino Jebarson R"));
   const candidatePayoutMethod: CandidatePayoutMethod = store.candidatePayoutMethod || {
     type: "upi",
-    upiId: "jinovj250@oksbi",
+    upiId: isApiEnabled ? "clinician@oksbi" : "jinovj250@oksbi",
     accountHolderName: candidateName,
     status: "Verified",
     verifiedAt: "Cashfree Instant VPA Validated",
@@ -126,9 +246,8 @@ function CandidateEarningsPage() {
         amount: 18000,
         payoutDate: "Releasing 01 Nov 2026 · 10:00 AM",
         status: "In Escrow (24h SLA)",
-        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${
-          candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
-        }`,
+        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
+          }`,
         slipRef: "FALE-STU-8812",
       },
       {
@@ -143,9 +262,8 @@ function CandidateEarningsPage() {
         amount: 18000,
         payoutDate: "01 Oct 2026 · 10:30 AM",
         status: "Disbursed",
-        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${
-          candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
-        }`,
+        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
+          }`,
         utr: "CFUPI2026100199412",
         slipRef: "FALE-STU-7901",
       },
@@ -161,9 +279,8 @@ function CandidateEarningsPage() {
         amount: 5000,
         payoutDate: "15 Aug 2026 · 02:15 PM",
         status: "Disbursed",
-        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${
-          candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
-        }`,
+        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
+          }`,
         utr: "CFUPI2026081512044",
         slipRef: "FALE-STU-6520",
       },
@@ -171,16 +288,20 @@ function CandidateEarningsPage() {
     [candidatePayoutMethod]
   );
 
-  const payouts: CandidatePayoutTransaction[] = isStudent ? studentPayouts : store.candidatePayouts || [];
+  const payouts: UiPayoutTransaction[] = isApiEnabled
+    ? (apiPayouts || [])
+    : isStudent
+    ? studentPayouts
+    : (store.candidatePayouts as any) || [];
 
   // Payout Form Modal State
   const [payoutType, setPayoutType] = useState<"upi" | "bank">(candidatePayoutMethod.type);
-  const [formUpiId, setFormUpiId] = useState(candidatePayoutMethod.upiId || "jinovj250@oksbi");
+  const [formUpiId, setFormUpiId] = useState(candidatePayoutMethod.upiId || (isApiEnabled ? "" : "jinovj250@oksbi"));
   const [formHolderName, setFormHolderName] = useState(candidatePayoutMethod.accountHolderName || candidateName);
-  const [formBankName, setFormBankName] = useState(candidatePayoutMethod.bankName || "HDFC Bank Ltd");
-  const [formAccNumber, setFormAccNumber] = useState(candidatePayoutMethod.accountNumber || "50100412891234");
-  const [formConfirmAcc, setFormConfirmAcc] = useState(candidatePayoutMethod.accountNumber || "50100412891234");
-  const [formIfsc, setFormIfsc] = useState(candidatePayoutMethod.ifsc || "HDFC0000060");
+  const [formBankName, setFormBankName] = useState(candidatePayoutMethod.bankName || (isApiEnabled ? "" : "HDFC Bank Ltd"));
+  const [formAccNumber, setFormAccNumber] = useState(candidatePayoutMethod.accountNumber || (isApiEnabled ? "" : "50100412891234"));
+  const [formConfirmAcc, setFormConfirmAcc] = useState(candidatePayoutMethod.accountNumber || (isApiEnabled ? "" : "50100412891234"));
+  const [formIfsc, setFormIfsc] = useState(candidatePayoutMethod.ifsc || (isApiEnabled ? "" : "HDFC0000060"));
   const [isVerifying, setIsVerifying] = useState(false);
 
   // Financial Telemetry
@@ -190,11 +311,40 @@ function CandidateEarningsPage() {
       .reduce((sum, p) => sum + p.amount, 0);
   }, [payouts]);
 
-  const inEscrowAmount = useMemo(() => {
-    return payouts
-      .filter((p) => p.status === "In Escrow (24h SLA)")
-      .reduce((sum, p) => sum + p.amount, 0);
+  const inEscrowPayouts = useMemo(() => {
+    return payouts.filter((p) => p.status === "In Escrow (24h SLA)");
   }, [payouts]);
+
+  const inEscrowAmount = useMemo(() => {
+    return inEscrowPayouts.reduce((sum, p) => sum + p.amount, 0);
+  }, [inEscrowPayouts]);
+
+  const tdsList = useMemo(() => {
+    if (isApiEnabled) {
+      return payouts
+        .filter((p) => p.status === "Disbursed")
+        .map((p) => {
+          const gross = p.grossAmount || p.amount;
+          const tdsAmt = p.tdsAmount !== undefined ? p.tdsAmount : (isStudent ? 0 : Math.round(gross * 0.01));
+          return {
+            id: `TDS-${p.id.slice(0, 8).toUpperCase()}`,
+            period: p.shiftDate,
+            gross: gross,
+            tdsRate: isStudent ? "0% (Sec 10(16))" : "1% (Sec 194J)",
+            tdsAmount: tdsAmt,
+            netCredited: p.amount,
+            status: isStudent ? "Tax-Free Stipend" : "Deposited to TRACES",
+          };
+        });
+    }
+    return isStudent
+      ? [
+          { id: "EDU-2026-Q3-01", period: "Oct 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
+          { id: "EDU-2026-Q2-02", period: "Sep 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
+          { id: "EDU-2026-Q2-01", period: "Aug 2026", gross: 5000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 5000, status: "Tax-Free Stipend" },
+        ]
+      : mockTdsRecords;
+  }, [isApiEnabled, isStudent, payouts]);
 
   const filteredPayouts = useMemo(() => {
     let list = payouts;
@@ -219,7 +369,7 @@ function CandidateEarningsPage() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleSavePayoutMethod = (e: React.FormEvent) => {
+  const handleSavePayoutMethod = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (payoutType === "upi") {
@@ -243,16 +393,26 @@ function CandidateEarningsPage() {
     }
 
     setIsVerifying(true);
-    setTimeout(() => {
-      setIsVerifying(false);
+    try {
+      if (isApiEnabled) {
+        await apiSavePayoutMethod({
+          methodType: payoutType,
+          upiId: payoutType === "upi" ? formUpiId.trim().toLowerCase() : undefined,
+          accountNumber: payoutType === "bank" ? formAccNumber.trim() : undefined,
+          ifsc: payoutType === "bank" ? formIfsc.trim().toUpperCase() : undefined,
+          bankName: payoutType === "bank" ? formBankName.trim() : undefined,
+          accountHolderName: formHolderName.trim() || candidateName,
+        });
+      }
 
       const updated: CandidatePayoutMethod = {
         type: payoutType,
         upiId: payoutType === "upi" ? formUpiId.toLowerCase() : undefined,
         accountNumber: payoutType === "bank" ? formAccNumber : undefined,
+        accountNumberLast4: payoutType === "bank" ? formAccNumber.slice(-4) : undefined,
         ifsc: payoutType === "bank" ? formIfsc.toUpperCase() : undefined,
         bankName: payoutType === "bank" ? formBankName : undefined,
-        accountHolderName: formHolderName,
+        accountHolderName: formHolderName || candidateName,
         status: "Verified",
         verifiedAt: payoutType === "upi" ? "Cashfree Instant VPA Validated" : "Cashfree ₹1 Penny Drop Validated",
       };
@@ -260,6 +420,11 @@ function CandidateEarningsPage() {
       setState(() => ({
         candidatePayoutMethod: updated,
       }));
+
+      const desc = payoutType === "upi"
+        ? `Cashfree Instant UPI · ${formUpiId.toLowerCase()}`
+        : `Cashfree Direct Bank · ${formBankName} (****${formAccNumber.slice(-4)})`;
+      setApiPayouts((prev) => (prev || []).map((p) => ({ ...p, payoutMethodUsed: desc })));
 
       setPayoutModalOpen(false);
       toast.success(
@@ -270,13 +435,19 @@ function CandidateEarningsPage() {
           description: `All future disbursements will be sent to ${payoutType === "upi" ? formUpiId : formBankName}.`,
         }
       );
-    }, 1000);
+    } catch (err: any) {
+      toast.error("Verification failed", {
+        description: err?.message || "Could not save payout destination.",
+      });
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   return (
     <AppShell>
       <div className="max-w-7xl mx-auto space-y-6 pb-16 min-w-0">
-        
+
         {/* ================= PAGE HEADER (MATCHING HUDDLE) ================= */}
         <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="min-w-0">
@@ -384,7 +555,11 @@ function CandidateEarningsPage() {
                     ₹{inEscrowAmount.toLocaleString("en-IN")}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {isStudent ? "Oct 2026 rotation" : "From tonight's duty"}
+                    {isStudent
+                      ? "Academic rotation"
+                      : inEscrowAmount > 0
+                      ? `${inEscrowPayouts.length} shift(s) pending clearance`
+                      : "Zero shifts in escrow"}
                   </p>
                 </div>
               </div>
@@ -396,7 +571,7 @@ function CandidateEarningsPage() {
                     <HiOutlineArrowTrendingUp className="h-5 w-5" />
                   </span>
                   <span className="text-[10px] font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
-                    Oct 2026
+                    {new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" }).toUpperCase()}
                   </span>
                 </div>
                 <div>
@@ -427,10 +602,14 @@ function CandidateEarningsPage() {
                     {isStudent ? "Completed Rotations" : "Completed Duties"}
                   </span>
                   <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono mt-1">
-                    {payouts.length} {isStudent ? "Rotations" : "Shifts"}
+                    {payouts.length} {isStudent ? "Rotations" : payouts.length === 1 ? "Shift" : "Shifts"}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {isStudent ? "Academic logbook signed" : "Zero payment disputes"}
+                    {isStudent
+                      ? "Academic logbook signed"
+                      : payouts.some((p) => (p as any).rawClaim?.status === "DISPUTED")
+                      ? "1 dispute in mediation"
+                      : "Zero payment disputes"}
                   </p>
                 </div>
               </div>
@@ -492,199 +671,193 @@ function CandidateEarningsPage() {
                   <div className="space-y-0.5">
                     <div className="font-mono font-bold text-foreground text-sm sm:text-base break-all">
                       {candidatePayoutMethod.type === "upi"
-                        ? candidatePayoutMethod.upiId
-                        : `•••• •••• ${candidatePayoutMethod.accountNumber?.slice(-4)} (${candidatePayoutMethod.ifsc})`}
+                        ? (candidatePayoutMethod.upiId || "Not Configured")
+                        : (candidatePayoutMethod.accountNumber ? `•••• •••• ${candidatePayoutMethod.accountNumber.slice(-4)} (${candidatePayoutMethod.ifsc || ""})` : "Not Configured")}
                     </div>
                     <span className="text-xs text-muted-foreground block">
-                      Matched Name: <span className="font-medium text-foreground">{candidatePayoutMethod.accountHolderName}</span>
+                      Matched Name: <span className="font-medium text-foreground">{candidatePayoutMethod.accountHolderName || candidateName}</span>
                     </span>
                   </div>
                 </div>
               </div>
             </section>
-        {/* Ledger & Statements (Matching Huddle) */}
-        <section className="rounded-3xl border border-border/80 bg-card shadow-xs overflow-hidden">
-          {/* Header Controls */}
-          <div className="p-4 sm:p-6 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            {/* Tab Pills with Smooth Horizontal Mobile Scroll */}
-            <div className="w-full sm:w-auto overflow-x-auto no-scrollbar -mx-1 px-1">
-              <div className="inline-flex items-center rounded-2xl bg-muted/60 p-1 border border-border/50 min-w-full sm:min-w-0">
-                {[
-                  {
-                    id: "all",
-                    label: isStudent ? "All Stipend Disbursements" : "All Shift Payouts",
-                    mobileLabel: isStudent ? "Stipends" : "All Payouts",
-                  },
-                  {
-                    id: "pending",
-                    label: isStudent ? "In Escrow (Next Cycle)" : "In Escrow (24h SLA)",
-                    mobileLabel: isStudent ? "Next Cycle" : "In Escrow",
-                  },
-                  {
-                    id: "tds",
-                    label: isStudent ? "Tax Exemption & Slips" : "TDS & Tax Slips",
-                    mobileLabel: isStudent ? "Tax Exemption" : "Tax Slips",
-                  },
-                ].map((tab) => (
-                  <button
-                    type="button"
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                    className={cn(
-                      "whitespace-nowrap shrink-0 flex-1 sm:flex-initial rounded-xl px-2.5 sm:px-4 py-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none",
-                      activeTab === tab.id
-                        ? "bg-card text-primary shadow-xs font-bold"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <span className="hidden sm:inline">{tab.label}</span>
-                    <span className="sm:hidden">{tab.mobileLabel}</span>
-                    {tab.id === "pending" && inEscrowAmount > 0 && (
-                      <span className="text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 px-1.5 py-0.2 rounded-full font-bold">
-                        1 Active
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Search Box matching Huddle */}
-            {activeTab !== "tds" && (
-              <div className="flex items-center gap-2 rounded-2xl bg-muted/40 border border-border/70 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all w-full sm:w-72">
-                <HiOutlineMagnifyingGlass className="h-4 w-4 text-muted-foreground shrink-0" />
-                <input
-                  type="text"
-                  placeholder={isStudent ? "Filter rotation, hospital..." : "Filter shift, hospital..."}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-9 w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-medium"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery("")}
-                    className="rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
-                    title="Clear search"
-                  >
-                    <HiOutlineXMark className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* TAB 1: Payouts Ledger Table / Mobile Cards */}
-          {activeTab !== "tds" && (
-            <>
-              {/* Mobile View: High-density interactive cards */}
-              <div className="sm:hidden divide-y divide-border/60">
-                {filteredPayouts.length === 0 ? (
-                  <div className="py-12 px-4 text-center text-muted-foreground text-xs font-medium">
-                    {isStudent ? "No internship stipends found matching your filter." : "No shift payouts found matching your filter."}
-                  </div>
-                ) : (
-                  filteredPayouts.map((tx) => (
-                    <div key={tx.id} className="p-4 space-y-3 hover:bg-muted/10 transition-colors">
-                      {/* Top Row: Shift Role & Amount */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <h4 className="font-bold text-sm text-foreground leading-snug">{tx.shiftTitle}</h4>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {tx.hospitalName} · {tx.dept}
-                          </p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="font-mono font-extrabold text-base text-foreground">
-                            ₹{tx.amount.toLocaleString("en-IN")}
-                          </div>
-                          <span className="text-[10px] text-muted-foreground font-medium block">
-                            {isStudent ? "Net Stipend" : "Net Remuneration"}
+            {/* Ledger & Statements (Matching Huddle) */}
+            <section className="rounded-3xl border border-border/80 bg-card shadow-xs overflow-hidden">
+              {/* Header Controls */}
+              <div className="p-4 sm:p-6 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                {/* Tab Pills with Smooth Horizontal Mobile Scroll */}
+                <div className="w-full sm:w-auto overflow-x-auto no-scrollbar -mx-1 px-1">
+                  <div className="inline-flex items-center rounded-2xl bg-muted/60 p-1 border border-border/50 min-w-full sm:min-w-0">
+                    {[
+                      {
+                        id: "all",
+                        label: isStudent ? "All Stipend Disbursements" : "All Shift Payouts",
+                        mobileLabel: isStudent ? "Stipends" : "All Payouts",
+                        count: payouts.length,
+                      },
+                      {
+                        id: "pending",
+                        label: isStudent ? "In Escrow (Next Cycle)" : "In Escrow (24h SLA)",
+                        mobileLabel: isStudent ? "Next Cycle" : "In Escrow",
+                        count: inEscrowPayouts.length,
+                        activeBadge: inEscrowPayouts.length > 0 ? `${inEscrowPayouts.length} Active` : undefined,
+                      },
+                      {
+                        id: "tds",
+                        label: isStudent ? "Tax Exemption & Slips" : "TDS & Tax Slips",
+                        mobileLabel: isStudent ? "Tax Exemption" : "Tax Slips",
+                        count: tdsList.length,
+                      },
+                    ].map((tab) => (
+                      <button
+                        type="button"
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                        className={cn(
+                          "whitespace-nowrap shrink-0 flex-1 sm:flex-initial rounded-xl px-2.5 sm:px-4 py-2 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none",
+                          activeTab === tab.id
+                            ? "bg-card text-primary shadow-xs font-bold"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <span className="hidden sm:inline">{tab.label}</span>
+                        <span className="sm:hidden">{tab.mobileLabel}</span>
+                        {tab.activeBadge ? (
+                          <span className="text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 px-1.5 py-0.2 rounded-full font-bold">
+                            {tab.activeBadge}
                           </span>
-                        </div>
-                      </div>
+                        ) : tab.count !== undefined ? (
+                          <span className={cn(
+                            "text-[10px] px-1.5 py-0.2 rounded-full font-bold",
+                            activeTab === tab.id ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+                          )}>
+                            {tab.count}
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-                      {/* Middle Row: Date, Hours/Rate, and Status */}
-                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-xs">
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground bg-muted/60 border border-border/60 px-2 py-0.5 rounded-lg">
-                          <HiOutlineCalendarDays className="h-3 w-3 text-muted-foreground" />
-                          <span>{tx.shiftDate}</span>
-                        </span>
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground bg-muted/40 border border-border/50 px-2 py-0.5 rounded-lg">
-                          <HiOutlineClock className="h-3 w-3" />
-                          <span>{tx.hours} hrs {isStudent ? "rotation" : `@ ₹${tx.rate}/hr`}</span>
-                        </span>
-                        <span
-                          className={cn(
-                            "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ml-auto",
-                            tx.status === "Disbursed"
-                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
-                              : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
-                          )}
-                        >
-                          {tx.status}
-                        </span>
-                      </div>
-
-                      {/* Bottom Row: Disbursement Destination & Advice Slip Action */}
-                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/40 text-xs">
-                        <div className="min-w-0 flex-1 text-muted-foreground">
-                          <div className="text-[11px] font-mono truncate">{tx.payoutMethodUsed}</div>
-                          {tx.utr && <div className="text-[10px] text-muted-foreground/70 font-mono">UTR: {tx.utr}</div>}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedSlipTx(tx)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer shrink-0"
-                          title="View & Print Payout Advice Slip"
-                        >
-                          <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
-                          <span>Advice Slip</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                {/* Search Box matching Huddle */}
+                {activeTab !== "tds" && (
+                  <div className="flex items-center gap-2 rounded-2xl bg-muted/40 border border-border/70 px-3.5 py-1 focus-within:bg-card focus-within:ring-2 focus-within:ring-primary/20 transition-all w-full sm:w-72">
+                    <HiOutlineMagnifyingGlass className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <input
+                      type="text"
+                      placeholder={isStudent ? "Filter rotation, hospital..." : "Filter shift, hospital..."}
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="h-9 w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-medium"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery("")}
+                        className="rounded-full p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                        title="Clear search"
+                      >
+                        <HiOutlineXMark className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
-              {/* Desktop View: Full-featured Table */}
-              <div className="hidden sm:block overflow-x-auto scrollbar-none">
-                <table className="w-full text-left text-xs min-w-[700px]">
-                  <thead>
-                    <tr className="border-b border-border/80 bg-muted/30 text-muted-foreground font-bold text-[11px] uppercase tracking-wider">
-                      <th className="py-3.5 px-5">{isStudent ? "Rotation Period" : "Shift Date"}</th>
-                      <th className="py-3.5 px-5">{isStudent ? "Program & Teaching Hospital" : "Role & Facility"}</th>
-                      <th className="py-3.5 px-5">{isStudent ? "Academic Hours" : "Duration & Rate"}</th>
-                      <th className="py-3.5 px-5">Status</th>
-                      <th className="py-3.5 px-5">Disbursed Via</th>
-                      <th className="py-3.5 px-5 text-right">{isStudent ? "Net Stipend" : "Net Remuneration"}</th>
-                      <th className="py-3.5 px-5 text-right">Advice Slip</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {filteredPayouts.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="py-12 text-center text-muted-foreground font-medium">
-                          {isStudent ? "No internship stipends found matching your filter." : "No shift payouts found matching your filter."}
-                        </td>
-                      </tr>
+              {/* TAB 1: Payouts Ledger Table / Mobile Cards */}
+              {activeTab !== "tds" && (
+                <>
+                  {/* Mobile View: High-density interactive cards */}
+                  <div className="sm:hidden divide-y divide-border/60">
+                    {loading ? (
+                      <div className="py-12 px-4 text-center text-muted-foreground text-xs font-medium">
+                        <HiOutlineClock className="mx-auto h-6 w-6 text-primary animate-spin" />
+                        <p className="mt-2 font-semibold">Loading shift claims & payouts...</p>
+                      </div>
+                    ) : loadError ? (
+                      <div className="py-12 px-4 text-center text-rose-500 text-xs font-medium">
+                        {loadError}
+                      </div>
+                    ) : filteredPayouts.length === 0 ? (
+                      <div className="py-12 px-4 text-center space-y-3">
+                        <EmptyEarningsGraphic className="w-36 h-36 mx-auto" />
+                        <h4 className="font-extrabold text-sm text-foreground tracking-tight">
+                          {searchQuery
+                            ? "No matching shift payouts found"
+                            : activeTab === "pending"
+                            ? "No payouts currently in escrow"
+                            : isStudent
+                            ? "No clinical stipends recorded yet"
+                            : "No clinical shift payouts recorded yet"}
+                        </h4>
+                        <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                          {searchQuery
+                            ? "Try adjusting your search terms or clearing the filter."
+                            : activeTab === "pending"
+                            ? "Escrow disbursements appear here after timesheet signoff and release within 24 hours."
+                            : isStudent
+                            ? "Your verified clinical rotations and academic allowances will appear here."
+                            : "Complete verified clinical duties to receive 24-hr escrow guaranteed direct disbursements."}
+                        </p>
+                        {searchQuery ? (
+                          <button
+                            type="button"
+                            onClick={() => setSearchQuery("")}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-primary text-primary px-4 py-1.5 text-xs font-bold hover:bg-primary hover:text-white transition-all cursor-pointer mt-2"
+                          >
+                            Clear search filter
+                          </button>
+                        ) : activeTab === "pending" ? (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab("all")}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-primary text-primary px-4 py-1.5 text-xs font-bold hover:bg-primary hover:text-white transition-all cursor-pointer mt-2"
+                          >
+                            View all payouts
+                          </button>
+                        ) : (
+                          <Link
+                            to="/shifts"
+                            className="inline-flex items-center gap-1.5 rounded-full bg-primary text-primary-foreground px-4 py-1.5 text-xs font-bold hover:bg-primary/90 transition-all shadow-xs cursor-pointer mt-2"
+                          >
+                            Browse Available Shifts
+                          </Link>
+                        )}
+                      </div>
                     ) : (
                       filteredPayouts.map((tx) => (
-                        <tr key={tx.id} className="hover:bg-muted/20 transition-colors">
-                          <td className="py-4 px-5 whitespace-nowrap text-muted-foreground font-medium">
-                            {tx.shiftDate}
-                          </td>
-                          <td className="py-4 px-5">
-                            <div className="font-bold text-sm text-foreground">{tx.shiftTitle}</div>
-                            <div className="text-xs text-muted-foreground mt-0.5">{tx.hospitalName} · {tx.dept}</div>
-                          </td>
-                          <td className="py-4 px-5 whitespace-nowrap text-muted-foreground font-medium">
-                            <div>{tx.hours} hrs {isStudent ? "rotation" : `@ ₹${tx.rate}/hr`}</div>
-                          </td>
-                          <td className="py-4 px-5 whitespace-nowrap">
+                        <div key={tx.id} className="p-4 space-y-3 hover:bg-muted/10 transition-colors">
+                          {/* Top Row: Shift Role & Amount */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <h4 className="font-bold text-sm text-foreground leading-snug">{tx.shiftTitle}</h4>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {tx.hospitalName} · {tx.dept}
+                              </p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="font-mono font-extrabold text-base text-foreground">
+                                ₹{tx.amount.toLocaleString("en-IN")}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground font-medium block">
+                                {isStudent ? "Net Stipend" : "Net Remuneration"}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Middle Row: Date, Hours/Rate, and Status */}
+                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-xs">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground bg-muted/60 border border-border/60 px-2 py-0.5 rounded-lg">
+                              <HiOutlineCalendarDays className="h-3 w-3 text-muted-foreground" />
+                              <span>{tx.shiftDate}</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground bg-muted/40 border border-border/50 px-2 py-0.5 rounded-lg">
+                              <HiOutlineClock className="h-3 w-3" />
+                              <span>{tx.hours} hrs {isStudent ? "rotation" : `@ ₹${tx.rate}/hr`}</span>
+                            </span>
                             <span
                               className={cn(
-                                "inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ml-auto",
                                 tx.status === "Disbursed"
                                   ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
                                   : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
@@ -692,138 +865,213 @@ function CandidateEarningsPage() {
                             >
                               {tx.status}
                             </span>
-                          </td>
-                          <td className="py-4 px-5 whitespace-nowrap text-xs text-muted-foreground font-mono">
-                            <div>{tx.payoutMethodUsed}</div>
-                            {tx.utr && <div className="text-[10px] text-muted-foreground/70 mt-0.5">UTR: {tx.utr}</div>}
-                          </td>
-                          <td className="py-4 px-5 whitespace-nowrap text-right font-mono font-bold text-sm sm:text-base text-foreground">
-                            ₹{tx.amount.toLocaleString("en-IN")}
-                          </td>
-                          <td className="py-4 px-5 whitespace-nowrap text-right">
+                          </div>
+
+                          {/* Bottom Row: Disbursement Destination & Advice Slip Action */}
+                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/40 text-xs">
+                            <div className="min-w-0 flex-1 text-muted-foreground">
+                              <div className="text-[11px] font-mono truncate">{tx.payoutMethodUsed}</div>
+                              {tx.utr && <div className="text-[10px] text-muted-foreground/70 font-mono">UTR: {tx.utr}</div>}
+                            </div>
                             <button
                               type="button"
                               onClick={() => setSelectedSlipTx(tx)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer shrink-0"
                               title="View & Print Payout Advice Slip"
                             >
                               <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
-                              <span>Slip</span>
+                              <span>Advice Slip</span>
                             </button>
-                          </td>
-                        </tr>
+                          </div>
+                        </div>
                       ))
                     )}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-
-          {/* TAB 2: TDS & Form 16A Summaries */}
-          {activeTab === "tds" && (
-            <div>
-              <div className="px-5 py-3.5 bg-muted/20 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-muted-foreground gap-3">
-                <span className="leading-relaxed">
-                  {isStudent ? (
-                    <>Academic stipends are 100% tax-free under <strong>Section 10(16)</strong> of the Income Tax Act. Zero TDS deducted.</>
-                  ) : (
-                    <>TDS applicable under <strong>Section 194J</strong> (Professional Healthcare Cover). Annual summary available for ITR filing.</>
-                  )}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => toast.success(isStudent ? "Stipend Tax-Exemption summary emailed." : "Consolidated Form 16A summary scheduled for email delivery.")}
-                  className="h-8 text-xs text-primary font-bold hover:bg-muted cursor-pointer shrink-0 self-start sm:self-auto"
-                >
-                  {isStudent ? "Email Exemption Slip" : "Email Form 16A Summary"}
-                </Button>
-              </div>
-
-              {/* Mobile Card List for TDS */}
-              <div className="sm:hidden divide-y divide-border/60">
-                {(isStudent
-                  ? [
-                      { id: "EDU-2026-Q3-01", period: "Oct 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
-                      { id: "EDU-2026-Q2-02", period: "Sep 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
-                      { id: "EDU-2026-Q2-01", period: "Aug 2026", gross: 5000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 5000, status: "Tax-Free Stipend" },
-                    ]
-                  : mockTdsRecords
-                ).map((t) => (
-                  <div key={t.id} className="p-4 space-y-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span className="font-mono font-bold text-xs text-foreground block">{t.id}</span>
-                        <span className="text-xs text-muted-foreground mt-0.5 block">{t.period} · {t.tdsRate}</span>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-mono font-bold text-sm text-foreground">₹{t.netCredited.toLocaleString("en-IN")}</div>
-                        <div className="text-[10px] text-muted-foreground font-medium">Gross: ₹{t.gross.toLocaleString("en-IN")}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between pt-1 border-t border-border/40 text-xs">
-                      <span className="text-[11px] text-muted-foreground">
-                        TDS: <span className={t.tdsAmount === 0 ? "text-muted-foreground font-medium" : "text-destructive font-semibold"}>
-                          {t.tdsAmount === 0 ? "₹0" : `-₹${t.tdsAmount.toLocaleString("en-IN")}`}
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => toast.success(`Statement ${t.id} downloaded.`)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
-                      >
-                        <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
-                        <span>Download</span>
-                      </button>
-                    </div>
                   </div>
-                ))}
-              </div>
 
-              {/* Desktop Table for TDS */}
-              <div className="hidden sm:block overflow-x-auto scrollbar-none">
-                <table className="w-full text-left text-xs min-w-[660px]">
-                  <thead>
-                    <tr className="border-b border-border/80 bg-muted/30 text-muted-foreground font-bold text-[11px] uppercase tracking-wider">
-                      <th className="py-3.5 px-5">Statement #</th>
-                      <th className="py-3.5 px-5">Period</th>
-                      <th className="py-3.5 px-5 text-right">{isStudent ? "Gross Stipend" : "Gross Earnings"}</th>
-                      <th className="py-3.5 px-5 text-right">Tax Section</th>
-                      <th className="py-3.5 px-5 text-right">TDS Deducted</th>
-                      <th className="py-3.5 px-5 text-right">Net Received</th>
-                      <th className="py-3.5 px-5 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {(isStudent
-                      ? [
-                          { id: "EDU-2026-Q3-01", period: "Oct 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
-                          { id: "EDU-2026-Q2-02", period: "Sep 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
-                          { id: "EDU-2026-Q2-01", period: "Aug 2026", gross: 5000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 5000, status: "Tax-Free Stipend" },
-                        ]
-                      : mockTdsRecords
-                    ).map((t) => (
-                      <tr key={t.id} className="hover:bg-muted/20 transition-colors">
-                        <td className="py-4 px-5 whitespace-nowrap font-mono font-bold text-foreground">
-                          {t.id}
-                        </td>
-                        <td className="py-4 px-5 whitespace-nowrap text-muted-foreground font-medium">
-                          {t.period}
-                        </td>
-                        <td className="py-4 px-5 whitespace-nowrap text-right font-mono text-muted-foreground font-medium">
-                          ₹{t.gross.toLocaleString("en-IN")}
-                        </td>
-                        <td className="py-4 px-5 whitespace-nowrap text-right font-medium text-foreground">
-                          {t.tdsRate}
-                        </td>
-                        <td className="py-4 px-5 whitespace-nowrap text-right font-mono text-destructive font-semibold">
-                          {t.tdsAmount === 0 ? "₹0" : `-₹${t.tdsAmount.toLocaleString("en-IN")}`}
-                        </td>
-                        <td className="py-4 px-5 whitespace-nowrap text-right font-mono font-bold text-foreground">
-                          ₹{t.netCredited.toLocaleString("en-IN")}
-                        </td>
-                        <td className="py-4 px-5 whitespace-nowrap text-right">
+                  {/* Desktop View: Full-featured Table */}
+                  <div className="hidden sm:block overflow-x-auto scrollbar-none">
+                    <table className="w-full text-left text-xs min-w-[700px]">
+                      <thead>
+                        <tr className="border-b border-border/80 bg-muted/30 text-muted-foreground font-bold text-[11px] uppercase tracking-wider">
+                          <th className="py-3.5 px-5">{isStudent ? "Rotation Period" : "Shift Date"}</th>
+                          <th className="py-3.5 px-5">{isStudent ? "Program & Teaching Hospital" : "Role & Facility"}</th>
+                          <th className="py-3.5 px-5">{isStudent ? "Academic Hours" : "Duration & Rate"}</th>
+                          <th className="py-3.5 px-5">Status</th>
+                          <th className="py-3.5 px-5">Disbursed Via</th>
+                          <th className="py-3.5 px-5 text-right">{isStudent ? "Net Stipend" : "Net Remuneration"}</th>
+                          <th className="py-3.5 px-5 text-right">Advice Slip</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {loading ? (
+                          <tr>
+                            <td colSpan={7} className="py-12 text-center text-muted-foreground font-medium">
+                              <HiOutlineClock className="mx-auto h-6 w-6 text-primary animate-spin" />
+                              <p className="mt-2 text-xs font-semibold">Loading shift claims & payouts...</p>
+                            </td>
+                          </tr>
+                        ) : loadError ? (
+                          <tr>
+                            <td colSpan={7} className="py-12 text-center text-rose-500 font-medium text-xs">
+                              {loadError}
+                            </td>
+                          </tr>
+                        ) : filteredPayouts.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="py-14 px-6 text-center">
+                              <div className="max-w-md mx-auto space-y-3">
+                                <EmptyEarningsGraphic className="w-40 h-40 mx-auto" />
+                                <h4 className="text-base font-extrabold text-foreground tracking-tight">
+                                  {searchQuery
+                                    ? "No matching shift payouts found"
+                                    : activeTab === "pending"
+                                    ? "No payouts currently in escrow"
+                                    : isStudent
+                                    ? "No clinical stipends recorded yet"
+                                    : "No clinical shift payouts recorded yet"}
+                                </h4>
+                                <p className="text-xs text-muted-foreground leading-relaxed">
+                                  {searchQuery
+                                    ? "Try adjusting your search terms or clearing the filter."
+                                    : activeTab === "pending"
+                                    ? "Escrow disbursements appear here after timesheet signoff and release within 24 hours."
+                                    : isStudent
+                                    ? "Your verified clinical rotations and academic allowances will appear here."
+                                    : "Complete verified clinical duties to receive 24-hr escrow guaranteed direct disbursements."}
+                                </p>
+                                {searchQuery ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSearchQuery("")}
+                                    className="inline-flex items-center gap-1.5 rounded-full border border-primary text-primary px-4 py-1.5 text-xs font-bold hover:bg-primary hover:text-white transition-all cursor-pointer mt-2"
+                                  >
+                                    Clear search filter
+                                  </button>
+                                ) : activeTab === "pending" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveTab("all")}
+                                    className="inline-flex items-center gap-1.5 rounded-full border border-primary text-primary px-4 py-1.5 text-xs font-bold hover:bg-primary hover:text-white transition-all cursor-pointer mt-2"
+                                  >
+                                    View all payouts
+                                  </button>
+                                ) : (
+                                  <Link
+                                    to="/shifts"
+                                    className="inline-flex items-center gap-1.5 rounded-full bg-primary text-primary-foreground px-4 py-1.5 text-xs font-bold hover:bg-primary/90 transition-all shadow-xs cursor-pointer mt-2"
+                                  >
+                                    Browse Available Shifts
+                                  </Link>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredPayouts.map((tx) => (
+                            <tr key={tx.id} className="hover:bg-muted/20 transition-colors">
+                              <td className="py-4 px-5 whitespace-nowrap text-muted-foreground font-medium">
+                                {tx.shiftDate}
+                              </td>
+                              <td className="py-4 px-5">
+                                <div className="font-bold text-sm text-foreground">{tx.shiftTitle}</div>
+                                <div className="text-xs text-muted-foreground mt-0.5">{tx.hospitalName} · {tx.dept}</div>
+                              </td>
+                              <td className="py-4 px-5 whitespace-nowrap text-muted-foreground font-medium">
+                                <div>{tx.hours} hrs {isStudent ? "rotation" : `@ ₹${tx.rate}/hr`}</div>
+                              </td>
+                              <td className="py-4 px-5 whitespace-nowrap">
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                    tx.status === "Disbursed"
+                                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                                      : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
+                                  )}
+                                >
+                                  {tx.status}
+                                </span>
+                              </td>
+                              <td className="py-4 px-5 whitespace-nowrap text-xs text-muted-foreground font-mono">
+                                <div>{tx.payoutMethodUsed}</div>
+                                {tx.utr && <div className="text-[10px] text-muted-foreground/70 mt-0.5">UTR: {tx.utr}</div>}
+                              </td>
+                              <td className="py-4 px-5 whitespace-nowrap text-right font-mono font-bold text-sm sm:text-base text-foreground">
+                                ₹{tx.amount.toLocaleString("en-IN")}
+                              </td>
+                              <td className="py-4 px-5 whitespace-nowrap text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedSlipTx(tx)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
+                                  title="View & Print Payout Advice Slip"
+                                >
+                                  <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
+                                  <span>Slip</span>
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+
+              {/* TAB 2: TDS & Form 16A Summaries */}
+              {activeTab === "tds" && (
+                <div>
+                  <div className="px-5 py-3.5 bg-muted/20 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-muted-foreground gap-3">
+                    <span className="leading-relaxed">
+                      {isStudent ? (
+                        <>Academic stipends are 100% tax-free under <strong>Section 10(16)</strong> of the Income Tax Act. Zero TDS deducted.</>
+                      ) : (
+                        <>TDS applicable under <strong>Section 194J</strong> (Professional Healthcare Cover). Annual summary available for ITR filing.</>
+                      )}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => toast.success(isStudent ? "Stipend Tax-Exemption summary emailed." : "Consolidated Form 16A summary scheduled for email delivery.")}
+                      className="h-8 text-xs text-primary font-bold hover:bg-muted cursor-pointer shrink-0 self-start sm:self-auto"
+                    >
+                      {isStudent ? "Email Exemption Slip" : "Email Form 16A Summary"}
+                    </Button>
+                  </div>
+
+                  {/* Mobile Card List for TDS */}
+                  <div className="sm:hidden divide-y divide-border/60">
+                    {tdsList.length === 0 ? (
+                      <div className="py-12 px-4 text-center space-y-3">
+                        <EmptyEarningsGraphic className="w-32 h-32 mx-auto" />
+                        <h4 className="text-sm font-extrabold text-foreground tracking-tight">
+                          No tax deduction statements generated yet
+                        </h4>
+                        <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                          {isStudent
+                            ? "Academic stipends are tax-exempt under Section 10(16)."
+                            : "Quarterly TDS certificates (Form 16A) are generated after verified quarterly filing."}
+                        </p>
+                      </div>
+                    ) : (
+                      tdsList.map((t) => (
+                      <div key={t.id} className="p-4 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="font-mono font-bold text-xs text-foreground block">{t.id}</span>
+                            <span className="text-xs text-muted-foreground mt-0.5 block">{t.period} · {t.tdsRate}</span>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-mono font-bold text-sm text-foreground">₹{t.netCredited.toLocaleString("en-IN")}</div>
+                            <div className="text-[10px] text-muted-foreground font-medium">Gross: ₹{t.gross.toLocaleString("en-IN")}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between pt-1 border-t border-border/40 text-xs">
+                          <span className="text-[11px] text-muted-foreground">
+                            TDS: <span className={t.tdsAmount === 0 ? "text-muted-foreground font-medium" : "text-destructive font-semibold"}>
+                              {t.tdsAmount === 0 ? "₹0" : `-₹${t.tdsAmount.toLocaleString("en-IN")}`}
+                            </span>
+                          </span>
                           <button
                             type="button"
                             onClick={() => toast.success(`Statement ${t.id} downloaded.`)}
@@ -832,17 +1080,83 @@ function CandidateEarningsPage() {
                             <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
                             <span>Download</span>
                           </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </section>
-        </>
-      )}
+                        </div>
+                      </div>
+                    )))}
+                  </div>
+
+                  {/* Desktop Table for TDS */}
+                  <div className="hidden sm:block overflow-x-auto scrollbar-none">
+                    <table className="w-full text-left text-xs min-w-[660px]">
+                      <thead>
+                        <tr className="border-b border-border/80 bg-muted/30 text-muted-foreground font-bold text-[11px] uppercase tracking-wider">
+                          <th className="py-3.5 px-5">Statement #</th>
+                          <th className="py-3.5 px-5">Period</th>
+                          <th className="py-3.5 px-5 text-right">{isStudent ? "Gross Stipend" : "Gross Earnings"}</th>
+                          <th className="py-3.5 px-5 text-right">Tax Section</th>
+                          <th className="py-3.5 px-5 text-right">TDS Deducted</th>
+                          <th className="py-3.5 px-5 text-right">Net Received</th>
+                          <th className="py-3.5 px-5 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {tdsList.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="py-12 px-6 text-center">
+                              <div className="max-w-md mx-auto space-y-3">
+                                <EmptyEarningsGraphic className="w-36 h-36 mx-auto" />
+                                <h4 className="text-sm font-extrabold text-foreground tracking-tight">
+                                  No tax deduction statements generated yet
+                                </h4>
+                                <p className="text-xs text-muted-foreground leading-relaxed">
+                                  {isStudent
+                                    ? "Academic stipends are tax-exempt under Section 10(16)."
+                                    : "Quarterly TDS certificates (Form 16A) are generated after verified quarterly filing."}
+                                </p>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          tdsList.map((t) => (
+                          <tr key={t.id} className="hover:bg-muted/20 transition-colors">
+                            <td className="py-4 px-5 whitespace-nowrap font-mono font-bold text-foreground">
+                              {t.id}
+                            </td>
+                            <td className="py-4 px-5 whitespace-nowrap text-muted-foreground font-medium">
+                              {t.period}
+                            </td>
+                            <td className="py-4 px-5 whitespace-nowrap text-right font-mono text-muted-foreground font-medium">
+                              ₹{t.gross.toLocaleString("en-IN")}
+                            </td>
+                            <td className="py-4 px-5 whitespace-nowrap text-right font-medium text-foreground">
+                              {t.tdsRate}
+                            </td>
+                            <td className="py-4 px-5 whitespace-nowrap text-right font-mono text-destructive font-semibold">
+                              {t.tdsAmount === 0 ? "₹0" : `-₹${t.tdsAmount.toLocaleString("en-IN")}`}
+                            </td>
+                            <td className="py-4 px-5 whitespace-nowrap text-right font-mono font-bold text-foreground">
+                              ₹{t.netCredited.toLocaleString("en-IN")}
+                            </td>
+                            <td className="py-4 px-5 whitespace-nowrap text-right">
+                              <button
+                                type="button"
+                                onClick={() => toast.success(`Statement ${t.id} downloaded.`)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
+                              >
+                                <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
+                                <span>Download</span>
+                              </button>
+                            </td>
+                          </tr>
+                        )))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </section>
+          </>
+        )}
 
       </div>
 
@@ -1337,7 +1651,7 @@ function CandidateEarningsPage() {
                           </span>
                         </div>
                         <span className="font-mono font-bold text-xs text-foreground shrink-0">
-                          ₹{(selectedSlipTx.hours * selectedSlipTx.rate).toLocaleString("en-IN")}
+                          ₹{(selectedSlipTx.grossAmount || (selectedSlipTx.hours * selectedSlipTx.rate)).toLocaleString("en-IN")}
                         </span>
                       </div>
 
@@ -1348,12 +1662,16 @@ function CandidateEarningsPage() {
 
                       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                         <span>FALE Platform Fee (Candidate)</span>
-                        <span className="text-emerald-600 font-semibold">100% Free</span>
+                        <span className={selectedSlipTx.platformFee ? "font-mono text-muted-foreground" : "text-emerald-600 font-semibold"}>
+                          {selectedSlipTx.platformFee ? `-₹${selectedSlipTx.platformFee.toLocaleString("en-IN")}` : "100% Free"}
+                        </span>
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                         <span>TDS Withholding (Sec 194J)</span>
-                        <span className="font-mono">₹0.00 (Exempt)</span>
+                        <span className="font-mono">
+                          {selectedSlipTx.tdsAmount ? `-₹${selectedSlipTx.tdsAmount.toLocaleString("en-IN")}` : "₹0.00 (Exempt)"}
+                        </span>
                       </div>
 
                       <div className="flex items-center justify-between pt-2.5 border-t-2 border-border/80 text-xs">
@@ -1391,7 +1709,7 @@ function CandidateEarningsPage() {
                             ₹{selectedSlipTx.rate.toLocaleString("en-IN")} / hr
                           </td>
                           <td className="py-2.5 px-3 text-right font-mono font-semibold text-foreground">
-                            ₹{(selectedSlipTx.hours * selectedSlipTx.rate).toLocaleString("en-IN")}
+                            ₹{(selectedSlipTx.grossAmount || (selectedSlipTx.hours * selectedSlipTx.rate)).toLocaleString("en-IN")}
                           </td>
                         </tr>
                         <tr>
@@ -1407,16 +1725,24 @@ function CandidateEarningsPage() {
                             FALE Platform Convenience Fee (Candidate)
                           </td>
                           <td className="py-2 px-3 text-center text-muted-foreground font-mono">-</td>
-                          <td className="py-2 px-3 text-right text-emerald-600 font-semibold">100% Free</td>
-                          <td className="py-2 px-3 text-right font-mono text-muted-foreground">₹0.00</td>
+                          <td className={selectedSlipTx.platformFee ? "py-2 px-3 text-right font-mono text-muted-foreground" : "py-2 px-3 text-right text-emerald-600 font-semibold"}>
+                            {selectedSlipTx.platformFee ? `-₹${selectedSlipTx.platformFee.toLocaleString("en-IN")}` : "100% Free"}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-muted-foreground">
+                            {selectedSlipTx.platformFee ? `-₹${selectedSlipTx.platformFee.toLocaleString("en-IN")}` : "₹0.00"}
+                          </td>
                         </tr>
                         <tr>
                           <td className="py-2 px-3 text-muted-foreground">
                             TDS Withholding (Section 194J - Professional Services)
                           </td>
                           <td className="py-2 px-3 text-center text-muted-foreground font-mono">-</td>
-                          <td className="py-2 px-3 text-right text-muted-foreground font-mono">Exempt / Threshold</td>
-                          <td className="py-2 px-3 text-right font-mono text-muted-foreground">₹0.00</td>
+                          <td className="py-2 px-3 text-right text-muted-foreground font-mono">
+                            {selectedSlipTx.tdsAmount ? "1% Withholding" : "Exempt / Threshold"}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-muted-foreground">
+                            {selectedSlipTx.tdsAmount ? `-₹${selectedSlipTx.tdsAmount.toLocaleString("en-IN")}` : "₹0.00"}
+                          </td>
                         </tr>
                       </tbody>
                       <tfoot className="border-t-2 border-border/80 bg-muted/30">

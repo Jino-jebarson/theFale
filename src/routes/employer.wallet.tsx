@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   HiOutlineBanknotes,
@@ -21,8 +21,10 @@ import {
   HiOutlineEye,
   HiOutlineEyeSlash,
   HiOutlineTrash,
+  HiOutlinePrinter,
 } from "react-icons/hi2";
 import { toast } from "sonner";
+import { Logo } from "@/components/fale/Logo";
 import { AppShell } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +43,23 @@ import {
 } from "@/components/ui/select";
 import { useApp, setState, type WalletTransaction, type HospitalBankAccount } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled, paiseToRupees, rupeesToPaise } from "@/lib/api";
+import {
+  getFacilityWallet,
+  getWalletTransactions,
+  topUpWallet,
+  buyCandidateCredits,
+  getHospitalBankAccount,
+  updateHospitalBankAccount,
+  type FacilityWalletDto,
+  type WalletTransactionDto,
+  type HospitalBankAccountDto,
+} from "@/lib/adapters/facilityAdapter";
+import {
+  generateHospitalInvoicePdf,
+  printHospitalInvoicePdf,
+  type HospitalInvoicePdfData,
+} from "@/lib/hospitalInvoicePdf";
 
 export const Route = createFileRoute("/employer/wallet")({
   head: () => ({
@@ -79,6 +98,35 @@ function EmployerWalletPage() {
   const [topUpModalOpen, setTopUpModalOpen] = useState(false);
   const [buyCreditsModalOpen, setBuyCreditsModalOpen] = useState(false);
   const [bankModalOpen, setBankModalOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<HospitalInvoicePdfData | null>(null);
+
+  // Dynamic API State
+  const [apiWallet, setApiWallet] = useState<FacilityWalletDto | null>(null);
+  const [apiTransactions, setApiTransactions] = useState<WalletTransactionDto[]>([]);
+  const [apiBank, setApiBank] = useState<HospitalBankAccountDto | null>(null);
+  const [loading, setLoading] = useState(isApiEnabled);
+
+  const fetchWalletData = () => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    Promise.all([
+      getFacilityWallet().catch(() => null),
+      getWalletTransactions().catch(() => []),
+      getHospitalBankAccount().catch(() => null),
+    ])
+      .then(([wallet, txs, bank]) => {
+        setApiWallet(wallet);
+        setApiTransactions(txs);
+        setApiBank(bank);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchWalletData();
+  }, []);
 
   // Top Up State
   const [selectedTopUpAmount, setSelectedTopUpAmount] = useState<number>(25000);
@@ -89,12 +137,23 @@ function EmployerWalletPage() {
 
   // Bank Form State
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const orgName = String(store.profile["org"] || "Apollo Health City");
+  const orgName = String(store.profile["org"] || (isApiEnabled ? "Healthcare Facility" : "Apollo Health City"));
   const defaultHolder = store.hospitalBankAccount?.accountHolderName && !store.hospitalBankAccount.accountHolderName.includes("Apollo")
     ? store.hospitalBankAccount.accountHolderName
     : `${orgName} Private Limited`;
 
-  const currentBank: HospitalBankAccount = store.hospitalBankAccount || {
+  const currentBank: HospitalBankAccount = isApiEnabled && apiBank ? {
+    bankName: apiBank.bankName || "HDFC Bank Ltd",
+    accountNumber: apiBank.accountNumberMasked || (apiBank.accountNumberLast4 ? `•••• •••• ${apiBank.accountNumberLast4}` : "50200084920194"),
+    ifsc: apiBank.ifsc || apiBank.ifscCode || "HDFC0000060",
+    accountType: (apiBank.accountType as any) || "Current",
+    accountHolderName: apiBank.accountHolderName || defaultHolder,
+    branch: apiBank.branch || "Central Corporate Branch",
+    status: apiBank.status || apiBank.verificationStatus || "Verified",
+    documentName: "Hospital_Bank_Mandate.pdf",
+    documentDate: apiBank.verifiedAt ? new Date(apiBank.verifiedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Active",
+    verifiedAt: "Cashfree Penny Drop Verified",
+  } : store.hospitalBankAccount || {
     bankName: "HDFC Bank Ltd",
     accountNumber: "50200084920194",
     ifsc: "HDFC0000060",
@@ -117,17 +176,144 @@ function EmployerWalletPage() {
   const [formChequeFile, setFormChequeFile] = useState<string>(currentBank.documentName || "Cancelled_Cheque_Hospital.pdf");
   const [isVerifyingPenny, setIsVerifyingPenny] = useState(false);
 
-  const escrowBalance = store.escrowBalance ?? 185000;
-  const lockedEscrow = store.lockedEscrow ?? 14500;
-  const candidateCredits = store.candidateCredits ?? 48;
-  const transactions = store.walletTransactions ?? [];
+  const escrowBalance = isApiEnabled
+    ? (apiWallet ? paiseToRupees(apiWallet.availableBalancePaise) : 0)
+    : (store.escrowBalance ?? 0);
+  const lockedEscrow = isApiEnabled
+    ? (apiWallet ? paiseToRupees(apiWallet.lockedEscrowBalancePaise) : 0)
+    : (store.lockedEscrow ?? 0);
+  const candidateCredits = isApiEnabled
+    ? (apiWallet ? apiWallet.candidateCredits : 0)
+    : (store.candidateCredits ?? 0);
+  const totalDisbursed = isApiEnabled
+    ? (apiWallet ? paiseToRupees(apiWallet.totalDisbursedPaise) : 0)
+    : (store.totalDisbursed ?? 1240000);
+
+  const lockedShiftCount = isApiEnabled
+    ? (lockedEscrow > 0 ? Math.max(1, Math.round(lockedEscrow / 5000)) : 0)
+    : 2;
+
+  const virtualAccount = apiWallet?.facilityId
+    ? `FALEHOSP${apiWallet.facilityId.replace(/-/g, "").slice(0, 8).toUpperCase()}`
+    : "FALEHOSP99418290";
+
+  const dynamicInvoices = useMemo(() => {
+    // 1. If backend API transactions exist, derive real tax invoices
+    if (isApiEnabled && apiTransactions.length > 0) {
+      const billable = apiTransactions.filter(
+        (tx) => tx.invoiceId || tx.type?.toLowerCase().includes("credit") || tx.type?.toLowerCase().includes("topup") || tx.type?.toLowerCase().includes("refund") || tx.type?.toLowerCase().includes("disburs")
+      );
+      if (billable.length > 0) {
+        return billable.map((tx) => {
+          const totalPaise = Math.abs(tx.amountPaise || 0);
+          const total = totalPaise > 0 ? paiseToRupees(totalPaise) : 1999;
+          const subtotal = Math.round((total / 1.18) * 100) / 100;
+          const gst = Math.round((total - subtotal) * 100) / 100;
+          const dateObj = tx.createdAt ? new Date(tx.createdAt) : new Date();
+          const month = dateObj.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+          const dateStr = dateObj.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+          const invId = tx.invoiceId || `INV-2026-${tx.id.replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
+          return {
+            id: invId,
+            month,
+            desc: tx.title || "Clinical Staffing & Escrow Settlement",
+            subtotal,
+            gst,
+            total,
+            date: dateStr,
+            status: tx.status === "COMPLETED" ? "Paid" : "Completed",
+            refNumber: tx.refNumber || tx.utr || "CRD-FALE-TXN",
+            utr: tx.utr,
+            subtitle: tx.subtitle || "Institutional clinical staffing, sourcing credits & escrow custody services",
+          };
+        });
+      }
+    }
+
+    // 2. If store transactions exist in client state
+    if (store.walletTransactions && store.walletTransactions.length > 0) {
+      const billable = store.walletTransactions.filter(
+        (tx) => tx.invoiceId || tx.type === "credit_purchase" || tx.type === "topup" || tx.type === "refund" || tx.type === "disbursement"
+      );
+      if (billable.length > 0) {
+        return billable.map((tx) => {
+          const total = Math.max(1, Math.abs(tx.amount || 0));
+          const subtotal = Math.round((total / 1.18) * 100) / 100;
+          const gst = Math.round((total - subtotal) * 100) / 100;
+          const invId = tx.invoiceId || `INV-2026-${(tx.id || "").replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
+          return {
+            id: invId,
+            month: new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" }),
+            desc: tx.title || "Clinical Staffing & Escrow Settlement",
+            subtotal,
+            gst,
+            total,
+            date: tx.date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+            status: tx.status === "Completed" ? "Paid" : "Completed",
+            refNumber: tx.refNumber || tx.utr || "CRD-FALE-TXN",
+            utr: tx.utr,
+            subtitle: tx.subtitle || "Institutional clinical staffing, sourcing credits & escrow custody services",
+          };
+        });
+      }
+    }
+
+    return mockTaxInvoices;
+  }, [isApiEnabled, apiTransactions, store.walletTransactions]);
+
+  const filteredInvoices = useMemo(() => {
+    if (!searchQuery.trim()) return dynamicInvoices;
+    const q = searchQuery.toLowerCase();
+    return dynamicInvoices.filter(
+      (inv) =>
+        inv.id.toLowerCase().includes(q) ||
+        inv.desc.toLowerCase().includes(q) ||
+        inv.month.toLowerCase().includes(q) ||
+        inv.refNumber.toLowerCase().includes(q)
+    );
+  }, [dynamicInvoices, searchQuery]);
+
+  const transactions: WalletTransaction[] = useMemo(() => {
+    if (isApiEnabled) {
+      return apiTransactions.map((tx) => {
+        const rawType = (tx.type || "").toLowerCase();
+        let mappedType: WalletTransaction["type"] = "escrow_hold";
+        if (rawType.includes("topup")) mappedType = "topup";
+        else if (rawType.includes("credit")) mappedType = "credit_purchase";
+        else if (rawType.includes("refund")) mappedType = "refund" as any;
+        else if (rawType.includes("disburs")) mappedType = "disbursement";
+
+        const invId = tx.invoiceId || `INV-2026-${tx.id.replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
+
+        return {
+          id: tx.id,
+          type: mappedType,
+          title: tx.title || "Escrow Operation",
+          subtitle: tx.subtitle || "Institutional settlement",
+          amount: paiseToRupees(tx.amountPaise),
+          date: tx.createdAt
+            ? new Date(tx.createdAt).toLocaleDateString("en-IN", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })
+            : "Recent",
+          status: (tx.status?.toUpperCase() === "COMPLETED" ? "Completed" : tx.status?.toUpperCase() === "PENDING" ? "Processing" : "Completed") as any,
+          refNumber: tx.refNumber || tx.utr || "TXN-FALE-99214",
+          invoiceId: invId,
+          utr: tx.utr,
+        };
+      });
+    }
+    return store.walletTransactions ?? [];
+  }, [isApiEnabled, apiTransactions, store.walletTransactions]);
 
   // Filtered transactions
   const filteredTransactions = useMemo(() => {
     let list = transactions;
 
     if (activeTab === "shifts") {
-      list = list.filter((t) => t.type === "escrow_hold" || t.type === "disbursement" || t.type === "standby_credit");
+      list = list.filter((t) => t.type === "escrow_hold" || t.type === "disbursement" || t.type === "standby_credit" || (t.type as any) === "refund");
     } else if (activeTab === "credits") {
       list = list.filter((t) => t.type === "credit_purchase");
     }
@@ -151,8 +337,56 @@ function EmployerWalletPage() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  const prepareInvoiceData = (invOrTx: any): HospitalInvoicePdfData => {
+    const isTx = "amount" in invOrTx || "amountPaise" in invOrTx;
+    const rawAmount = "amountPaise" in invOrTx
+      ? paiseToRupees(invOrTx.amountPaise)
+      : "amount" in invOrTx
+        ? invOrTx.amount
+        : invOrTx.total;
+    const total = Math.max(1, Math.abs(Number(rawAmount) || 0));
+    const subtotal = Math.round((total / 1.18) * 100) / 100;
+    const gst = Math.round((total - subtotal) * 100) / 100;
+    const invId = invOrTx.invoiceId || invOrTx.id || `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    return {
+      invoiceId: invId,
+      date: invOrTx.date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+      period: invOrTx.month || invOrTx.period || new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" }),
+      hospitalName: String(store.profile["org"] || (isApiEnabled ? "Healthcare Facility" : "Apollo Hospitals")),
+      facilityAddress: "Accredited Hospital Network & Clinical Campus, India",
+      gstin: "29AABCT1332L1Z4",
+      refNumber: invOrTx.refNumber || invOrTx.utr || "CRD-FALE-TXN",
+      utr: invOrTx.utr,
+      description: invOrTx.title || invOrTx.desc || invOrTx.description || "Clinical Staffing & Escrow Settlement",
+      subtitle: invOrTx.subtitle || "Institutional clinical staffing, sourcing credits & escrow custody services",
+      subtotal,
+      gst,
+      total,
+      status: (invOrTx.status || "Paid").toUpperCase() === "PENDING" ? "Processing" : "Paid",
+      nodalAccount: virtualAccount,
+    };
+  };
+
+  const handleOpenInvoice = (invOrTx: any) => {
+    const invData = prepareInvoiceData(invOrTx);
+    setSelectedInvoice(invData);
+  };
+
+  const handleDownloadInvoice = (invOrTx: any) => {
+    try {
+      const invData = prepareInvoiceData(invOrTx);
+      generateHospitalInvoicePdf(invData);
+      toast.success(`Tax invoice ${invData.invoiceId} downloaded successfully!`);
+    } catch (err: any) {
+      toast.error("Failed to download tax invoice", {
+        description: err?.message || "Please preview the invoice first.",
+      });
+    }
+  };
+
   // Top Up Action
-  const handleConfirmTopUp = () => {
+  const handleConfirmTopUp = async () => {
     const finalAmount = customTopUpInput ? Number(customTopUpInput) : selectedTopUpAmount;
     if (!finalAmount || finalAmount < 1000) {
       toast.error("Minimum top-up is ₹1,000");
@@ -160,6 +394,25 @@ function EmployerWalletPage() {
     }
 
     setIsProcessing(true);
+
+    if (isApiEnabled) {
+      try {
+        const utrGen = `UTR${Date.now().toString().slice(-10)}`;
+        await topUpWallet(rupeesToPaise(finalAmount), utrGen, paymentMethod.toUpperCase());
+        setIsProcessing(false);
+        setTopUpModalOpen(false);
+        setCustomTopUpInput("");
+        toast.success(`₹${finalAmount.toLocaleString("en-IN")} deposited to Escrow Reserve`);
+        fetchWalletData();
+      } catch (err: any) {
+        setIsProcessing(false);
+        toast.error("Top-up deposit failed", {
+          description: err?.message || "Could not process top-up.",
+        });
+      }
+      return;
+    }
+
     setTimeout(() => {
       setIsProcessing(false);
       const newTxId = "tx-" + Date.now().toString().slice(-4);
@@ -167,7 +420,7 @@ function EmployerWalletPage() {
         id: newTxId,
         type: "topup",
         title: "Escrow Top-Up",
-        subtitle: `${paymentMethod === "upi" ? "Corporate UPI" : paymentMethod === "netbanking" ? "Corporate NetBanking" : "NEFT/RTGS Transfer"} · ${orgName}`,
+        subtitle: `${paymentMethod === "upi" ? "Corporate UPI" : paymentMethod === "netbanking" ? "Corporate NetBanking" : "NEFT/RTGS Transfer"} • ${orgName}`,
         amount: finalAmount,
         date: "Just now",
         status: "Completed",
@@ -188,13 +441,30 @@ function EmployerWalletPage() {
   };
 
   // Buy Credits Action
-  const handleConfirmBuyCredits = () => {
+  const handleConfirmBuyCredits = async () => {
     if (!selectedPkg) return;
     setIsProcessing(true);
+    const priceNum = Number(selectedPkg.price.replace(/[^0-9]/g, ""));
+
+    if (isApiEnabled) {
+      try {
+        await buyCandidateCredits(selectedPkg.id, selectedPkg.credits, rupeesToPaise(priceNum));
+        setIsProcessing(false);
+        setBuyCreditsModalOpen(false);
+        toast.success(`${selectedPkg.credits} Sourcing Credits activated`);
+        fetchWalletData();
+      } catch (err: any) {
+        setIsProcessing(false);
+        toast.error("Credits purchase failed", {
+          description: err?.message || "Ensure available balance is sufficient.",
+        });
+      }
+      return;
+    }
+
     setTimeout(() => {
       setIsProcessing(false);
       const newTxId = "tx-" + Date.now().toString().slice(-4);
-      const priceNum = Number(selectedPkg.price.replace(/[^0-9]/g, ""));
       const newTx: WalletTransaction = {
         id: newTxId,
         type: "credit_purchase",
@@ -217,7 +487,7 @@ function EmployerWalletPage() {
     }, 500);
   };
 
-  // Cheque Upload Trigger
+    // Cheque Upload Trigger
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -510,12 +780,12 @@ function EmployerWalletPage() {
             </div>
 
             {/* Search */}
-            {activeTab !== "invoices" && activeTab !== "bank" && (
+            {activeTab !== "bank" && (
               <div className="relative w-full sm:w-60 shrink-0">
                 <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder="Filter transactions..."
+                  placeholder={activeTab === "invoices" ? "Filter tax invoices..." : "Filter transactions..."}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="h-8.5 w-full rounded-xl border border-input bg-card pl-8 pr-3 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
@@ -588,13 +858,24 @@ function EmployerWalletPage() {
                           </td>
                           <td className="py-3 px-4 whitespace-nowrap text-right">
                             {tx.invoiceId ? (
-                              <button
-                                type="button"
-                                onClick={() => toast.success(`Downloading invoice ${tx.invoiceId}...`)}
-                                className="text-primary hover:underline font-mono text-[11px] cursor-pointer"
-                              >
-                                {tx.invoiceId}
-                              </button>
+                              <div className="inline-flex items-center gap-1.5 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenInvoice(tx)}
+                                  className="text-primary hover:underline font-mono text-[11px] font-bold cursor-pointer"
+                                  title="View tax invoice preview"
+                                >
+                                  {tx.invoiceId}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadInvoice(tx)}
+                                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+                                  title="Download PDF Invoice"
+                                >
+                                  <HiOutlineDocumentArrowDown className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
                             ) : (
                               <span className="text-muted-foreground/40">—</span>
                             )}
@@ -608,7 +889,7 @@ function EmployerWalletPage() {
             </div>
           )}
 
-          {/* TAB 2: Clean Tax Invoices Table */}
+          {/* TAB 2: Clean Dynamic Tax Invoices Table */}
           {activeTab === "invoices" && (
             <div>
               <div className="px-4 py-3 bg-muted/20 border-b border-border/60 flex items-center justify-between text-xs text-muted-foreground">
@@ -637,38 +918,68 @@ function EmployerWalletPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
-                    {mockTaxInvoices.map((inv) => (
-                      <tr key={inv.id} className="hover:bg-muted/20 transition-colors">
-                        <td className="py-3 px-4 whitespace-nowrap font-mono font-bold text-foreground">
-                          {inv.id}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-muted-foreground font-medium">
-                          {inv.month}
-                        </td>
-                        <td className="py-3 px-4 font-medium text-foreground">
-                          {inv.desc}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono text-muted-foreground">
-                          ₹{inv.subtotal.toLocaleString("en-IN")}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono text-muted-foreground">
-                          ₹{inv.gst.toLocaleString("en-IN")}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right font-mono font-bold text-foreground">
-                          ₹{inv.total.toLocaleString("en-IN")}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap text-right">
-                          <button
-                            type="button"
-                            onClick={() => toast.success(`Downloading tax invoice ${inv.id}...`)}
-                            className="inline-flex items-center gap-1 text-primary hover:underline font-semibold cursor-pointer"
-                          >
-                            <HiOutlineDocumentArrowDown className="h-3.5 w-3.5" />
-                            <span>PDF</span>
-                          </button>
+                    {filteredInvoices.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center text-muted-foreground font-medium">
+                          No tax invoices match your filter.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      filteredInvoices.map((inv) => (
+                        <tr key={inv.id} className="hover:bg-muted/20 transition-colors">
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenInvoice(inv)}
+                              className="font-mono font-bold text-primary hover:underline cursor-pointer"
+                              title="Click to preview official tax invoice"
+                            >
+                              {inv.id}
+                            </button>
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap text-muted-foreground font-medium">
+                            {inv.month}
+                          </td>
+                          <td className="py-3 px-4 font-medium text-foreground">
+                            <div>{inv.desc}</div>
+                            {inv.subtitle && (
+                              <div className="text-[10px] text-muted-foreground truncate max-w-xs">{inv.subtitle}</div>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap text-right font-mono text-muted-foreground">
+                            ₹{inv.subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap text-right font-mono text-muted-foreground">
+                            ₹{inv.gst.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap text-right font-mono font-bold text-foreground">
+                            ₹{inv.total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap text-right">
+                            <div className="inline-flex items-center gap-1.5 justify-end">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenInvoice(inv)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted text-xs font-semibold cursor-pointer transition-all"
+                                title="View printable invoice receipt"
+                              >
+                                <HiOutlinePrinter className="h-3.5 w-3.5" />
+                                <span>View</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadInvoice(inv)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-white text-xs font-bold cursor-pointer transition-all shadow-2xs"
+                                title="Download PDF Tax Invoice"
+                              >
+                                <HiOutlineDocumentArrowDown className="h-3.5 w-3.5" />
+                                <span>PDF</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1285,6 +1596,185 @@ function EmployerWalletPage() {
           </form>
         </DialogContent>
       </Dialog>
+    
+      {/* Printable Official Tax Invoice & Escrow Settlement Modal */}
+      <Dialog open={!!selectedInvoice} onOpenChange={(open) => !open && setSelectedInvoice(null)}>
+        <DialogContent className="sm:max-w-3xl p-0 overflow-hidden max-h-[92vh] flex flex-col rounded-2xl border-border/80 shadow-2xl bg-background">
+          <div className="py-3 px-4 sm:px-6 pr-12 border-b border-border/60 bg-muted/40 flex items-center justify-between shrink-0 print:hidden min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
+                <HiOutlineDocumentText className="h-4.5 w-4.5" />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-xs sm:text-sm font-bold text-foreground truncate">
+                  Official Tax Invoice &amp; Settlement Receipt
+                </h3>
+                <span className="text-[10px] text-muted-foreground font-mono truncate block">
+                  Invoice #: {selectedInvoice?.invoiceId}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => selectedInvoice && printHospitalInvoicePdf(selectedInvoice)}
+                className="h-8 rounded-xl text-xs font-semibold gap-1.5 cursor-pointer"
+              >
+                <HiOutlinePrinter className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Print</span>
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (selectedInvoice) {
+                    handleDownloadInvoice(selectedInvoice);
+                  }
+                }}
+                className="h-8 rounded-xl text-xs font-bold gap-1.5 bg-primary text-primary-foreground shadow-xs cursor-pointer"
+              >
+                <HiOutlineDocumentArrowDown className="h-3.5 w-3.5" />
+                <span>Download PDF Receipt</span>
+              </Button>
+            </div>
+          </div>
+
+          <div className="overflow-y-auto scrollbar-none p-3 sm:p-6 flex-1 bg-muted/15">
+            {selectedInvoice && (
+              <div className="bg-card text-foreground rounded-2xl border border-border/80 p-5 sm:p-8 shadow-xs space-y-6 max-w-2xl mx-auto text-xs">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-border/80 pb-5">
+                  <div className="space-y-1">
+                    <Logo />
+                    <div className="text-[10px] text-muted-foreground leading-relaxed pt-1">
+                      <p className="font-bold text-foreground/90">THE FALE HEALTHCARE PRIVATE LIMITED</p>
+                      <p>Healthcare Staffing &amp; 24-Hour Nodal Escrow Platform</p>
+                      <p>CIN: U85100KA2025PTC189210 • GSTIN: 29AABCT1332L1Z4</p>
+                      <p>Bengaluru, Karnataka - 560001 • billing@thefale.com</p>
+                    </div>
+                  </div>
+
+                  <div className="text-left sm:text-right space-y-1 shrink-0">
+                    <span className="inline-block text-[11px] font-mono font-bold tracking-wider px-2.5 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20">
+                      OFFICIAL TAX INVOICE
+                    </span>
+                    <div className="font-mono text-xs font-bold text-foreground mt-1">
+                      {selectedInvoice.invoiceId}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Date: <span className="font-medium text-foreground">{selectedInvoice.date}</span>
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Route: <span className="font-medium text-foreground">ICICI Nodal Escrow</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Status banner */}
+                <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 flex items-center justify-between flex-wrap gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <HiOutlineCheckBadge className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <div>
+                      <span className="font-bold block">PAID &amp; SETTLED VIA ESCROW RESERVE</span>
+                      <span className="text-[11px] opacity-85">Rule 48 CGST Rules, 2017 • Valid electronic tax invoice</span>
+                    </div>
+                  </div>
+                  <div className="font-mono text-[11px] bg-background/90 px-2.5 py-1 rounded-lg border border-emerald-500/30 font-bold">
+                    Ref: {selectedInvoice.refNumber}
+                  </div>
+                </div>
+
+                {/* Two columns: Billed to & Details */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-3.5 rounded-xl bg-muted/30 border border-border/60 space-y-1">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Billed To (Hospital)</span>
+                    <p className="text-sm font-bold text-foreground">{selectedInvoice.hospitalName}</p>
+                    <p className="text-[11px] text-muted-foreground">GSTIN: {selectedInvoice.gstin || "29AABCT1332L1Z4"}</p>
+                    <p className="text-[11px] text-muted-foreground">{selectedInvoice.facilityAddress}</p>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-muted/30 border border-border/60 space-y-1">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Settlement Account</span>
+                    <p className="text-xs font-mono font-bold text-foreground">Virtual A/C: {selectedInvoice.nodalAccount || "FALEHOSP99418290"}</p>
+                    <p className="text-[11px] text-muted-foreground">IFSC: ICIC0000041 • ICICI Bank</p>
+                    <p className="text-[11px] text-muted-foreground">Period: {selectedInvoice.period}</p>
+                  </div>
+                </div>
+
+                {/* Itemized Table */}
+                <div className="border border-border/70 rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-muted/50 border-b border-border/60 font-semibold text-muted-foreground">
+                      <tr>
+                        <th className="py-2.5 px-3">Service Description</th>
+                        <th className="py-2.5 px-3">SAC</th>
+                        <th className="py-2.5 px-3 text-right">Taxable</th>
+                        <th className="py-2.5 px-3 text-right">GST (18%)</th>
+                        <th className="py-2.5 px-3 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      <tr>
+                        <td className="py-3 px-3">
+                          <p className="font-bold text-foreground">{selectedInvoice.description}</p>
+                          <p className="text-[10px] text-muted-foreground">{selectedInvoice.subtitle}</p>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-muted-foreground">998311</td>
+                        <td className="py-3 px-3 text-right font-mono text-muted-foreground">
+                          ₹{selectedInvoice.subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-muted-foreground">
+                          ₹{selectedInvoice.gst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-foreground">
+                          ₹{selectedInvoice.total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Financial Totals */}
+                <div className="flex flex-col sm:flex-row justify-between gap-4 pt-2">
+                  <div className="space-y-1 text-[11px] text-muted-foreground max-w-xs">
+                    <p className="font-semibold text-foreground">Input Tax Credit (ITC) Eligible</p>
+                    <p>This invoice is fully eligible for GST input tax credit under Section 16 of the CGST Act.</p>
+                  </div>
+
+                  <div className="w-full sm:w-64 space-y-1.5 p-3 rounded-xl bg-muted/20 border border-border/60 font-mono text-xs">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Subtotal:</span>
+                      <span>₹{selectedInvoice.subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>CGST (9%):</span>
+                      <span>₹{(selectedInvoice.gst / 2).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>SGST (9%):</span>
+                      <span>₹{(selectedInvoice.gst / 2).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="border-t border-border/70 pt-1.5 flex justify-between font-bold text-sm text-foreground">
+                      <span>Total Paid:</span>
+                      <span className="text-primary">₹{selectedInvoice.total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer Legal & Seal */}
+                <div className="pt-4 border-t border-border/70 flex items-center justify-between text-[10px] text-muted-foreground">
+                  <p>Valid without physical signature under the IT Act, 2000.</p>
+                  <span className="font-bold text-primary px-2 py-0.5 rounded bg-primary/10 border border-primary/20">
+                    FALE ESCROW SECURE
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </AppShell>
   );
 }

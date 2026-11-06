@@ -46,6 +46,8 @@ import {
 } from "@/components/ui/select";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import { createSupportTicket, getMyTickets } from "@/lib/adapters/supportAdapter";
 
 export const Route = createFileRoute("/support")({
   head: () => ({
@@ -232,7 +234,7 @@ function SupportPage() {
     }
   };
 
-  const handleTicketSubmit = (e: React.FormEvent) => {
+  const handleTicketSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim() || !email.trim() || !message.trim()) {
       toast.error("Please complete all required fields.");
@@ -240,28 +242,72 @@ function SupportPage() {
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
-      const ticketRef = `FALE-${urgency === "emergency" ? "EMG" : "CARE"}-${Math.floor(10000 + Math.random() * 90000)}`;
-      setSubmittedTicket({
-        id: ticketRef,
-        category,
-        urgency,
-        timestamp: "Just now",
-      });
-      toast.success("Support ticket logged successfully!", {
-        description: `Ticket Reference: #${ticketRef}. Confirmation dispatched to ${email}.`,
-      });
-    }, 700);
+    if (isApiEnabled) {
+      try {
+        const created = await createSupportTicket(subject || "Support Inquiry", category, message);
+        setSubmittedTicket({
+          id: created.id,
+          category: created.category,
+          urgency,
+          timestamp: "Just now",
+        });
+        toast.success("Support ticket created in FALE CRM!", {
+          description: `Ticket #${created.id} is active and assigned.`,
+        });
+      } catch (err: any) {
+        toast.error(err.message || "Failed to create support ticket.");
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
+      setTimeout(() => {
+        setIsSubmitting(false);
+        const ticketRef = `FALE-${urgency === "emergency" ? "EMG" : "CARE"}-${Math.floor(10000 + Math.random() * 90000)}`;
+        setSubmittedTicket({
+          id: ticketRef,
+          category,
+          urgency,
+          timestamp: "Just now",
+        });
+        toast.success("Support ticket registered!", {
+          description: `Ticket #${ticketRef} logged.`,
+        });
+      }, 700);
+    }
   };
 
-  const handleTrackTicket = (e: React.FormEvent) => {
+  const handleTrackTicket = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!trackIdInput.trim()) {
       toast.error("Please enter a ticket reference ID (e.g. FALE-CARE-84920).");
       return;
     }
     const cleanId = trackIdInput.trim().toUpperCase();
+    if (isApiEnabled) {
+      try {
+        const tickets = await getMyTickets();
+        const found = tickets.find(
+          (t) => t.id.toUpperCase() === cleanId || t.id.toLowerCase() === trackIdInput.trim().toLowerCase()
+        );
+        if (found) {
+          setTrackedStatus({
+            id: found.id,
+            status: found.status || "In Review with Support Team",
+            step: found.status === "RESOLVED" ? 4 : found.status === "IN_PROGRESS" ? 2 : 1,
+            agent: "FALE Clinical Support Lead",
+            eta: "Within 24 hours",
+            type: found.category || "General Support",
+            lastUpdate: found.createdAt ? new Date(found.createdAt).toLocaleDateString() : "Recently",
+          });
+          toast.success(`Ticket #${found.id} retrieved successfully`);
+        } else {
+          toast.error(`Ticket #${cleanId} not found in your submitted tickets.`);
+        }
+      } catch (err: any) {
+        toast.error("Failed to retrieve ticket status: " + (err.message || "Network error"));
+      }
+      return;
+    }
     const isEmg = cleanId.includes("EMG");
     setTrackedStatus({
       id: cleanId,
@@ -913,7 +959,7 @@ function SupportPage() {
               </form>
 
               {/* Quick sample ticket triggers */}
-              {!trackedStatus && (
+              {!trackedStatus && !isApiEnabled && (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span className="text-[11px] font-semibold">Try sample tickets:</span>
                   {["FALE-CARE-84920", "FALE-EMG-10492"].map((sample) => (
@@ -981,8 +1027,8 @@ function SupportPage() {
                                   isDone
                                     ? "bg-emerald-500"
                                     : isCurrent
-                                    ? "bg-primary animate-pulse"
-                                    : "bg-muted"
+                                      ? "bg-primary animate-pulse"
+                                      : "bg-muted"
                                 )}
                               />
                             </div>
@@ -992,8 +1038,8 @@ function SupportPage() {
                                 isDone
                                   ? "text-emerald-600 dark:text-emerald-400"
                                   : isCurrent
-                                  ? "text-primary font-black"
-                                  : "text-muted-foreground"
+                                    ? "text-primary font-black"
+                                    : "text-muted-foreground"
                               )}
                             >
                               {sItem.label}

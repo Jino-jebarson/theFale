@@ -27,6 +27,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useApp, setState, Portal } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { logout } from "@/lib/adapters/authAdapter";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -236,9 +237,14 @@ export function AdminLayout({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={() => {
+                onClick={async () => {
+                  try {
+                    await logout();
+                  } catch {
+                    // Ignore logout network errors
+                  }
                   setState({ signedIn: false });
-                  navigate({ to: "/" });
+                  navigate({ to: "/admin/login" });
                 }}
                 className="text-destructive text-xs cursor-pointer"
               >

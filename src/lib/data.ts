@@ -615,7 +615,19 @@ export interface Course {
   id: string;
   title: string;
   provider: string;
-  category: "Critical Care" | "Emergency & Trauma" | "Infection Control" | "Nursing Essentials" | "Quality & NABH" | "Pharmacology";
+  category:
+    | "Critical Care"
+    | "Emergency & Trauma"
+    | "Infection Control"
+    | "Nursing Essentials"
+    | "Quality & NABH"
+    | "Pharmacology"
+    | "Clinical Pharmacology"
+    | "Dialysis & Renal"
+    | "Physiotherapy & Rehab"
+    | "Radiology & Imaging"
+    | "Student Essentials"
+    | (string & {});
   duration: string;
   level: "Beginner" | "Intermediate" | "Advanced";
   cmeCredits: number;
@@ -1263,7 +1275,11 @@ export interface Applicant {
   education: string;
   certifications: string[];
   experienceList: { hospital: string; role: string; duration: string; details: string }[];
+  resumeUrl?: string;
+  resumeFileName?: string;
+  candidateDocuments?: { id?: string; documentType: string; originalFileName: string; fileUrl: string; mimeType?: string; verified?: boolean }[];
 }
+
 
 export const applicants: Applicant[] = [
   {
@@ -2014,6 +2030,9 @@ export interface HuddlePost {
   authorRole: string;
   authorLevel: "student" | "fresher" | "professional" | "hospital";
   isMentor?: boolean;
+  mentorYrs?: number;
+  time?: string;
+  date?: string;
   anon: boolean;
   text: string;
   helpfulCount: number;

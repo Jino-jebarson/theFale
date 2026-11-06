@@ -18,6 +18,8 @@ import { toast } from "sonner";
 import type { Job } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import { applyForJob, saveJob, unsaveJob } from "@/lib/adapters/jobAdapter";
 
 export function OrgMark({ name, className }: { name: string; className?: string }) {
   return (
@@ -60,6 +62,13 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
   const toggleSave = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (isApiEnabled) {
+      if (saved) {
+        unsaveJob(job.id).catch(console.error);
+      } else {
+        saveJob(job.id).catch(console.error);
+      }
+    }
     setState((x) => ({
       saved: saved ? x.saved.filter((i) => i !== job.id) : [...x.saved, job.id],
     }));
@@ -78,6 +87,11 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
       return;
     }
     const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    if (isApiEnabled) {
+      applyForJob(job.id).catch((err) => {
+        console.error("Apply error:", err);
+      });
+    }
     setState((x) => ({
       applied: [{ jobId: job.id, status: "Applied", date: now }, ...x.applied.filter((a) => a.jobId !== job.id)],
     }));

@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 interface ResumeParserModalProps {
   open: boolean;
   onClose: () => void;
-  onApplyData: (data: ParsedResumeData, fileName: string) => void;
+  onApplyData: (data: ParsedResumeData, fileName: string, fileDataUrl?: string) => void;
 }
 
 type ParseStage = "idle" | "reading" | "analyzing" | "preview";
@@ -36,6 +36,7 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
   const [stage, setStage] = useState<ParseStage>("idle");
   const [dragActive, setDragActive] = useState(false);
   const [currentFile, setCurrentFile] = useState<string>("");
+  const [currentFileDataUrl, setCurrentFileDataUrl] = useState<string>("");
   const [parsedData, setParsedData] = useState<ParsedResumeData | null>(null);
   const [progressStep, setProgressStep] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -53,6 +54,12 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
     }
 
     setCurrentFile(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCurrentFileDataUrl(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+
     setStage("reading");
     setProgressStep(1);
 
@@ -119,7 +126,7 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
 
   const handleApply = () => {
     if (!parsedData) return;
-    onApplyData(parsedData, currentFile || "Uploaded_Resume.pdf");
+    onApplyData(parsedData, currentFile || "Uploaded_Resume.pdf", currentFileDataUrl || undefined);
     onClose();
   };
 
@@ -127,6 +134,7 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
     setStage("idle");
     setParsedData(null);
     setCurrentFile("");
+    setCurrentFileDataUrl("");
     setProgressStep(1);
   };
 

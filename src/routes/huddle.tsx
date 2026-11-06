@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, type ReactNode } from "react";
+import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   HiOutlineChatBubbleLeftRight,
@@ -35,6 +35,8 @@ import {
   HiOutlineFunnel,
   HiCheckCircle,
   HiOutlineVideoCamera,
+  HiOutlineTrash,
+  HiOutlinePlus,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill, RiStethoscopeLine, RiChatVoiceLine, RiHospitalLine } from "react-icons/ri";
 import { toast } from "sonner";
@@ -42,6 +44,8 @@ import { AppShell, initials } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import {
   Dialog,
   DialogContent,
@@ -52,7 +56,6 @@ import {
 } from "@/components/ui/dialog";
 import {
   safetyCheck,
-  clinicalMentors,
   type HuddlePost,
   type HuddlePostType,
   type HuddleField,
@@ -68,8 +71,41 @@ import {
   askMentorQuestion,
   answerMentorQuestion,
   toggleBookSession,
+  updateHuddlePost as updateHuddlePostLocal,
+  deleteHuddlePost as deleteHuddlePostLocal,
+  deleteHuddleQuestion as deleteHuddleQuestionLocal,
 } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import {
+  getHuddlePosts,
+  createHuddlePost,
+  upvoteHuddlePost,
+  flagHuddlePost,
+  addHuddleComment,
+  getHuddleComments,
+  getHuddleQuestions,
+  createHuddleQuestion,
+  answerHuddleQuestion,
+  getMentorStatus,
+  applyForMentorSeal,
+  getHuddleSessions,
+  createHuddleSession,
+  bookHuddleSession,
+  cancelHuddleSessionBooking,
+  deleteHuddleSession,
+  updateHuddlePost as updateHuddlePostApi,
+  deleteHuddlePost as deleteHuddlePostApi,
+  deleteHuddleQuestion as deleteHuddleQuestionApi,
+  type HuddlePostDto,
+  type HuddleCommentDto,
+  type HuddleQuestionDto,
+  type MentorApplicationDto,
+  type HuddleSessionDto,
+  type CreateHuddleSessionPayload,
+} from "@/lib/adapters/huddleAdapter";
+import { getCandidateProfile, type CandidateProfile } from "@/lib/adapters/candidateAdapter";
+import { getFacilityProfile, type FacilityProfileDto } from "@/lib/adapters/facilityAdapter";
 
 export const Route = createFileRoute("/huddle")({
   head: () => ({
@@ -94,6 +130,37 @@ export const Route = createFileRoute("/huddle")({
 });
 
 const FIELDS: HuddleField[] = ["All", "Nursing", "Physio", "Lab", "Radiology", "Pharmacy", "Medicine"];
+
+function resolveDefaultFieldFromRole(profile: Record<string, any> = {}, portal?: string): HuddleField {
+  if (portal === "facility") return "Medicine";
+  const str = [
+    profile["specialty"],
+    profile["profession"],
+    profile["role"],
+    profile["qualification"],
+    profile["course"],
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (str.includes("nurse") || str.includes("nursing") || str.includes("gnm") || str.includes("anm")) {
+    return "Nursing";
+  }
+  if (str.includes("physio") || str.includes("bpt") || str.includes("mpt") || str.includes("rehab")) {
+    return "Physio";
+  }
+  if (str.includes("pharm") || str.includes("d.pharm") || str.includes("b.pharm") || str.includes("m.pharm")) {
+    return "Pharmacy";
+  }
+  if (str.includes("radio") || str.includes("x-ray") || str.includes("mri") || str.includes("imaging") || str.includes("radiolog")) {
+    return "Radiology";
+  }
+  if (str.includes("lab") || str.includes("dmlt") || str.includes("bmlt") || str.includes("patholog") || str.includes("technician")) {
+    return "Lab";
+  }
+  return "Medicine";
+}
 
 const REPORT_REASONS = [
   {
@@ -128,6 +195,94 @@ const REPORT_REASONS = [
   },
 ];
 
+const validateClinicalContent = (text: string): { valid: boolean; error?: string } => {
+  if (!text || !text.trim()) return { valid: true };
+
+  // 1. Bed / Ward numbers
+  const bedPattern = /\b(?:bed\s*(?:no\.?|number|#)?\s*\d+|ward\s*(?:no\.?|#)?\s*\d+|icu\s*bed\s*\d*)\b/i;
+  if (bedPattern.test(text)) {
+    return {
+      valid: false,
+      error: "Bed / Ward number detected. Please remove specific hospital bed and ward identifiers.",
+    };
+  }
+
+  // 2. Patient names / personal identifiers
+  const patientPattern = /\b(?:patient|pt\.?|mr\.?|mrs\.?|ms\.?)\s+[A-Za-z]{2,}(?:\s+[A-Za-z]{2,})?\b/i;
+  if (patientPattern.test(text)) {
+    return {
+      valid: false,
+      error: "Patient name or personal identifier detected. Clinical discussions and answers must strictly preserve patient anonymity.",
+    };
+  }
+
+  // 3. Numbers (phone / UHID / MRD / 10-digit number)
+  const phonePattern = /(?:(?:\+91|0)?[6-9]\d{9})|\b\d{10,12}\b/i;
+  const hospitalIdPattern = /\b(?:MRN|UHID|IPD|OPD|REG(?:ISTRATION)?)[-:\s#]?\d{3,}\b/i;
+  if (phonePattern.test(text) || hospitalIdPattern.test(text)) {
+    return {
+      valid: false,
+      error: "Contact or registration number (phone, UHID, MRD) detected. Direct personal contacts and hospital IDs are strictly forbidden.",
+    };
+  }
+
+  // 4. Links / URLs
+  const linkPattern = /(?:https?:\/\/|www\.|t\.me\/|wa\.me\/|bit\.ly\/)[^\s]+|\b[a-zA-Z0-9-]+\.(?:com|org|net|in|io|co|ai)(?:\/[^\s]*)?\b/i;
+  if (linkPattern.test(text)) {
+    return {
+      valid: false,
+      error: "External links and URLs are not permitted in clinical answers or discussions.",
+    };
+  }
+
+  // 5. Hiring / Recruitment
+  const hiringPattern = /\b(?:we\s+are\s+hiring|hiring\s+now|job\s+vacancy|job\s+opening|urgent\s+requirement|walk[- ]?in\s+interview|send\s+(?:your\s+)?(?:cv|resume)|contact\s+for\s+job|apply\s+now|recruiting|open\s+position)\b/i;
+  if (hiringPattern.test(text)) {
+    return {
+      valid: false,
+      error: "Job postings and recruitment promotions are not allowed in Huddle. Please use the FALE Jobs portal.",
+    };
+  }
+
+  return { valid: true };
+};
+
+export function formatRelativeTime(dateInput?: string | Date | null): string {
+  if (!dateInput) return "Recently";
+  const str = String(dateInput).trim();
+  if (!str) return "Recently";
+
+  // Check if string is already a formatted relative label
+  if (
+    str.toLowerCase() === "just now" ||
+    str.toLowerCase() === "today" ||
+    str.toLowerCase() === "yesterday" ||
+    str.toLowerCase() === "recently" ||
+    /^\d+\s*(s|m|h|d|w|mo|y)\s*ago$/i.test(str) ||
+    /^\d+\s*(sec|secs|min|mins|minute|minutes|hour|hours|day|days|week|weeks)\s*ago$/i.test(str)
+  ) {
+    return str;
+  }
+
+  const date = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  if (isNaN(date.getTime())) return str || "Recently";
+
+  const now = new Date();
+  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  if (diffSec < 45) return "Just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+
+  return date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
 function HuddlePage() {
   const s = useApp();
   const [activeTab, setActiveTab] = useState<"feed" | "mentors" | "sessions">("feed");
@@ -143,11 +298,16 @@ function HuddlePage() {
 
   // Posting Permissions & Community Rules Modal State
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
-  const [isSimulatedUnverified, setIsSimulatedUnverified] = useState(false);
 
-  // Composer State
+  // Composer State - dynamically defaulted from clinician role
+  const defaultField = useMemo(() => resolveDefaultFieldFromRole(s.profile, s.portal), [s.profile, s.portal]);
   const [postType, setPostType] = useState<HuddlePostType>("Thought");
-  const [postField, setPostField] = useState<HuddleField>("Nursing");
+  const [postField, setPostField] = useState<HuddleField>(defaultField);
+
+  // Auto-sync post department when clinician role or profile updates
+  useEffect(() => {
+    setPostField(defaultField);
+  }, [defaultField]);
   const [postText, setPostText] = useState("");
   const [postAnon, setPostAnon] = useState(false);
   const [postImage, setPostImage] = useState<string | null>(null);
@@ -160,20 +320,209 @@ function HuddlePage() {
   const [askText, setAskText] = useState("");
   const [mentorAnswerDrafts, setMentorAnswerDrafts] = useState<Record<string, string>>({});
 
-  // Current user info & verification status
+  // Conduct Session State
+  const [conductSessionModalOpen, setConductSessionModalOpen] = useState(false);
+  const [sessionTitle, setSessionTitle] = useState("");
+  const [sessionCategory, setSessionCategory] = useState("Mentorship Workshop");
+  const [sessionDate, setSessionDate] = useState<Date | undefined>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d;
+  });
+  const [sessionTime, setSessionTime] = useState<string>("06:00 PM");
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [sessionWhere, setSessionWhere] = useState("Live Interactive (Google Meet)");
+  const [sessionSeats, setSessionSeats] = useState(30);
+  const [sessionDescription, setSessionDescription] = useState("");
+  const [sessionRoles, setSessionRoles] = useState<string[]>(["Nursing", "Doctors", "Interns"]);
+  const [isConductingSession, setIsConductingSession] = useState(false);
+
+  // Candidate Profile for identity
+  const [candidateProfile, setCandidateProfile] = useState<CandidateProfile | null>(null);
+
+  // Edit Post State
+  const [editingPost, setEditingPost] = useState<HuddlePost | null>(null);
+  const [editPostText, setEditPostText] = useState("");
+  const [editPostType, setEditPostType] = useState<HuddlePostType>("Thought");
+  const [editPostField, setEditPostField] = useState<HuddleField>("Medicine");
+  const [editPostImage, setEditPostImage] = useState<string | null>(null);
+  const [editPostAnon, setEditPostAnon] = useState(false);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Delete Post State
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  const [isDeletingPost, setIsDeletingPost] = useState(false);
+
+  // Delete Question State
+  const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
+  const [isDeletingQuestion, setIsDeletingQuestion] = useState(false);
+
+  const sessionTimeSlots = useMemo(
+    () => [
+      "09:00 AM",
+      "10:00 AM",
+      "11:00 AM",
+      "12:00 PM",
+      "02:00 PM",
+      "03:30 PM",
+      "05:00 PM",
+      "06:00 PM",
+      "07:00 PM",
+      "08:00 PM",
+    ],
+    []
+  );
+
+  // Dynamic API state
+  const [apiPosts, setApiPosts] = useState<HuddlePostDto[]>([]);
+  const [apiQuestions, setApiQuestions] = useState<HuddleQuestionDto[]>([]);
+  const [apiSessions, setApiSessions] = useState<HuddleSessionDto[]>([]);
+  const [postComments, setPostComments] = useState<Record<string, HuddleCommentDto[]>>({});
+  const [loading, setLoading] = useState(isApiEnabled);
+
+  const fetchHuddleData = () => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    Promise.all([
+      getHuddlePosts(selectedField).catch(() => []),
+      getHuddleQuestions().catch(() => []),
+      getHuddleSessions().catch(() => []),
+    ])
+      .then(([posts, questions, sessions]) => {
+        setApiPosts(posts);
+        setApiQuestions(questions);
+        setApiSessions(sessions);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchHuddleData();
+  }, [selectedField]);
+
+  // Current user info & verification status (100% Dynamic from active session)
   const isHospital = s.portal === "facility";
-  const userName = String(s.profile["name"] || (isHospital ? "Apollo Hospitals — Central" : "Dr. Ananya Patel"));
-  const userRole = String(s.profile["role"] || (isHospital ? "Hospital Administrator" : "Pharmacist"));
-  const userLevel = (s.candidateLevel || (s.profile["exp"] === "Fresher" ? "fresher" : (s.profile["level"] as any) || "professional")) as
+  const [facilityProfile, setFacilityProfile] = useState<FacilityProfileDto | null>(null);
+
+  useEffect(() => {
+    if (isApiEnabled && isHospital) {
+      getFacilityProfile()
+        .then((profile) => {
+          if (profile) setFacilityProfile(profile);
+        })
+        .catch((err) => {
+          console.warn("Failed to load facility profile for Huddle:", err);
+        });
+    }
+  }, [isHospital]);
+
+  const userName = String(
+    (isHospital ? (facilityProfile?.hospitalName || s.profile["org"] || s.profile["hospitalName"]) : "") ||
+    s.profile["name"] ||
+    s.profile["fullName"] ||
+    (s.contact && !s.contact.startsWith("+91000") ? (s.contact.includes("@") ? s.contact.split("@")[0] : s.contact) : "") ||
+    (isHospital ? "Healthcare Facility" : "Doctor / Clinician")
+  );
+  const userRole = String(
+    (isHospital ? (facilityProfile?.facilityType || s.profile["facilityType"] || "Multi-Specialty Hospital") : "") ||
+    s.profile["specialty"] ||
+    s.profile["profession"] ||
+    s.profile["role"] ||
+    (isHospital ? "Facility Department" : "Healthcare Professional")
+  );
+  const userLevel = (isHospital
+    ? "hospital"
+    : (s.candidateLevel || (s.profile["exp"] === "Fresher" ? "fresher" : (s.profile["level"] as any) || "professional"))) as
     | "student"
     | "fresher"
     | "professional"
     | "hospital";
 
   // Verification status based on FALE credential check
-  const isVerified =
-    (s.profile["verified"] !== false && s.profile["kycStatus"] !== "pending" && s.profile["kycStatus"] !== "rejected") &&
-    !isSimulatedUnverified;
+  const isVerified = isHospital
+    ? (facilityProfile ? facilityProfile.status === "VERIFIED" || s.profile["verified"] !== false : true)
+    : (s.profile["verified"] !== false && s.profile["kycStatus"] !== "pending" && s.profile["kycStatus"] !== "rejected");
+
+  // Clinical Mentor verification & application state
+  const [mentorData, setMentorData] = useState<MentorApplicationDto | null>(null);
+  const [applyingMentor, setApplyingMentor] = useState(false);
+
+  useEffect(() => {
+    if (isApiEnabled && !isHospital) {
+      getCandidateProfile()
+        .then((profile) => {
+          if (profile) setCandidateProfile(profile);
+        })
+        .catch(() => {});
+      if (userLevel !== "student") {
+        getMentorStatus()
+          .then((res) => {
+            if (res) setMentorData(res);
+          })
+          .catch((err) => {
+            console.warn("Failed to load mentor status:", err);
+          });
+      }
+    }
+  }, [isHospital, userLevel]);
+
+  // Extract candidate clinical experience years (from API status, candidate profile, or local store)
+  const candidateExpYears = useMemo(() => {
+    if (mentorData?.yearsExperience != null && mentorData.yearsExperience > 0) {
+      return mentorData.yearsExperience;
+    }
+    const raw = String(
+      s.profile["experienceYears"] ||
+      s.profile["exp"] ||
+      s.profile["experience"] ||
+      ""
+    ).toLowerCase();
+    if (raw.includes("fresher") || raw.includes("student") || raw.includes("intern")) {
+      return 0;
+    }
+    const match = raw.match(/(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  }, [mentorData, s.profile]);
+
+  const isMentorCertified = Boolean(
+    s.profile["isMentor"] ||
+    mentorData?.status === "APPROVED" ||
+    mentorData?.verified
+  );
+  const isMentorPending = mentorData?.status === "PENDING";
+  const hasMinExperience = candidateExpYears >= 3;
+
+  const handleApplyMentor = async () => {
+    if (!hasMinExperience) {
+      toast.error("3+ Years Experience Required", {
+        description: `Healthcare mentors must have at least 3 years of clinical experience. Your current profile has ${candidateExpYears} year${candidateExpYears === 1 ? "" : "s"}.`,
+      });
+      return;
+    }
+    setApplyingMentor(true);
+    try {
+      if (isApiEnabled) {
+        const res = await applyForMentorSeal();
+        setMentorData(res);
+      } else {
+        setMentorData({
+          status: "PENDING",
+          name: userName,
+          yearsExperience: candidateExpYears,
+        });
+      }
+      toast.success("Mentor Application Submitted!", {
+        description: "Your clinical profile has been forwarded to the Admin Moderation Desk for credential audit & mentor seal verification.",
+      });
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to submit mentor application");
+    } finally {
+      setApplyingMentor(false);
+    }
+  };
 
   // Real-time safety analysis
   const safety = useMemo(() => safetyCheck(postText, isHospital), [postText, isHospital]);
@@ -202,9 +551,153 @@ function HuddlePage() {
 
   const availableTypes = isHospital ? hospitalPostTypes : candidatePostTypes;
 
-  // Filtered posts
+  const visibleQuestions = useMemo(() => {
+    if (isApiEnabled && apiQuestions.length > 0) {
+      return apiQuestions.map((q) => ({
+        id: q.id,
+        topic: (q.topic || q.category || q.field || "Career") as HuddleQuestion["topic"],
+        askerId: q.askerId || q.authorId || "user",
+        askerName: q.askerName || q.authorName || "Healthcare Professional",
+        askerShort: (q.askerName || q.authorName || "Clinician").split(" ")[0],
+        askerLevel: (q.askerLevel || "professional") as any,
+        askerProfession: q.askerProfession || q.authorRole || "Clinician",
+        text: q.questionText || q.body || q.title || q.question || "Clinical question",
+        answers: (q.answers || []).map((a) => ({
+          id: a.id,
+          mentorId: a.mentorId || "mentor",
+          mentorName: a.mentorName || "Verified Specialist",
+          mentorShort: (a.mentorName || "Dr.").split(" ")[0],
+          mentorRole: a.mentorRole || "Consultant",
+          mentorYrs: a.mentorYrs != null && a.mentorYrs > 0 ? a.mentorYrs : candidateExpYears >= 3 ? candidateExpYears : 3,
+          mentorSpecialty: a.mentorSpecialty || "Clinical Specialist",
+          text: a.answerText || a.body || a.text || "",
+          at: formatRelativeTime(a.createdAt || (a as any).timeAgo || (a as any).at),
+          helpfulCount: a.upvotes || a.helpfulCount || 0,
+        })),
+        at: formatRelativeTime(q.createdAt || (q as any).timeAgo || (q as any).at),
+      }));
+    }
+    return (s.huddleQuestions || []).map((q) => ({
+      ...q,
+      at: formatRelativeTime(q.at),
+      answers: (q.answers || []).map((a) => ({
+        ...a,
+        at: formatRelativeTime(a.at),
+      })),
+    }));
+  }, [isApiEnabled, apiQuestions, s.huddleQuestions, candidateExpYears]);
+
+  const visibleMentors = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; role: string; yrs: number; answersCount: number }>();
+    if (isMentorCertified && userName) {
+      map.set(userName, {
+        id: mentorData?.userId || "current-user-mentor",
+        name: userName,
+        role: userRole || "Clinical Specialist",
+        yrs: candidateExpYears >= 3 ? candidateExpYears : 4,
+        answersCount: 0,
+      });
+    }
+    for (const q of visibleQuestions) {
+      for (const a of q.answers) {
+        if (!a.mentorName) continue;
+        const existing = map.get(a.mentorName);
+        if (existing) {
+          existing.answersCount += 1;
+        } else {
+          map.set(a.mentorName, {
+            id: a.mentorId || a.mentorName,
+            name: a.mentorName,
+            role: a.mentorRole || a.mentorSpecialty || "Clinical Specialist",
+            yrs: a.mentorYrs != null && a.mentorYrs > 0 ? a.mentorYrs : candidateExpYears >= 3 ? candidateExpYears : 3,
+            answersCount: 1,
+          });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [visibleQuestions, isMentorCertified, userName, userRole, mentorData, candidateExpYears]);
+
+  // Filtered posts - 100% Dynamic from live backend API or real session
   const visiblePosts = useMemo(() => {
-    return s.huddlePosts
+    let rawList: HuddlePost[] = [];
+    if (isApiEnabled) {
+      const apiIds = new Set(apiPosts.map((p) => p.id));
+      const localOnly = (s.huddlePosts || [])
+        .filter((p) => !apiIds.has(p.id))
+        .map((p) => ({
+          ...p,
+          at: formatRelativeTime(p.at || p.time),
+          time: formatRelativeTime(p.at || p.time),
+          isMentor: Boolean(p.isMentor || (isMentorCertified && p.authorName === userName)),
+        }));
+      const mappedApi: HuddlePost[] = apiPosts.map((p) => {
+        const isAnon = Boolean((p as any).anon || (p as any).isAnonymous);
+        const isPostMentor = Boolean(
+          (p as any).isMentor ||
+          (p as any).authorIsMentor ||
+          (isMentorCertified && (p.authorId === mentorData?.userId || p.authorName === userName || p.authorName === mentorData?.name)) ||
+          visibleMentors.some((m) => m.name === p.authorName || m.id === p.authorId)
+        );
+        const isPostHospital = Boolean(
+          (p as any).isHospital ||
+          p.type === "Update" ||
+          p.type === "Event" ||
+          (p.authorRole && (
+            p.authorRole.toLowerCase().includes("hospital") ||
+            p.authorRole.toLowerCase().includes("facility") ||
+            p.authorRole.toLowerCase().includes("center") ||
+            p.authorRole.toLowerCase().includes("centre") ||
+            p.authorRole.toLowerCase().includes("institute") ||
+            p.authorRole.toLowerCase().includes("clinic")
+          )) ||
+          (isHospital && (p.authorId === (facilityProfile?.id || s.profile["facilityId"]) || p.authorName === userName))
+        );
+        const mentorYrs = (p as any).mentorYrs || (isPostMentor ? (candidateExpYears >= 3 ? candidateExpYears : 4) : undefined);
+        const relTime = formatRelativeTime(p.createdAt || (p as any).timeAgo || (p as any).time);
+        return {
+          id: p.id,
+          type: (p.type || (isPostHospital ? "Update" : "Thought")) as HuddlePostType,
+          field: (p.field || "Medicine") as HuddleField,
+          authorId: p.authorId || "",
+          authorName: isAnon ? "Anonymous Clinician" : (p.authorName || (isPostHospital ? "Healthcare Facility" : "Verified Clinician")),
+          authorShort: isAnon ? "Anonymous" : (p.authorName || (isPostHospital ? "Facility" : "Clinician")).split(" ")[0],
+          authorRole: isAnon ? "Verified Clinician" : (p.authorRole || (isPostHospital ? "Accredited Hospital" : "Clinician")),
+          authorLevel: (isPostHospital ? "hospital" : "professional") as any,
+          isMentor: isPostMentor,
+          isHospital: isPostHospital,
+          mentorYrs: mentorYrs,
+          anon: isAnon,
+          pinned: Boolean((p as any).isPinned),
+          text: p.body || p.title || "",
+          status: ((p.status || "live").toLowerCase()) as any,
+          time: relTime,
+          at: relTime,
+          date: "Today",
+          helpfulCount: p.upvotes || 0,
+          userHelpful: Boolean(p.hasUpvoted),
+          image: (p as any).image || (p as any).imageUrl,
+          replies: (postComments[p.id] || []).map((c) => ({
+            id: c.id,
+            authorName: c.authorName || "Verified Clinician",
+            authorRole: c.authorRole || "Clinician",
+            authorLevel: "professional" as const,
+            text: c.body || c.content || "",
+            at: formatRelativeTime(c.createdAt || (c as any).timeAgo || (c as any).at),
+          })),
+        };
+      });
+      rawList = [...localOnly, ...mappedApi];
+    } else {
+      rawList = (s.huddlePosts || []).map((p) => ({
+        ...p,
+        at: formatRelativeTime(p.at || p.time),
+        time: formatRelativeTime(p.at || p.time),
+        isMentor: Boolean(p.isMentor || (isMentorCertified && p.authorName === userName)),
+      }));
+    }
+
+    return rawList
       .filter((p) => p.status === "live")
       .filter((p) => selectedField === "All" || p.field === selectedField || p.field === "All")
       .filter((p) => selectedType === "All" || p.type === selectedType)
@@ -215,7 +708,33 @@ function HuddlePage() {
           p.authorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
           p.field.toLowerCase().includes(searchQuery.toLowerCase())
       );
-  }, [s.huddlePosts, selectedField, selectedType, searchQuery]);
+  }, [isApiEnabled, apiPosts, postComments, s.huddlePosts, selectedField, selectedType, searchQuery, isMentorCertified, userName, mentorData, visibleMentors, candidateExpYears]);
+
+  const visibleSessions = useMemo(() => {
+    if (isApiEnabled) {
+      return apiSessions.map((sess) => ({
+        id: sess.id,
+        title: sess.title,
+        category: sess.category,
+        hostType: (sess.hostType || "mentor") as "mentor" | "hospital",
+        hostName: sess.hostName,
+        hostSub: sess.hostSub || "Accredited Clinical Mentor",
+        when: sess.when,
+        where: sess.where,
+        seats: sess.seats,
+        bookedCount: sess.bookedCount,
+        isBooked: Boolean(sess.isBooked),
+        isHost: Boolean(sess.isHost),
+        description: sess.description || "",
+        forRoles: Array.isArray(sess.forRoles)
+          ? sess.forRoles
+          : typeof sess.forRoles === "string"
+          ? (sess.forRoles as string).split(",").map((r) => r.trim()).filter(Boolean)
+          : ["Nursing", "Doctors", "Interns"],
+      }));
+    }
+    return s.huddleSessions || [];
+  }, [isApiEnabled, apiSessions, s.huddleSessions]);
 
   const handleCreatePost = (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,17 +749,53 @@ function HuddlePage() {
       return;
     }
 
+    const isAnon = Boolean(postAnon && !isHospital);
+    const hasImage = Boolean(postImage);
+    const isUnderReview = postType === "Case" || hasImage;
+
+    // Optimistically update store
     const created = addHuddlePost({
       type: postType,
       field: postField,
-      authorName: userName,
-      authorRole: userRole,
+      authorName: isAnon ? "Anonymous Clinician" : userName,
+      authorRole: isAnon ? "Verified Clinician" : userRole,
       authorLevel: isHospital ? "hospital" : userLevel,
-      anon: postAnon && !isHospital,
+      anon: isAnon,
       text: postText.trim(),
       image: postImage || undefined,
       isHospital,
     });
+
+    if (isApiEnabled) {
+      createHuddlePost({
+        title: postText.slice(0, 80),
+        body: postText.trim(),
+        type: postType,
+        field: postField,
+        anon: isAnon,
+        image: postImage || undefined,
+      })
+        .then((newPost) => {
+          if (newPost && newPost.id) {
+            const augmented: HuddlePostDto = {
+              ...newPost,
+              authorName: isAnon ? "Anonymous Clinician" : newPost.authorName,
+              authorRole: isAnon ? "Verified Clinician" : newPost.authorRole,
+              anon: isAnon,
+              isAnonymous: isAnon,
+              image: postImage || undefined,
+              imageUrl: postImage || undefined,
+              status: isUnderReview ? "review" : "live",
+            };
+            if (!isUnderReview) {
+              setApiPosts((prev) => [augmented, ...prev]);
+            }
+          }
+        })
+        .catch((err) => {
+          console.warn("Backend huddle post sync:", err);
+        });
+    }
 
     setPostText("");
     setPostImage(null);
@@ -265,15 +820,66 @@ function HuddlePage() {
       });
       return;
     }
+    const targetPost = posts.find((p) => p.id === postId);
+    if (targetPost && (targetPost.type === "Question" || targetPost.type === "question") && !isMentorCertified) {
+      toast.error("Accredited Mentors Only", {
+        description: "Only certified clinical mentors with 3+ years experience can answer questions.",
+      });
+      return;
+    }
     const text = (replyDrafts[postId] || "").trim();
     if (!text) return;
 
+    const validation = validateClinicalContent(text);
+    if (!validation.valid) {
+      toast.error("Content Policy Violation", {
+        description: validation.error,
+      });
+      return;
+    }
+
+    const optimisticComment: HuddleCommentDto = {
+      id: "temp-" + Date.now(),
+      postId,
+      authorName: userName,
+      authorRole: userRole,
+      content: text,
+      body: text,
+      createdAt: new Date().toISOString(),
+      timeAgo: "Just now",
+    };
+
+    setPostComments((prev) => ({
+      ...prev,
+      [postId]: [...(prev[postId] || []), optimisticComment],
+    }));
+
+    setApiPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId ? { ...p, commentCount: ((p as any).commentsCount || p.commentCount || 0) + 1 } : p
+      )
+    );
+
+    // Optimistically update store
     addHuddleReply(postId, {
       authorName: userName,
       authorRole: userRole,
       text,
       authorLevel: userLevel === "hospital" ? "professional" : userLevel,
     });
+
+    if (isApiEnabled) {
+      addHuddleComment(postId, text)
+        .then((savedComment) => {
+          setPostComments((prev) => ({
+            ...prev,
+            [postId]: (prev[postId] || []).map((c) => (c.id === optimisticComment.id ? savedComment : c)),
+          }));
+        })
+        .catch((err) => {
+          console.warn("Backend comment sync:", err);
+        });
+    }
 
     setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
     setExpandedReplies((prev) => ({ ...prev, [postId]: true }));
@@ -294,10 +900,169 @@ function HuddlePage() {
       : "Community Rule Violation";
 
     reportHuddlePost(reportingPostId, reasonText);
+
+    if (isApiEnabled) {
+      flagHuddlePost(reportingPostId, reasonText)
+        .then(() => {
+          fetchHuddleData();
+        })
+        .catch(console.error);
+    }
+
     toast.success("Flagged for Clinical Review", {
       description: "Thank you. The post has been hidden from your feed and routed to the FALE Moderation Desk.",
     });
     setReportingPostId(null);
+  };
+
+  const isPostAuthor = useMemo(() => {
+    return (post: HuddlePost) => {
+      if (post.authorId === "current-user") return true;
+      if (candidateProfile?.userId && post.authorId === candidateProfile.userId) return true;
+      if (mentorData?.userId && post.authorId === mentorData.userId) return true;
+      if (facilityProfile?.userId && post.authorId === facilityProfile.userId) return true;
+      if (facilityProfile?.id && post.authorId === facilityProfile.id) return true;
+      if (s.profile["userId"] && post.authorId === s.profile["userId"]) return true;
+      if (!post.anon && post.authorName) {
+        const curName = (facilityProfile?.hospitalName || candidateProfile?.name || userName || "").trim().toLowerCase();
+        const postName = post.authorName.trim().toLowerCase();
+        if (curName && (postName === curName || postName.includes(curName) || curName.includes(postName))) {
+          return true;
+        }
+      }
+      return false;
+    };
+  }, [candidateProfile, facilityProfile, mentorData, s.profile, userName]);
+
+  const isQuestionAuthor = useMemo(() => {
+    return (q: any) => {
+      if (q.askerId === "current-user") return true;
+      if (candidateProfile?.userId && q.authorId === candidateProfile.userId) return true;
+      if (s.profile["userId"] && q.authorId === s.profile["userId"]) return true;
+      if (!q.isAnonymous && (q.askerName || q.authorName)) {
+        const curName = (candidateProfile?.name || userName || "").trim().toLowerCase();
+        const askerName = (q.askerName || q.authorName || "").trim().toLowerCase();
+        if (curName && (askerName === curName || askerName.includes(curName) || curName.includes(askerName))) {
+          return true;
+        }
+      }
+      return false;
+    };
+  }, [candidateProfile, s.profile, userName]);
+
+  const handleOpenEditModal = (post: HuddlePost) => {
+    setEditingPost(post);
+    setEditPostText(post.text);
+    setEditPostType(post.type);
+    setEditPostField(post.field);
+    setEditPostImage(post.image || null);
+    setEditPostAnon(Boolean(post.anon));
+  };
+
+  const handleSavePostEdit = async () => {
+    if (!editingPost) return;
+    const trimmed = editPostText.trim();
+    if (!trimmed) {
+      toast.error("Post content cannot be empty");
+      return;
+    }
+    const safetyContent = validateClinicalContent(trimmed);
+    if (!safetyContent.valid) {
+      toast.error(safetyContent.error || "Clinical safety violation detected");
+      return;
+    }
+    const safety = safetyCheck(trimmed);
+    if (safety.st === "block" || safety.st === "hire") {
+      toast.error(safety.why);
+      return;
+    }
+
+    setIsSubmittingEdit(true);
+    try {
+      if (isApiEnabled) {
+        await updateHuddlePostApi(editingPost.id, {
+          title: trimmed.slice(0, 100),
+          body: trimmed,
+          type: editPostType,
+          field: editPostField,
+          image: editPostImage,
+          anon: editPostAnon,
+        });
+        setApiPosts((prev) =>
+          prev.map((p) =>
+            p.id === editingPost.id
+              ? {
+                  ...p,
+                  title: trimmed.slice(0, 100),
+                  body: trimmed,
+                  type: editPostType,
+                  field: editPostField,
+                  imageUrl: editPostImage || undefined,
+                  image: editPostImage || undefined,
+                  isAnonymous: editPostAnon,
+                  anon: editPostAnon,
+                }
+              : p
+          )
+        );
+      }
+      updateHuddlePostLocal(editingPost.id, {
+        type: editPostType,
+        field: editPostField,
+        text: trimmed,
+        image: editPostImage,
+        anon: editPostAnon,
+      });
+
+      toast.success("Discussion updated successfully!");
+      setEditingPost(null);
+    } catch (err: any) {
+      toast.error("Failed to update post", {
+        description: err?.message || "Please check your network and try again.",
+      });
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
+
+  const handleConfirmDeletePost = async () => {
+    if (!deletingPostId) return;
+    setIsDeletingPost(true);
+    try {
+      if (isApiEnabled) {
+        await deleteHuddlePostApi(deletingPostId);
+        setApiPosts((prev) => prev.filter((p) => p.id !== deletingPostId));
+      }
+      deleteHuddlePostLocal(deletingPostId);
+      toast.success("Post deleted successfully", {
+        description: "The discussion has been removed from Huddle.",
+      });
+      setDeletingPostId(null);
+    } catch (err: any) {
+      toast.error("Failed to delete post", {
+        description: err?.message || "Could not delete post",
+      });
+    } finally {
+      setIsDeletingPost(false);
+    }
+  };
+
+  const handleConfirmDeleteQuestion = async () => {
+    if (!deletingQuestionId) return;
+    setIsDeletingQuestion(true);
+    try {
+      if (isApiEnabled) {
+        await deleteHuddleQuestionApi(deletingQuestionId);
+        setApiQuestions((prev) => prev.filter((q) => q.id !== deletingQuestionId));
+      }
+      deleteHuddleQuestionLocal(deletingQuestionId);
+      toast.success("Question deleted successfully");
+      setDeletingQuestionId(null);
+    } catch (err: any) {
+      toast.error("Failed to delete question: " + (err?.message || ""));
+    } finally {
+      setIsDeletingQuestion(false);
+    }
   };
 
   const handleAskMentor = (e: React.FormEvent) => {
@@ -308,6 +1073,14 @@ function HuddlePage() {
     }
     if (!askText.trim()) return;
 
+    const validation = validateClinicalContent(askText);
+    if (!validation.valid) {
+      toast.error("Content Policy Violation", {
+        description: validation.error,
+      });
+      return;
+    }
+
     askMentorQuestion({
       topic: askTopic,
       askerName: userName,
@@ -315,6 +1088,16 @@ function HuddlePage() {
       askerProfession: userRole,
       text: askText.trim(),
     });
+
+    if (isApiEnabled) {
+      createHuddleQuestion({
+        title: askText.slice(0, 80),
+        body: askText.trim(),
+        category: askTopic,
+      })
+        .then(() => fetchHuddleData())
+        .catch(console.warn);
+    }
 
     setAskText("");
     setAskModalOpen(false);
@@ -324,29 +1107,187 @@ function HuddlePage() {
   };
 
   const handleAnswerMentor = (questionId: string) => {
-    if (!isVerified) {
-      toast.error("Verification required to answer mentor questions");
-      return;
-    }
-    if (userLevel === "student") {
-      toast.error("Learners & Students cannot publish official mentor answers", {
-        description: "Only accredited mentors with 3+ years clinical experience can answer clinical questions.",
+    if (!isMentorCertified) {
+      toast.error("Mentor Accreditation Required", {
+        description: "Only accredited clinical mentors with 3+ years experience can answer questions.",
       });
       return;
     }
     const text = (mentorAnswerDrafts[questionId] || "").trim();
     if (!text) return;
 
+    const validation = validateClinicalContent(text);
+    if (!validation.valid) {
+      toast.error("Content Policy Violation", {
+        description: validation.error,
+      });
+      return;
+    }
+
+    const resolvedMentorYrs = candidateExpYears >= 3 ? candidateExpYears : 3;
+    const resolvedMentorSpecialty = String(s.profile["specialty"] || s.profile["profession"] || "Clinical Specialist");
+
     answerMentorQuestion(questionId, {
       mentorName: userName,
       mentorRole: userRole,
-      mentorYrs: 5,
-      mentorSpecialty: "Clinical Specialist",
+      mentorYrs: resolvedMentorYrs,
+      mentorSpecialty: resolvedMentorSpecialty,
       text,
     });
 
+    if (isApiEnabled) {
+      answerHuddleQuestion(questionId, text)
+        .then(() => fetchHuddleData())
+        .catch(console.warn);
+    }
+
     setMentorAnswerDrafts((prev) => ({ ...prev, [questionId]: "" }));
     toast.success("Mentor answer published!");
+  };
+
+  const handleToggleBookSession = async (session: any) => {
+    if (!isVerified) {
+      toast.error("Account Verification Required", {
+        description: "Please complete your clinical ID or KYC verification to book CME seats.",
+      });
+      return;
+    }
+
+    try {
+      if (isApiEnabled) {
+        let updated: HuddleSessionDto;
+        if (session.isBooked) {
+          updated = await cancelHuddleSessionBooking(session.id);
+          toast.info("Booking cancelled.");
+        } else {
+          updated = await bookHuddleSession(session.id);
+          toast.success("Seat reserved!", {
+            description: `You are booked for "${session.title}". Invitation confirmed.`,
+          });
+        }
+        setApiSessions((prev) =>
+          prev.map((s) => (s.id === session.id ? updated : s))
+        );
+      } else {
+        toggleBookSession(session.id);
+        if (!session.isBooked) {
+          toast.success("Seat reserved!", {
+            description: `You are booked for "${session.title}". Invitation confirmed.`,
+          });
+        } else {
+          toast.info("Booking cancelled.");
+        }
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update session booking");
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    if (!confirm("Are you sure you want to cancel and remove this session?")) return;
+    try {
+      if (isApiEnabled) {
+        await deleteHuddleSession(sessionId);
+        setApiSessions((prev) => prev.filter((s) => s.id !== sessionId));
+        toast.success("Session cancelled and removed.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to cancel session");
+    }
+  };
+
+  const handleConductSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isMentorCertified && !isHospital) {
+      toast.error("Accredited Clinical Mentor or Hospital Required", {
+        description: "Only verified clinical mentors or accredited healthcare institutions can conduct sessions and CMEs.",
+      });
+      return;
+    }
+
+    if (!sessionTitle.trim()) {
+      toast.error("Session title is required");
+      return;
+    }
+    if (!sessionDate) {
+      toast.error("Please select a date for the mentorship session");
+      return;
+    }
+
+    // Safety checks
+    const safetyCheckRes = validateClinicalContent(sessionTitle + " " + sessionDescription);
+    if (!safetyCheckRes.valid) {
+      toast.error("Content Policy Violation", {
+        description: safetyCheckRes.error,
+      });
+      return;
+    }
+
+    // Combine custom date + time into ISO timestamp
+    const combinedDate = new Date(sessionDate);
+    const [timeStr, modifier] = (sessionTime || "06:00 PM").split(" ");
+    let [hours, minutes] = timeStr.split(":").map(Number);
+    if (modifier === "PM" && hours < 12) hours += 12;
+    if (modifier === "AM" && hours === 12) hours = 0;
+    combinedDate.setHours(hours, minutes || 0, 0, 0);
+    const whenIso = combinedDate.toISOString();
+
+    setIsConductingSession(true);
+    try {
+      if (isApiEnabled) {
+        const payload: CreateHuddleSessionPayload = {
+          title: sessionTitle.trim(),
+          category: sessionCategory,
+          when: whenIso,
+          where: sessionWhere.trim() || "Live Interactive (Google Meet)",
+          seats: Number(sessionSeats) || 30,
+          description: sessionDescription.trim(),
+          forRoles: sessionRoles.length > 0 ? sessionRoles : ["Nursing", "Doctors", "Interns"],
+        };
+
+        const newSession = await createHuddleSession(payload);
+        setApiSessions((prev) => [newSession, ...prev]);
+        toast.success("Mentorship session scheduled!", {
+          description: `"${newSession.title}" is now open for clinical registrations.`,
+        });
+      } else {
+        const newMockSession = {
+          id: "sess_" + Date.now(),
+          title: sessionTitle.trim(),
+          category: sessionCategory,
+          hostType: "mentor" as const,
+          hostName: userName,
+          hostSub: `Accredited Clinical Mentor · ${userRole}`,
+          when: whenIso,
+          where: sessionWhere.trim() || "Live Interactive (Google Meet)",
+          seats: Number(sessionSeats) || 30,
+          bookedCount: 0,
+          isBooked: false,
+          description: sessionDescription.trim(),
+          forRoles: sessionRoles,
+        };
+        setState((st) => ({
+          huddleSessions: [newMockSession, ...(st.huddleSessions || [])],
+        }));
+        toast.success("Mentorship session scheduled!", {
+          description: `"${newMockSession.title}" is now live.`,
+        });
+      }
+
+      // Reset form & close modal
+      setSessionTitle("");
+      setSessionDescription("");
+      const defaultDate = new Date();
+      defaultDate.setDate(defaultDate.getDate() + 3);
+      setSessionDate(defaultDate);
+      setSessionTime("06:00 PM");
+      setSessionSeats(30);
+      setConductSessionModalOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to schedule session");
+    } finally {
+      setIsConductingSession(false);
+    }
   };
 
   return (
@@ -373,11 +1314,7 @@ function HuddlePage() {
               <span>{isVerified ? "Verified Members Only" : "Read-Only Mode"}</span>
               <HiOutlineInformationCircle className="h-3 w-3 shrink-0 opacity-70" />
             </button>
-            {isSimulatedUnverified && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 px-2 py-0.5 text-[10px] font-bold">
-                Simulating Unverified
-              </span>
-            )}
+
           </div>
           <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
             Peer-to-peer clinical discussions, real ward experiences, mentor Q&A, and accredited CME events.
@@ -502,7 +1439,7 @@ function HuddlePage() {
                       activeTab === "sessions" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
                     )}
                   >
-                    {s.huddleSessions.length}
+                    {visibleSessions.length}
                   </span>
                 </button>
               </div>
@@ -715,16 +1652,7 @@ function HuddlePage() {
                               Check KYC &amp; Verification Status
                             </Button>
                           </Link>
-                          {isSimulatedUnverified && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={() => setIsSimulatedUnverified(false)}
-                              className="h-9 px-3 rounded-xl text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-                            >
-                              Exit Simulation
-                            </Button>
-                          )}
+
                         </div>
                         <span className="text-[11px] text-muted-foreground">NABH &amp; HIPAA Compliant Peer Network</span>
                       </div>
@@ -804,8 +1732,8 @@ function HuddlePage() {
 
                         {/* Attached Image Preview */}
                         {postImage && (
-                          <div className="relative inline-block rounded-2xl overflow-hidden border border-border">
-                            <img src={postImage} alt="Attachment" className="max-h-40 object-cover rounded-xl" />
+                          <div className="relative inline-block rounded-2xl overflow-hidden border border-border bg-muted/20">
+                            <img src={postImage} alt="Attachment" className="max-h-56 w-auto max-w-full object-contain rounded-xl" />
                             <button
                               type="button"
                               onClick={() => setPostImage(null)}
@@ -917,22 +1845,23 @@ function HuddlePage() {
                                 onChange={(e) => {
                                   const file = e.target.files?.[0];
                                   if (file) {
-                                    const url = URL.createObjectURL(file);
-                                    setPostImage(url);
-                                    toast.info("Image attached. Posts with images undergo FALE privacy check.");
+                                    if (file.size > 5 * 1024 * 1024) {
+                                      toast.error("Image file is too large. Max size is 5MB.");
+                                      return;
+                                    }
+                                    const reader = new FileReader();
+                                    reader.onload = (ev) => {
+                                      const base64 = ev.target?.result as string;
+                                      setPostImage(base64);
+                                      toast.info("Image attached. Posts with images undergo FALE privacy check.");
+                                    };
+                                    reader.readAsDataURL(file);
                                   }
                                 }}
                               />
                             </label>
 
-                            <button
-                              type="button"
-                              onClick={() => setIsSimulatedUnverified(true)}
-                              className="text-[10px] text-muted-foreground hover:text-primary transition-colors underline cursor-pointer ml-1 whitespace-nowrap shrink-0"
-                              title="Test how unverified read-only users experience Huddle"
-                            >
-                              Simulate unverified
-                            </button>
+
                           </div>
 
                           {/* Submit Button */}
@@ -958,7 +1887,12 @@ function HuddlePage() {
 
                   {/* Feed Items */}
                   <div className="space-y-4">
-                    {visiblePosts.length === 0 ? (
+                    {loading ? (
+                      <div className="surface p-12 text-center text-xs text-muted-foreground rounded-3xl border border-border/80">
+                        <HiOutlineClock className="mx-auto h-8 w-8 text-primary animate-spin" />
+                        <p className="mt-2 text-sm font-semibold">Loading discussions...</p>
+                      </div>
+                    ) : visiblePosts.length === 0 ? (
                       <div className="rounded-3xl border border-dashed border-border bg-card p-12 text-center">
                         <div className="h-12 w-12 rounded-2xl bg-muted text-muted-foreground mx-auto flex items-center justify-center mb-3">
                           <HiOutlineChatBubbleLeftRight className="h-6 w-6" />
@@ -995,9 +1929,14 @@ function HuddlePage() {
                                     {post.anon ? "Anonymous Clinician" : post.authorName}
                                   </span>
                                   <RiVerifiedBadgeFill className="h-4 w-4 text-primary shrink-0" />
-                                  {post.isMentor && (
+                                  {post.isMentor && !post.anon && (
                                     <span className="rounded-full bg-[#FFF4EC] text-[#FF5A1F] border border-primary/20 px-2 py-0.5 text-[10px] font-black uppercase whitespace-nowrap shrink-0">
-                                      Mentor
+                                      Mentor {post.mentorYrs ? `(${post.mentorYrs}+ YRS)` : ""}
+                                    </span>
+                                  )}
+                                  {post.isHospital && !post.anon && (
+                                    <span className="rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 px-2 py-0.5 text-[10px] font-bold whitespace-nowrap shrink-0">
+                                      Verified Institution
                                     </span>
                                   )}
                                   {post.authorLevel === "student" && !post.anon && (
@@ -1012,7 +1951,7 @@ function HuddlePage() {
                                   </span>
                                   <span className="shrink-0 text-muted-foreground/60">·</span>
                                   <span className="shrink-0 text-muted-foreground whitespace-nowrap">
-                                    {post.at && post.at.trim() ? post.at : "2 days ago"}
+                                    {formatRelativeTime(post.at || post.time)}
                                   </span>
                                 </p>
                               </div>
@@ -1054,8 +1993,15 @@ function HuddlePage() {
 
                           {/* Attached Image if present */}
                           {post.image && (
-                            <div className="mt-3 rounded-2xl overflow-hidden border border-border">
-                              <img src={post.image} alt="Clinical demonstration" className="max-h-72 w-full object-cover" />
+                            <div className="mt-3 rounded-2xl overflow-hidden border border-border bg-muted/20 dark:bg-black/30 flex items-center justify-center">
+                              <img
+                                src={post.image}
+                                alt="Clinical demonstration"
+                                className="max-h-[520px] w-auto max-w-full object-contain mx-auto rounded-xl"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLElement).style.display = "none";
+                                }}
+                              />
                             </div>
                           )}
 
@@ -1065,7 +2011,23 @@ function HuddlePage() {
                               {/* Helpful Button */}
                               <button
                                 type="button"
-                                onClick={() => toggleHelpfulPost(post.id)}
+                                onClick={() => {
+                                  toggleHelpfulPost(post.id);
+                                  if (isApiEnabled) {
+                                    setApiPosts((prev) =>
+                                      prev.map((p) =>
+                                        p.id === post.id
+                                          ? {
+                                              ...p,
+                                              upvotes: (p.upvotes || 0) + (p.hasUpvoted ? -1 : 1),
+                                              hasUpvoted: !p.hasUpvoted,
+                                            }
+                                          : p
+                                      )
+                                    );
+                                    upvoteHuddlePost(post.id).catch(console.warn);
+                                  }
+                                }}
                                 className={cn(
                                   "px-3 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 font-bold cursor-pointer",
                                   post.userHelpful
@@ -1084,12 +2046,20 @@ function HuddlePage() {
                               {/* Replies Toggle */}
                               <button
                                 type="button"
-                                onClick={() =>
+                                onClick={() => {
+                                  const willExpand = !expandedReplies[post.id];
                                   setExpandedReplies((prev) => ({
                                     ...prev,
-                                    [post.id]: !prev[post.id],
-                                  }))
-                                }
+                                    [post.id]: willExpand,
+                                  }));
+                                  if (willExpand && isApiEnabled && !postComments[post.id]) {
+                                    getHuddleComments(post.id)
+                                      .then((comments) => {
+                                        setPostComments((prev) => ({ ...prev, [post.id]: comments }));
+                                      })
+                                      .catch(console.warn);
+                                  }
+                                }}
                                 className="px-3 py-1.5 rounded-xl border border-border bg-muted/40 text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all flex items-center gap-1.5 font-bold cursor-pointer"
                               >
                                 <HiOutlineChatBubbleLeftRight className="h-4 w-4" />
@@ -1099,15 +2069,39 @@ function HuddlePage() {
                               </button>
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={() => handleOpenReportModal(post.id)}
-                              className="text-muted-foreground hover:text-rose-500 transition-colors p-1.5 rounded-lg flex items-center gap-1 text-[11px] cursor-pointer"
-                              title="Report inappropriate post or privacy violation"
-                            >
-                              <HiOutlineFlag className="h-3.5 w-3.5" />
-                              <span className="hidden sm:inline">Report</span>
-                            </button>
+                            {isPostAuthor(post) ? (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditModal(post)}
+                                  className="text-muted-foreground hover:text-primary transition-colors px-2 py-1 rounded-lg flex items-center gap-1 text-xs font-semibold hover:bg-primary-soft cursor-pointer"
+                                  title="Edit post"
+                                >
+                                  <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                                  <span>Edit</span>
+                                </button>
+                                <span className="text-border">·</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingPostId(post.id)}
+                                  className="text-muted-foreground hover:text-rose-600 transition-colors px-2 py-1 rounded-lg flex items-center gap-1 text-xs font-semibold hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                                  title="Delete post"
+                                >
+                                  <HiOutlineTrash className="h-3.5 w-3.5" />
+                                  <span>Delete</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenReportModal(post.id)}
+                                className="text-muted-foreground hover:text-rose-500 transition-colors p-1.5 rounded-lg flex items-center gap-1 text-[11px] cursor-pointer"
+                                title="Report inappropriate post or privacy violation"
+                              >
+                                <HiOutlineFlag className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Report</span>
+                              </button>
+                            )}
                           </div>
 
                           {/* Expandable Replies Section */}
@@ -1130,7 +2124,7 @@ function HuddlePage() {
                                         </span>
                                       </div>
                                       <span className="text-[10px] text-muted-foreground shrink-0">
-                                        {reply.at && reply.at.trim() ? reply.at : "1 day ago"}
+                                        {formatRelativeTime(reply.at)}
                                       </span>
                                     </div>
                                     <p className="text-xs text-foreground/90 leading-relaxed">{reply.text}</p>
@@ -1138,11 +2132,36 @@ function HuddlePage() {
                                 </div>
                               ))}
 
-                              {/* Inline Reply Composer */}
+                              {/* Inline Reply / Answer Composer */}
                               {!isVerified ? (
                                 <div className="flex items-center gap-2 pt-1.5 p-2.5 rounded-xl bg-card border border-border/80 text-xs text-muted-foreground">
-                                  <HiOutlineLockClosed className="h-4 w-4 text-amber-500 shrink-0" />
+                                  <HiOutlineLockClosed className="h-4 w-4 text-primary shrink-0" />
                                   <span>Verification required to reply to peer discussions.</span>
+                                </div>
+                              ) : (post.type === "Question" || post.type === "question") && !isMentorCertified ? (
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1.5 p-2.5 rounded-xl bg-primary/5 border border-primary/20 text-xs text-muted-foreground">
+                                  <div className="flex items-center gap-2">
+                                    <HiOutlineLockClosed className="h-4 w-4 text-primary shrink-0" />
+                                    <span>
+                                      <strong className="text-foreground">Accredited Mentors Only: </strong>
+                                      Only certified clinical mentors can answer questions.
+                                    </span>
+                                  </div>
+                                  {isMentorPending ? (
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 shrink-0">
+                                      Application Under Review
+                                    </span>
+                                  ) : hasMinExperience ? (
+                                    <Button
+                                      size="sm"
+                                      type="button"
+                                      onClick={handleApplyMentor}
+                                      disabled={applyingMentor}
+                                      className="h-6 px-2.5 text-[10px] font-bold bg-primary text-white hover:bg-primary-hover rounded-lg cursor-pointer shrink-0"
+                                    >
+                                      Apply for Mentor Seal
+                                    </Button>
+                                  ) : null}
                                 </div>
                               ) : (
                                 <div className="flex items-center gap-2 pt-1.5">
@@ -1155,7 +2174,7 @@ function HuddlePage() {
                                         [post.id]: e.target.value,
                                       }))
                                     }
-                                    placeholder="Write a clinical or peer response..."
+                                    placeholder={post.type === "Question" ? "Answer this question as an accredited mentor..." : "Write a clinical or peer response..."}
                                     onKeyDown={(e) => {
                                       if (e.key === "Enter") handleSendReply(post.id);
                                     }}
@@ -1167,7 +2186,7 @@ function HuddlePage() {
                                     disabled={!(replyDrafts[post.id] || "").trim()}
                                     className="h-9 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs cursor-pointer shadow-xs shrink-0"
                                   >
-                                    Reply
+                                    {post.type === "Question" ? "Answer" : "Reply"}
                                   </Button>
                                 </div>
                               )}
@@ -1273,7 +2292,19 @@ function HuddlePage() {
 
                   {/* Questions List */}
                   <div className="space-y-4">
-                    {s.huddleQuestions.map((q) => (
+                    {loading ? (
+                      <div className="surface p-8 text-center text-xs text-muted-foreground rounded-3xl border border-border/80">
+                        <HiOutlineClock className="mx-auto h-6 w-6 text-primary animate-spin" />
+                        <p className="mt-2 font-semibold">Loading questions...</p>
+                      </div>
+                    ) : visibleQuestions.length === 0 ? (
+                      <div className="surface p-8 text-center text-xs text-muted-foreground rounded-3xl border border-dashed border-border/80">
+                        <HiOutlineLightBulb className="mx-auto h-7 w-7 text-muted-foreground" />
+                        <h4 className="font-bold text-foreground mt-2">No mentor questions yet</h4>
+                        <p className="mt-1">Be the first to ask a clinical mentor about career transitions, exams, or department protocols.</p>
+                      </div>
+                    ) : (
+                      visibleQuestions.map((q) => (
                       <div
                         key={q.id}
                         className="rounded-3xl border border-border bg-card p-5 shadow-xs transition-all hover:border-border/80 space-y-4"
@@ -1286,18 +2317,30 @@ function HuddlePage() {
                             <h3 className="font-extrabold text-base text-foreground mt-2">{q.text}</h3>
                             <p className="text-[11px] text-muted-foreground mt-1">
                               Asked by <span className="font-semibold text-foreground">{q.askerShort}</span> (
-                              {q.askerProfession || q.askerLevel}) · {q.at && q.at.trim() ? q.at : "2 days ago"}
+                              {q.askerProfession || q.askerLevel}) · {formatRelativeTime(q.at)}
                             </p>
                           </div>
+                          {isQuestionAuthor(q) && (
+                            <button
+                              type="button"
+                              onClick={() => setDeletingQuestionId(q.id)}
+                              className="h-8 w-8 rounded-xl border border-border/70 hover:border-rose-400 bg-card hover:bg-rose-50 dark:hover:bg-rose-950/30 text-muted-foreground hover:text-rose-600 transition-all grid place-items-center cursor-pointer shadow-2xs shrink-0"
+                              title="Delete your asked question"
+                            >
+                              <HiOutlineTrash className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
 
                         {/* Answers from Mentors */}
                         <div className="space-y-3 pt-2">
                           {q.answers.length === 0 ? (
-                            <div className="rounded-2xl bg-muted/40 p-3.5 text-xs text-muted-foreground flex items-center gap-2.5 border border-border/60">
-                              <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
-                              <span>Waiting for a verified mentor to answer. Answers are verified and public.</span>
-                            </div>
+                            !isMentorCertified ? (
+                              <div className="rounded-2xl bg-muted/40 p-3.5 text-xs text-muted-foreground flex items-center gap-2.5 border border-border/60">
+                                <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
+                                <span>Waiting for a verified mentor to answer. Answers are verified and public.</span>
+                              </div>
+                            ) : null
                           ) : (
                             q.answers.map((ans) => (
                               <div
@@ -1313,8 +2356,8 @@ function HuddlePage() {
                                       <div className="flex items-center gap-1.5 flex-wrap">
                                         <span className="font-bold text-xs text-foreground">{ans.mentorName}</span>
                                         <RiVerifiedBadgeFill className="h-3.5 w-3.5 text-primary" />
-                                        <span className="rounded-full bg-[#FFF4EC] text-[#FF5A1F] border border-primary/20 px-2 py-0.5 text-[10px] font-black uppercase">
-                                          Mentor ({ans.mentorYrs}+ yrs)
+                                        <span className="rounded-full bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 text-[10px] font-black uppercase">
+                                          Mentor ({ans.mentorYrs ? `${ans.mentorYrs}+` : "3+"} yrs)
                                         </span>
                                       </div>
                                       <p className="text-[10px] text-muted-foreground font-medium">
@@ -1323,7 +2366,7 @@ function HuddlePage() {
                                     </div>
                                   </div>
                                   <span className="text-[10px] text-muted-foreground shrink-0">
-                                    {ans.at && ans.at.trim() ? ans.at : "1 day ago"}
+                                    {formatRelativeTime(ans.at)}
                                   </span>
                                 </div>
                                 <p className="text-xs text-foreground/90 leading-relaxed sm:pl-10.5 pl-0">{ans.text}</p>
@@ -1334,19 +2377,40 @@ function HuddlePage() {
                           {/* Mentor Answer Box (Only accredited mentors can publish answers) */}
                           {userLevel === "student" ? (
                             <div className="pt-2">
-                              <div className="rounded-2xl border border-primary/20 bg-[#FFF4EC] dark:bg-card p-3 text-xs text-muted-foreground flex items-center gap-2.5">
+                              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground flex items-center gap-2.5">
                                 <HiOutlineAcademicCap className="h-5 w-5 text-primary shrink-0" />
                                 <div>
-                                  <span className="font-bold text-foreground">Student &amp; Learner Access: </span>
-                                  <span>You have priority access to ask clinical questions to verified specialists above. Official answers are reserved for accredited mentors with 3+ years clinical experience.</span>
+                                  <span className="font-bold text-foreground">Student &amp; Learner Priority Access: </span>
+                                  <span>You have priority access to ask clinical questions to verified specialists. Official answers are reserved for accredited clinical mentors (3+ years experience).</span>
                                 </div>
                               </div>
                             </div>
-                          ) : !isVerified ? (
+                          ) : !isMentorCertified ? (
                             <div className="pt-2">
-                              <div className="rounded-2xl border border-border/70 bg-muted/40 p-3 text-xs text-muted-foreground flex items-center gap-2.5">
-                                <HiOutlineLockClosed className="h-5 w-5 text-amber-500 shrink-0" />
-                                <span>Verification required to answer mentor questions. Only accredited clinicians can publish answers.</span>
+                              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                                <div className="flex items-center gap-2.5">
+                                  <HiOutlineLockClosed className="h-5 w-5 text-primary shrink-0" />
+                                  <span>
+                                    <strong className="text-foreground">Accredited Mentors Only: </strong>
+                                    Only verified clinical mentors with 3+ years experience can publish answers to peer questions.
+                                  </span>
+                                </div>
+                                {isMentorPending ? (
+                                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 shrink-0 flex items-center gap-1 self-start sm:self-auto">
+                                    <HiOutlineClock className="h-3 w-3" />
+                                    Mentor Application Pending Review
+                                  </span>
+                                ) : hasMinExperience ? (
+                                  <Button
+                                    size="sm"
+                                    type="button"
+                                    onClick={handleApplyMentor}
+                                    disabled={applyingMentor}
+                                    className="h-7 px-3 text-[11px] font-bold bg-primary text-white hover:bg-primary-hover rounded-xl cursor-pointer shrink-0 self-start sm:self-auto"
+                                  >
+                                    Apply for Mentor Seal
+                                  </Button>
+                                ) : null}
                               </div>
                             </div>
                           ) : (
@@ -1360,7 +2424,7 @@ function HuddlePage() {
                                     [q.id]: e.target.value,
                                   }))
                                 }
-                                placeholder="Answer as an experienced mentor..."
+                                placeholder="Answer as an accredited clinical mentor..."
                                 className="h-9 flex-1 rounded-xl bg-muted/30 border border-border px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                               />
                               <Button
@@ -1375,7 +2439,7 @@ function HuddlePage() {
                           )}
                         </div>
                       </div>
-                    ))}
+                    )))}
                   </div>
                 </div>
               )}
@@ -1387,23 +2451,59 @@ function HuddlePage() {
                 <div className="space-y-6">
                   {/* Sessions Hero Banner */}
                   <div className="rounded-3xl border border-primary/20 bg-gradient-to-br from-card via-card to-primary/5 p-5 sm:p-6 shadow-xs relative overflow-hidden">
-                    <div className="max-w-2xl space-y-2">
-                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#FFF4EC] dark:bg-card text-primary border border-primary/20 text-[11px] font-medium shadow-2xs">
-                        <HiOutlineAcademicCap className="h-3.5 w-3.5" />
-                        <span>Continuing Medical Education</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="max-w-2xl space-y-2">
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#FFF4EC] dark:bg-card text-primary border border-primary/20 text-[11px] font-medium shadow-2xs">
+                          <HiOutlineAcademicCap className="h-3.5 w-3.5" />
+                          <span>Continuing Medical Education</span>
+                        </div>
+                        <h2 className="text-lg sm:text-xl font-bold text-foreground tracking-tight">
+                          Clinical Talks, CMEs &amp; Mentorship Workshops
+                        </h2>
+                        <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                          Join live interactive masterclasses and accredited hospital CMEs led by verified clinicians. Learn real ward protocols, prepare for clinical viva, and earn verifiable CME badges.
+                        </p>
                       </div>
-                      <h2 className="text-lg sm:text-xl font-bold text-foreground tracking-tight">
-                        Clinical Talks, CMEs &amp; Mentorship Workshops
-                      </h2>
-                      <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
-                        Join live interactive masterclasses and accredited hospital CMEs led by verified clinicians. Learn real ward protocols, prepare for clinical viva, and earn verifiable CME badges.
-                      </p>
+
+                      {(isMentorCertified || isHospital) && (
+                        <Button
+                          type="button"
+                          onClick={() => setConductSessionModalOpen(true)}
+                          className="rounded-2xl bg-primary hover:bg-primary-hover text-white font-bold text-xs sm:text-sm px-5 py-3 h-auto cursor-pointer shadow-md flex items-center gap-2 shrink-0 self-start sm:self-center"
+                        >
+                          <HiOutlineVideoCamera className="h-4 w-4" />
+                          <span>{isHospital ? "Host CME Workshop" : "Conduct Session"}</span>
+                        </Button>
+                      )}
                     </div>
                   </div>
 
                   {/* Sessions Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {s.huddleSessions.map((session) => {
+                  {visibleSessions.length === 0 ? (
+                    <div className="surface p-12 text-center text-xs text-muted-foreground rounded-3xl border border-dashed border-border/80">
+                      <HiOutlineCalendar className="mx-auto h-8 w-8 text-muted-foreground" />
+                      <h4 className="font-bold text-foreground mt-2">No scheduled CME sessions right now</h4>
+                      <p className="mt-1 max-w-md mx-auto">
+                        {isHospital
+                          ? "You are a verified healthcare facility! Host a live clinical masterclass, grand rounds, or accredited CME workshop for doctors, nurses, and students."
+                          : isMentorCertified
+                          ? "You are an accredited clinical mentor! Host a live clinical masterclass, case viva, or CME workshop for junior nurses, interns, and students."
+                          : "Verified hospital partners and accredited mentors post live grand rounds and CME workshops regularly. Check back soon."}
+                      </p>
+                      {(isMentorCertified || isHospital) && (
+                        <Button
+                          type="button"
+                          onClick={() => setConductSessionModalOpen(true)}
+                          className="mt-4 rounded-2xl bg-primary hover:bg-primary-hover text-white font-bold text-xs px-5 py-2.5 h-auto cursor-pointer inline-flex items-center gap-2 shadow-xs"
+                        >
+                          <HiOutlineVideoCamera className="h-4 w-4" />
+                          <span>{isHospital ? "Host First CME Workshop" : "Conduct First Session"}</span>
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      {visibleSessions.map((session) => {
                       const d = new Date(session.when);
                       const seatsLeft = session.seats - session.bookedCount;
                       const isFull = seatsLeft <= 0;
@@ -1442,16 +2542,35 @@ function HuddlePage() {
                                 </div>
                               </div>
 
-                              {session.isBooked ? (
-                                <span className="rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-3 py-1 text-[11px] font-bold flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-                                  <HiCheckCircle className="h-3.5 w-3.5" />
-                                  Booked
-                                </span>
-                              ) : isFull ? (
-                                <span className="rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 px-3 py-1 text-[11px] font-bold uppercase shrink-0 whitespace-nowrap">
-                                  Full
-                                </span>
-                              ) : null}
+                              <div className="flex items-center gap-2 shrink-0">
+                                {session.isHost && (
+                                  <span className="rounded-full bg-primary/15 text-primary border border-primary/30 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider">
+                                    Hosted by you
+                                  </span>
+                                )}
+
+                                {session.isBooked ? (
+                                  <span className="rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-3 py-1 text-[11px] font-bold flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+                                    <HiCheckCircle className="h-3.5 w-3.5" />
+                                    Booked
+                                  </span>
+                                ) : isFull ? (
+                                  <span className="rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 px-3 py-1 text-[11px] font-bold uppercase shrink-0 whitespace-nowrap">
+                                    Full
+                                  </span>
+                                ) : null}
+
+                                {session.isHost && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteSession(session.id)}
+                                    title="Cancel and remove this session"
+                                    className="p-1 rounded-lg text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                  >
+                                    <HiOutlineTrash className="h-4 w-4" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             {/* Title & Description */}
@@ -1470,7 +2589,7 @@ function HuddlePage() {
                                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                                   For:
                                 </span>
-                                {session.forRoles.map((role) => (
+                                {session.forRoles.map((role: string) => (
                                   <span
                                     key={role}
                                     className="rounded-full bg-muted/60 border border-border/70 px-2.5 py-0.5 text-[11px] font-medium text-foreground"
@@ -1524,48 +2643,47 @@ function HuddlePage() {
                             </div>
 
                             <div className="pt-2">
-                              <Button
-                                type="button"
-                                onClick={() => {
-                                  toggleBookSession(session.id);
-                                  if (!session.isBooked) {
-                                    toast.success("Seat reserved!", {
-                                      description: `You are booked for "${session.title}". Invitation sent to your calendar.`,
-                                    });
-                                  } else {
-                                    toast.info("Booking cancelled.");
-                                  }
-                                }}
-                                className={cn(
-                                  "w-full h-11 sm:h-12 rounded-2xl text-sm font-bold transition-all cursor-pointer shadow-xs flex items-center justify-center gap-2",
-                                  session.isBooked
-                                    ? "bg-muted text-muted-foreground hover:bg-rose-500 hover:text-white"
-                                    : isFull
-                                    ? "bg-muted text-muted-foreground opacity-50 cursor-not-allowed"
-                                    : "bg-primary hover:bg-primary-hover text-white shadow-primary/20 hover:shadow-md"
-                                )}
-                                disabled={isFull && !session.isBooked}
-                              >
-                                {session.isBooked ? (
-                                  <>
-                                    <HiOutlineXMark className="h-4 w-4" />
-                                    <span>Cancel Booking</span>
-                                  </>
-                                ) : isFull ? (
-                                  <span>Seats Full</span>
-                                ) : (
-                                  <>
-                                    <HiOutlineCalendar className="h-4 w-4" />
-                                    <span>Book Free Seat</span>
-                                  </>
-                                )}
-                              </Button>
+                              {session.isHost ? (
+                                <div className="w-full h-11 sm:h-12 rounded-2xl bg-muted/60 text-muted-foreground text-xs font-bold flex items-center justify-center gap-2 border border-border/60">
+                                  <RiVerifiedBadgeFill className="h-4 w-4 text-primary" />
+                                  <span>You are hosting this session</span>
+                                </div>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  onClick={() => handleToggleBookSession(session)}
+                                  className={cn(
+                                    "w-full h-11 sm:h-12 rounded-2xl text-sm font-bold transition-all cursor-pointer shadow-xs flex items-center justify-center gap-2",
+                                    session.isBooked
+                                      ? "bg-muted text-muted-foreground hover:bg-rose-500 hover:text-white"
+                                      : isFull
+                                      ? "bg-muted text-muted-foreground opacity-50 cursor-not-allowed"
+                                      : "bg-primary hover:bg-primary-hover text-white shadow-primary/20 hover:shadow-md"
+                                  )}
+                                  disabled={isFull && !session.isBooked}
+                                >
+                                  {session.isBooked ? (
+                                    <>
+                                      <HiOutlineXMark className="h-4 w-4" />
+                                      <span>Cancel Booking</span>
+                                    </>
+                                  ) : isFull ? (
+                                    <span>Seats Full</span>
+                                  ) : (
+                                    <>
+                                      <HiOutlineCalendar className="h-4 w-4" />
+                                      <span>Book Free Seat</span>
+                                    </>
+                                  )}
+                                </Button>
+                              )}
                             </div>
                           </div>
                         </div>
                       );
                     })}
                   </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1658,52 +2776,146 @@ function HuddlePage() {
                 </div>
 
                 <div className="space-y-2.5">
-                  {clinicalMentors.map((mentor) => (
-                    <div
-                      key={mentor.id}
-                      className="rounded-2xl border border-border/70 p-3 flex items-center justify-between gap-3 bg-muted/20 hover:border-primary/30 transition-all"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-white font-black text-xs shrink-0 shadow-xs">
-                          {initials(mentor.name)}
-                        </span>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1">
-                            <span className="font-bold text-xs text-foreground truncate">{mentor.name}</span>
-                            <RiVerifiedBadgeFill className="h-3.5 w-3.5 text-primary shrink-0" />
-                          </div>
-                          <p className="text-[10px] text-muted-foreground truncate">
-                            {mentor.role} · {mentor.yrs} yrs
-                          </p>
-                        </div>
-                      </div>
-
-                      <span className="rounded-full bg-[#FFF4EC] text-[#FF5A1F] border border-primary/20 text-[10px] font-bold px-2.5 py-1 whitespace-nowrap shrink-0">
-                        {mentor.answersCount} ans
-                      </span>
+                  {visibleMentors.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-border/70 p-4 text-center text-xs text-muted-foreground bg-muted/10">
+                      <HiOutlineSparkles className="h-5 w-5 text-primary mx-auto mb-1.5" />
+                      <p className="font-semibold text-foreground">Verified Clinical Faculty</p>
+                      <p className="text-[11px] mt-0.5">Senior specialists and department heads verify community answers.</p>
                     </div>
-                  ))}
+                  ) : (
+                    visibleMentors.map((mentor) => (
+                      <div
+                        key={mentor.id}
+                        className="rounded-2xl border border-border/70 p-3 flex items-center justify-between gap-3 bg-muted/20 hover:border-primary/30 transition-all"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-white font-black text-xs shrink-0 shadow-xs">
+                            {initials(mentor.name)}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1">
+                              <span className="font-bold text-xs text-foreground truncate">{mentor.name}</span>
+                              <RiVerifiedBadgeFill className="h-3.5 w-3.5 text-primary shrink-0" />
+                            </div>
+                            <p className="text-[10px] text-muted-foreground truncate">
+                              {mentor.role} · {mentor.yrs} yrs
+                            </p>
+                          </div>
+                        </div>
+
+                        <span className="rounded-full bg-[#FFF4EC] text-[#FF5A1F] border border-primary/20 text-[10px] font-bold px-2.5 py-1 whitespace-nowrap shrink-0">
+                          {mentor.answersCount} ans
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
 
-                {/* Become a Mentor Callout (hidden for students & hospitals as students are not eligible for 3+ years experience seal) */}
+                {/* Become a Mentor Callout (Dynamic clinical experience check & admin review workflow) */}
                 {userLevel !== "student" && !isHospital && (
-                  <div className="rounded-2xl bg-muted/40 p-3.5 border border-border/80 text-xs space-y-2">
-                    <span className="font-bold text-foreground block">Become a FALE Mentor</span>
-                    <p className="text-muted-foreground text-[11px]">
-                      Are you a healthcare practitioner with 3+ years of clinical experience? Help guide junior nurses,
-                      interns, and students.
+                  <div className="rounded-2xl bg-muted/40 p-4 border border-border/80 text-xs space-y-3">
+                    {isMentorCertified ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-foreground flex items-center gap-1.5 text-xs">
+                            <RiVerifiedBadgeFill className="h-4 w-4 text-primary shrink-0" />
+                            Certified FALE Mentor
+                          </span>
+                          <span className="rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5">
+                            Seal Active
+                          </span>
+                        </div>
+                        <p className="text-muted-foreground text-[11px] leading-relaxed">
+                          Your clinical credentials have been verified by FALE Admin. You are accredited to mentor junior clinicians, answer peer AMA queries, and host CME sessions.
+                        </p>
+                      </div>
+                    ) : isMentorPending ? (
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-foreground block">Become a FALE Mentor</span>
+                          <span className="rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[10px] font-black px-2 py-0.5 flex items-center gap-1">
+                            <HiOutlineClock className="h-3 w-3" />
+                            Under Review
+                          </span>
+                        </div>
+                        <p className="text-muted-foreground text-[11px] leading-relaxed">
+                          Your mentor application and clinical credentials ({candidateExpYears}+ yrs) are undergoing audit at the FALE Moderation Desk. You will receive your verified seal upon admin review.
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled
+                          className="w-full text-xs font-bold h-8 rounded-xl border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/5 cursor-not-allowed"
+                        >
+                          Application Under Review
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-foreground block">Become a FALE Mentor</span>
+                          <span
+                            className={cn(
+                              "rounded-full text-[10px] font-black px-2 py-0.5 border",
+                              hasMinExperience
+                                ? "bg-primary/10 text-primary border-primary/20"
+                                : "bg-muted text-muted-foreground border-border/60"
+                            )}
+                          >
+                            {candidateExpYears} {candidateExpYears === 1 ? "yr" : "yrs"} clinical exp
+                          </span>
+                        </div>
+                        <p className="text-muted-foreground text-[11px] leading-relaxed">
+                          Are you a healthcare practitioner with 3+ years of clinical experience? Help guide junior nurses,
+                          interns, and students.
+                        </p>
+                        {!hasMinExperience && (
+                          <div className="text-[11px] font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 rounded-lg p-2.5 border border-amber-500/20">
+                            Requires 3+ years of clinical experience to apply. (Your profile has {candidateExpYears} {candidateExpYears === 1 ? "year" : "years"}).
+                          </div>
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!hasMinExperience || applyingMentor}
+                          onClick={handleApplyMentor}
+                          className={cn(
+                            "w-full text-xs font-bold h-8 rounded-xl transition-all",
+                            hasMinExperience
+                              ? "border-primary text-primary hover:bg-primary hover:text-white cursor-pointer"
+                              : "border-border/60 text-muted-foreground cursor-not-allowed opacity-60"
+                          )}
+                        >
+                          {applyingMentor ? "Submitting Application..." : hasMinExperience ? "Apply for Mentor Seal" : "Requires 3+ Yrs Clinical Exp"}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Hospital Institutional Outreach & CME Card */}
+                {isHospital && (
+                  <div className="rounded-2xl bg-primary/5 p-4 border border-primary/20 text-xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-foreground flex items-center gap-1.5 text-xs">
+                        <RiHospitalLine className="h-4 w-4 text-primary shrink-0" />
+                        Hospital CME &amp; Outreach
+                      </span>
+                      <span className="rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-[10px] font-bold px-2 py-0.5">
+                        Institution
+                      </span>
+                    </div>
+                    <p className="text-muted-foreground text-[11px] leading-relaxed">
+                      Connect with thousands of verified doctors, nurses, and clinicians across Karnataka. Announce new clinical facilities, grand rounds, and accredited CME workshops.
                     </p>
                     <Button
                       type="button"
-                      variant="outline"
-                      onClick={() => {
-                        toast.success("Mentor application received!", {
-                          description: "The FALE Clinical Credentials Board will review your profile and enable mentor privileges.",
-                        });
-                      }}
-                      className="w-full text-xs font-bold h-8 rounded-xl border-primary text-primary hover:bg-primary hover:text-white cursor-pointer"
+                      size="sm"
+                      onClick={() => setConductSessionModalOpen(true)}
+                      className="w-full text-xs font-bold h-8.5 rounded-xl bg-primary hover:bg-primary-hover text-white flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                     >
-                      Apply for Mentor Seal
+                      <HiOutlineVideoCamera className="h-3.5 w-3.5" />
+                      <span>Host CME Workshop</span>
                     </Button>
                   </div>
                 )}
@@ -1855,30 +3067,7 @@ function HuddlePage() {
               </DialogHeader>
 
               <div className="p-5 sm:p-6 py-4 flex-1 overflow-y-auto space-y-5 [scrollbar-width:thin]">
-                {/* Simulation Switcher */}
-                <div className="rounded-2xl p-3.5 bg-muted/40 border border-border/80 flex items-center justify-between gap-3">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-bold text-foreground block">
-                      Account Status: {isVerified ? "Verified Member" : "Pending Verification (Read-Only)"}
-                    </span>
-                    <p className="text-[11px] text-muted-foreground">
-                      Toggle to simulate how unverified vs verified clinicians experience Huddle
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsSimulatedUnverified(!isSimulatedUnverified)}
-                    className={cn(
-                      "h-8 px-3 rounded-xl text-xs font-bold cursor-pointer transition-all",
-                      isSimulatedUnverified
-                        ? "bg-primary text-white border-primary"
-                        : "border-border text-foreground hover:bg-muted"
-                    )}
-                  >
-                    {isSimulatedUnverified ? "Exit Simulation" : "Simulate Unverified"}
-                  </Button>
-                </div>
+
 
                 {/* 1. Who is allowed to post */}
                 <div className="space-y-2.5">
@@ -2011,6 +3200,477 @@ function HuddlePage() {
                   className="h-10 px-5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-xs cursor-pointer"
                 >
                   Understood
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Conduct Clinical Session / CME Modal */}
+          <Dialog open={conductSessionModalOpen} onOpenChange={setConductSessionModalOpen}>
+            <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl p-6 sm:p-7 bg-card border border-border shadow-2xl">
+              <DialogHeader className="space-y-2">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 text-[11px] font-bold uppercase w-fit">
+                  {isHospital ? <RiHospitalLine className="h-3.5 w-3.5" /> : <RiStethoscopeLine className="h-3.5 w-3.5" />}
+                  <span>{isHospital ? "Hospital CME & Workshop Portal" : "Clinical Mentor Portal"}</span>
+                </div>
+                <DialogTitle className="text-xl sm:text-[22px] font-extrabold text-foreground tracking-tight">
+                  {isHospital ? "Host Hospital CME or Clinical Workshop" : "Conduct a Clinical Mentorship Session / CME"}
+                </DialogTitle>
+                <DialogDescription className="text-xs sm:text-[13px] text-muted-foreground leading-relaxed">
+                  {isHospital
+                    ? "Schedule an official hospital CME, clinical grand rounds, or department masterclass for doctors, nurses, and healthcare clinicians."
+                    : "Host an interactive masterclass, grand rounds, or case viva for junior healthcare professionals, interns, and nursing students."}
+                </DialogDescription>
+              </DialogHeader>
+
+              <form onSubmit={handleConductSession} className="space-y-5 pt-3">
+                {/* Session Title */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Session Title <span className="text-destructive">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={sessionTitle}
+                    onChange={(e) => setSessionTitle(e.target.value)}
+                    placeholder="e.g. ICU Ventilator & Weaning Protocols Masterclass"
+                    required
+                    className="w-full h-11 rounded-2xl bg-muted/40 border border-border/80 px-3.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+                  />
+                </div>
+
+                {/* Category & Seat Capacity Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">
+                      Category <span className="text-destructive">*</span>
+                    </label>
+                    <Select value={sessionCategory} onValueChange={setSessionCategory}>
+                      <SelectTrigger className="w-full h-11 rounded-2xl bg-muted/40 border-border/80 px-3.5 text-xs text-foreground focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer">
+                        <SelectValue placeholder="Select Category" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-border bg-popover text-foreground shadow-xl z-[150]">
+                        <SelectItem value="Mentorship Workshop">Mentorship Workshop</SelectItem>
+                        <SelectItem value="Clinical Masterclass">Clinical Masterclass</SelectItem>
+                        <SelectItem value="CME & Workshop">CME &amp; Workshop</SelectItem>
+                        <SelectItem value="Interview Masterclass">Interview Masterclass</SelectItem>
+                        <SelectItem value="Case Viva Practice">Case Viva Practice</SelectItem>
+                        <SelectItem value="Clinical Talk">Clinical Talk</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">
+                      Seat Capacity <span className="text-destructive">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min={5}
+                        max={500}
+                        value={sessionSeats}
+                        onChange={(e) => setSessionSeats(Number(e.target.value))}
+                        className="w-full h-11 rounded-2xl bg-muted/40 border border-border/80 px-3.5 pl-9 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+                      />
+                      <HiOutlineUserGroup className="h-4 w-4 text-muted-foreground absolute left-3 top-3.5 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Date & Time (Custom Calendar + Custom Time Select) & Platform Mode Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">
+                      Date &amp; Time <span className="text-destructive">*</span>
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {/* Custom Date Popover */}
+                      <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={cn(
+                              "w-full h-11 justify-start text-left font-normal rounded-2xl bg-muted/40 border-border/80 hover:bg-muted/60 px-3 text-xs text-foreground shadow-none cursor-pointer",
+                              !sessionDate && "text-muted-foreground"
+                            )}
+                          >
+                            <HiOutlineCalendar className="mr-1.5 h-4 w-4 text-primary shrink-0" />
+                            <span className="truncate">
+                              {sessionDate ? (
+                                sessionDate.toLocaleDateString("en-IN", {
+                                  day: "numeric",
+                                  month: "short",
+                                })
+                              ) : (
+                                "Select Date"
+                              )}
+                            </span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0 rounded-2xl border-border bg-card shadow-2xl z-[150]" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={sessionDate}
+                            onSelect={(d) => {
+                              if (d) setSessionDate(d);
+                              setDatePickerOpen(false);
+                            }}
+                            disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+
+                      {/* Custom Time Select */}
+                      <Select value={sessionTime} onValueChange={setSessionTime}>
+                        <SelectTrigger className="w-full h-11 rounded-2xl bg-muted/40 border-border/80 px-2.5 text-xs text-foreground focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <HiOutlineClock className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <SelectValue placeholder="Time" />
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent className="rounded-2xl border-border bg-popover text-foreground shadow-xl z-[150] max-h-56">
+                          {sessionTimeSlots.map((time) => (
+                            <SelectItem key={time} value={time} className="text-xs">
+                              {time}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">
+                      Platform / Mode <span className="text-destructive">*</span>
+                    </label>
+                    <Select value={sessionWhere} onValueChange={setSessionWhere}>
+                      <SelectTrigger className="w-full h-11 rounded-2xl bg-muted/40 border-border/80 px-3.5 text-xs text-foreground focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer">
+                        <div className="flex items-center gap-2 truncate">
+                          {sessionWhere.toLowerCase().includes("meet") ||
+                          sessionWhere.toLowerCase().includes("zoom") ||
+                          sessionWhere.toLowerCase().includes("stream") ? (
+                            <HiOutlineVideoCamera className="h-4 w-4 text-primary shrink-0" />
+                          ) : (
+                            <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0" />
+                          )}
+                          <SelectValue placeholder="Select Platform" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-border bg-popover text-foreground shadow-xl z-[150]">
+                        <SelectItem value="Live Interactive (Google Meet)">Live Interactive (Google Meet)</SelectItem>
+                        <SelectItem value="Live Clinical Stream (Zoom)">Live Clinical Stream (Zoom)</SelectItem>
+                        <SelectItem value="FALE Live Clinical Classroom">FALE Live Clinical Classroom</SelectItem>
+                        <SelectItem value="Hospital Auditorium / Campus">Hospital Auditorium / Campus</SelectItem>
+                        <SelectItem value="Clinical Skills Lab (On-site)">Clinical Skills Lab (On-site)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Target Audience */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-foreground block">
+                    Target Audience <span className="text-[11px] font-normal text-muted-foreground">(Select one or more)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2 pt-0.5">
+                    {["Nursing", "Doctors", "Physiotherapy", "Lab Technicians", "Interns & Students"].map((role) => {
+                      const isSelected = sessionRoles.includes(role);
+                      return (
+                        <button
+                          key={role}
+                          type="button"
+                          onClick={() => {
+                            setSessionRoles((prev) =>
+                              isSelected ? prev.filter((r) => r !== role) : [...prev, role]
+                            );
+                          }}
+                          className={cn(
+                            "px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer select-none",
+                            isSelected
+                              ? "bg-primary text-white border-primary shadow-2xs font-bold"
+                              : "bg-muted/40 text-muted-foreground border-border/80 hover:border-primary/40 hover:text-foreground"
+                          )}
+                        >
+                          {role}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Learning Agenda & Overview */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Learning Agenda &amp; Overview
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={sessionDescription}
+                    onChange={(e) => setSessionDescription(e.target.value)}
+                    placeholder="What will attendees learn? Real mock scenario breakdown, clinical viva tips, protocols..."
+                    className="w-full rounded-2xl bg-muted/40 border border-border/80 p-3.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none leading-relaxed transition-all"
+                  />
+                </div>
+
+                <DialogFooter className="pt-4 border-t border-border/60 flex flex-row items-center justify-end gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setConductSessionModalOpen(false)}
+                    className="h-10 px-5 rounded-2xl border-border text-xs font-semibold hover:bg-muted/60 cursor-pointer"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isConductingSession}
+                    className="h-10 px-6 rounded-2xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-md shadow-primary/20 cursor-pointer transition-all"
+                  >
+                    {isConductingSession ? "Publishing..." : "Publish Session"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          {/* ================= EDIT POST MODAL ================= */}
+          <Dialog open={Boolean(editingPost)} onOpenChange={(open) => !open && setEditingPost(null)}>
+            <DialogContent className="sm:max-w-lg rounded-3xl p-0 flex flex-col max-h-[90vh] overflow-hidden bg-card border border-border/80 shadow-2xl">
+              <DialogHeader className="p-5 sm:p-6 pb-3.5 border-b border-border/60 shrink-0 text-left space-y-1.5">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-2xl bg-[#FFF4EC] dark:bg-card text-primary border border-primary/25 flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                    <HiOutlinePencilSquare className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <DialogTitle className="text-base sm:text-lg font-extrabold text-foreground tracking-tight">
+                      Edit Discussion Post
+                    </DialogTitle>
+                    <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                      Update your clinical insight, case presentation, or question. Safety rules apply.
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+
+              <div className="p-5 sm:p-6 space-y-4 overflow-y-auto max-h-[calc(90vh-140px)]">
+                {/* Type & Field Select Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">Post Category</label>
+                    <Select value={editPostType} onValueChange={(val) => setEditPostType(val as HuddlePostType)}>
+                      <SelectTrigger className="w-full h-10 rounded-xl bg-muted/40 border-border/80 px-3 text-xs text-foreground focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer">
+                        <SelectValue placeholder="Category" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl border-border bg-popover text-foreground shadow-xl z-[150]">
+                        <SelectItem value="Thought">Thought</SelectItem>
+                        <SelectItem value="Experience">Experience</SelectItem>
+                        <SelectItem value="Case">Clinical Case</SelectItem>
+                        <SelectItem value="Question">Question</SelectItem>
+                        <SelectItem value="Event">Event</SelectItem>
+                        <SelectItem value="Update">Update</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">Clinical Department</label>
+                    <Select value={editPostField} onValueChange={(val) => setEditPostField(val as HuddleField)}>
+                      <SelectTrigger className="w-full h-10 rounded-xl bg-muted/40 border-border/80 px-3 text-xs text-foreground focus:ring-1 focus:ring-primary focus:border-primary cursor-pointer">
+                        <SelectValue placeholder="Field" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl border-border bg-popover text-foreground shadow-xl z-[150]">
+                        <SelectItem value="Medicine">Medicine & Doctors</SelectItem>
+                        <SelectItem value="Nursing">Nursing</SelectItem>
+                        <SelectItem value="Physio">Physiotherapy</SelectItem>
+                        <SelectItem value="Lab">Lab Technicians</SelectItem>
+                        <SelectItem value="Radiology">Radiology</SelectItem>
+                        <SelectItem value="Pharmacy">Pharmacy</SelectItem>
+                        <SelectItem value="All">All Specialties</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Post Content */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-foreground">
+                    Content <span className="text-destructive">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={editPostText}
+                    onChange={(e) => setEditPostText(e.target.value)}
+                    placeholder="Share your clinical insight, case question, or ward experience..."
+                    className="w-full rounded-2xl bg-muted/40 border border-border/80 p-3.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none leading-relaxed transition-all"
+                  />
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                    <span className="flex items-center gap-1 text-[11px] text-primary">
+                      <HiOutlineShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                      Protected by Automated PHI & HIPAA Filters
+                    </span>
+                    <span>{editPostText.length} chars</span>
+                  </div>
+                </div>
+
+                {/* Attached Image Section */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-foreground">Attached Photo / Diagram</label>
+                  {editPostImage ? (
+                    <div className="relative inline-block rounded-2xl overflow-hidden border border-border bg-muted/20">
+                      <img
+                        src={editPostImage}
+                        alt="Attachment preview"
+                        className="max-h-48 w-auto max-w-full object-contain rounded-xl"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditPostImage(null)}
+                        className="absolute top-2 right-2 bg-black/70 hover:bg-black text-white p-1.5 rounded-full cursor-pointer transition-colors"
+                        title="Remove image"
+                      >
+                        <HiOutlineXMark className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <input
+                        type="file"
+                        ref={editFileInputRef}
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (ev) => {
+                              const base64 = ev.target?.result as string;
+                              setEditPostImage(base64);
+                              toast.info("Image attached. De-identification check applies.");
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => editFileInputRef.current?.click()}
+                        className="rounded-xl border-dashed border-border/80 text-xs font-semibold text-muted-foreground hover:text-foreground h-9"
+                      >
+                        <HiOutlinePhoto className="mr-1.5 h-4 w-4 text-primary" />
+                        Attach Clinical Diagram / Photo
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Anonymous Toggle */}
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="edit-post-anon"
+                    checked={editPostAnon}
+                    onChange={(e) => setEditPostAnon(e.target.checked)}
+                    className="h-4 w-4 rounded border-border text-primary focus:ring-primary accent-primary cursor-pointer"
+                  />
+                  <label htmlFor="edit-post-anon" className="text-xs text-foreground cursor-pointer select-none">
+                    Post anonymously (displays as <strong>Verified Clinician</strong>)
+                  </label>
+                </div>
+              </div>
+
+              <DialogFooter className="p-4 sm:p-5 pt-3 border-t border-border/60 shrink-0 flex-row items-center justify-end gap-2.5 bg-card/95">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingPost(null)}
+                  className="h-10 px-5 rounded-xl border border-border/80 bg-muted/40 hover:bg-muted text-foreground text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSavePostEdit}
+                  disabled={isSubmittingEdit || !editPostText.trim()}
+                  className="h-10 px-5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold shadow-xs hover:shadow-md cursor-pointer transition-all"
+                >
+                  {isSubmittingEdit ? "Saving..." : "Save Changes"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* ================= DELETE POST CONFIRMATION MODAL ================= */}
+          <Dialog open={Boolean(deletingPostId)} onOpenChange={(open) => !open && setDeletingPostId(null)}>
+            <DialogContent className="sm:max-w-md rounded-3xl p-5 sm:p-6 bg-card border border-border/80 shadow-2xl space-y-4">
+              <DialogHeader className="text-left space-y-2">
+                <div className="h-12 w-12 rounded-2xl bg-rose-100 dark:bg-rose-950/40 text-rose-600 border border-rose-200 dark:border-rose-900/40 flex items-center justify-center font-bold shadow-2xs">
+                  <HiOutlineTrash className="h-6 w-6" />
+                </div>
+                <DialogTitle className="text-lg font-extrabold text-foreground tracking-tight">
+                  Delete Discussion Post
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
+                  Are you sure you want to delete this discussion post? It will be permanently removed from the Huddle community feed.
+                </DialogDescription>
+              </DialogHeader>
+
+              <DialogFooter className="pt-3 border-t border-border/60 flex-row items-center justify-end gap-2.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDeletingPostId(null)}
+                  className="h-10 px-5 rounded-xl border border-border/80 bg-muted/40 hover:bg-muted text-foreground text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleConfirmDeletePost}
+                  disabled={isDeletingPost}
+                  className="h-10 px-5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-all"
+                >
+                  {isDeletingPost ? "Deleting..." : "Delete Post"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* ================= DELETE QUESTION CONFIRMATION MODAL ================= */}
+          <Dialog open={Boolean(deletingQuestionId)} onOpenChange={(open) => !open && setDeletingQuestionId(null)}>
+            <DialogContent className="sm:max-w-md rounded-3xl p-5 sm:p-6 bg-card border border-border/80 shadow-2xl space-y-4">
+              <DialogHeader className="text-left space-y-2">
+                <div className="h-12 w-12 rounded-2xl bg-rose-100 dark:bg-rose-950/40 text-rose-600 border border-rose-200 dark:border-rose-900/40 flex items-center justify-center font-bold shadow-2xs">
+                  <HiOutlineTrash className="h-6 w-6" />
+                </div>
+                <DialogTitle className="text-lg font-extrabold text-foreground tracking-tight">
+                  Delete Asked Question
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
+                  Are you sure you want to delete your question? Any verified mentor answers associated with it will also be deleted.
+                </DialogDescription>
+              </DialogHeader>
+
+              <DialogFooter className="pt-3 border-t border-border/60 flex-row items-center justify-end gap-2.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDeletingQuestionId(null)}
+                  className="h-10 px-5 rounded-xl border border-border/80 bg-muted/40 hover:bg-muted text-foreground text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleConfirmDeleteQuestion}
+                  disabled={isDeletingQuestion}
+                  className="h-10 px-5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-all"
+                >
+                  {isDeletingQuestion ? "Deleting..." : "Delete Question"}
                 </Button>
               </DialogFooter>
             </DialogContent>

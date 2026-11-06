@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { setState, useApp } from "@/lib/store";
 import { jobs as allJobs } from "@/lib/data";
+import { isApiEnabled } from "@/lib/api";
+import { getJobs } from "@/lib/adapters/jobAdapter";
 import heroHandsVideo from "@/assets/hero-hands.mp4";
 import {
   Select,
@@ -196,6 +198,25 @@ function LandingPage() {
     navigate({ to: "/" });
   };
 
+  const [liveJobs, setLiveJobs] = useState<any[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [jobError, setJobError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    setLoadingJobs(true);
+    getJobs()
+      .then((data) => {
+        setLiveJobs(data);
+        setJobError(null);
+      })
+      .catch(() => {
+        setJobError("Unable to load latest job postings.");
+        setLiveJobs([]);
+      })
+      .finally(() => setLoadingJobs(false));
+  }, []);
+
   // Search handler
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -208,7 +229,8 @@ function LandingPage() {
   // Filtered jobs from mock dataset
   const searchResults = useMemo(() => {
     if (!hasSearched) return [];
-    return allJobs.filter((j) => {
+    const source = isApiEnabled ? liveJobs : allJobs;
+    return source.filter((j) => {
       const matchRole =
         role === "any" ||
         j.title.toLowerCase().includes(role.toLowerCase()) ||
@@ -218,7 +240,7 @@ function LandingPage() {
         j.city.toLowerCase() === location.toLowerCase();
       return matchRole && matchLoc;
     });
-  }, [hasSearched, role, location]);
+  }, [hasSearched, role, location, liveJobs]);
 
   const copyToClipboard = (text: string, key: string) => {
     if (navigator.clipboard) {
@@ -712,7 +734,17 @@ function LandingPage() {
                 </button>
               </div>
 
-              {searchResults.length > 0 ? (
+              {loadingJobs ? (
+                <div className="empty">
+                  <h3>Loading positions...</h3>
+                  <p>Fetching active openings directly from verified healthcare partners.</p>
+                </div>
+              ) : jobError ? (
+                <div className="empty">
+                  <h3>Unable to load jobs</h3>
+                  <p>{jobError}</p>
+                </div>
+              ) : searchResults.length > 0 ? (
                 <div className="job-list">
                   {searchResults.map((j) => (
                     <article className="job" key={j.id}>

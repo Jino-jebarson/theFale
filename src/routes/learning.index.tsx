@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   HiOutlineAcademicCap,
@@ -22,6 +22,9 @@ import { Progress } from "@/components/ui/progress";
 import { courses } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import { getCourses, enrollCourse, mapCourseDtoToCourse } from "@/lib/adapters/learningAdapter";
+import { getAllRegistryCourses } from "@/lib/courseCurriculumRegistry";
 
 export const Route = createFileRoute("/learning/")({
   head: () => ({
@@ -41,8 +44,13 @@ const CATEGORIES = [
   "All Specialties",
   "Critical Care",
   "Emergency & Trauma",
-  "Quality & NABH",
   "Nursing Essentials",
+  "Clinical Pharmacology",
+  "Dialysis & Renal",
+  "Physiotherapy & Rehab",
+  "Radiology & Imaging",
+  "Quality & NABH",
+  "Student Essentials",
 ] as const;
 
 function Learning() {
@@ -58,9 +66,42 @@ function Learning() {
   const [selectedCategory, setSelectedCategory] = useState<string>("All Specialties");
   const [viewMode, setViewMode] = useState<"catalog" | "my-learning">("catalog");
 
+  const [apiCourses, setApiCourses] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState(isApiEnabled);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    getCourses()
+      .then((data) => {
+        setApiCourses(data);
+        setLoadError(null);
+        if (data && data.length > 0) {
+          const enrolledIds = data.filter((c) => c.enrolled).map((c) => c.id);
+          if (enrolledIds.length > 0) {
+            setState((x) => ({ courses: Array.from(new Set([...x.courses, ...enrolledIds])) }));
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load courses:", err);
+        setLoadError("Unable to load clinical academy courses.");
+        setApiCourses([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const courseSource = useMemo(() => {
+    if (isApiEnabled && apiCourses && apiCourses.length > 0) {
+      return apiCourses.map(mapCourseDtoToCourse);
+    }
+    return getAllRegistryCourses();
+  }, [isApiEnabled, apiCourses]);
+
   // Filtered courses based on search and category
   const filteredCourses = useMemo(() => {
-    return courses.filter((c) => {
+    return courseSource.filter((c) => {
       const matchesSearch =
         searchQuery.trim() === "" ||
         c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -72,13 +113,18 @@ function Learning() {
 
       return matchesSearch && matchesCategory;
     });
-  }, [searchQuery, selectedCategory]);
+  }, [courseSource, searchQuery, selectedCategory]);
 
   const enrolledCourses = useMemo(() => {
-    return courses.filter((c) => s.courses.includes(c.id));
-  }, [s.courses]);
+    return courseSource.filter((c) => s.courses.includes(c.id));
+  }, [courseSource, s.courses]);
 
   const handleQuickEnroll = (courseId: string, courseTitle: string) => {
+    if (isApiEnabled) {
+      enrollCourse(courseId).catch((err) => {
+        console.error("Enroll error:", err);
+      });
+    }
     if (s.courses.includes(courseId)) {
       setState((x) => ({ courses: x.courses.filter((id) => id !== courseId) }));
       toast.info("Unenrolled from course", { description: courseTitle });
@@ -176,7 +222,7 @@ function Learning() {
                         viewMode === "catalog" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
                       )}
                     >
-                      {courses.length}
+                      {courseSource.length}
                     </span>
                   </button>
                   <button
@@ -233,21 +279,37 @@ function Learning() {
             {/* Category Filter Pills (Catalog view only) matching Huddle */}
             {viewMode === "catalog" && (
               <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-2.5 border-t border-border/60 no-scrollbar">
-                {CATEGORIES.map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setSelectedCategory(cat)}
-                    className={cn(
-                      "rounded-full px-3.5 py-1.5 text-xs font-bold whitespace-nowrap transition-all border cursor-pointer select-none",
-                      selectedCategory === cat
-                        ? "bg-primary text-white border-primary shadow-xs font-bold"
-                        : "bg-muted/40 text-muted-foreground border-border/70 hover:bg-muted/70 hover:text-foreground"
-                    )}
-                  >
-                    {cat}
-                  </button>
-                ))}
+                {CATEGORIES.map((cat) => {
+                  const count =
+                    cat === "All Specialties"
+                      ? courseSource.length
+                      : courseSource.filter((c) => c.category === cat).length;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedCategory(cat)}
+                      className={cn(
+                        "rounded-full px-3 py-1 text-xs font-bold whitespace-nowrap transition-all border cursor-pointer select-none flex items-center gap-1.5 shrink-0",
+                        selectedCategory === cat
+                          ? "bg-primary text-white border-primary shadow-xs font-bold"
+                          : "bg-muted/40 text-muted-foreground border-border/70 hover:bg-muted/70 hover:text-foreground"
+                      )}
+                    >
+                      <span>{cat}</span>
+                      <span
+                        className={cn(
+                          "rounded-full px-1.5 py-0.2 text-[10px] font-bold",
+                          selectedCategory === cat
+                            ? "bg-white/25 text-white"
+                            : "bg-muted text-muted-foreground"
+                        )}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -349,117 +411,133 @@ function Learning() {
               </h2>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 pb-8 sm:pb-0 w-full min-w-0">
-              {filteredCourses.map((c) => {
-                const isEnrolled = s.courses.includes(c.id);
+            {loading ? (
+              <div className="surface p-12 text-center rounded-3xl border border-border/80 text-muted-foreground">
+                <HiOutlineClock className="mx-auto h-8 w-8 text-primary animate-spin" />
+                <p className="mt-3 text-sm font-semibold">Loading CME courses...</p>
+              </div>
+            ) : loadError ? (
+              <div className="surface p-12 text-center rounded-3xl border border-border/80 text-rose-500">
+                <p className="text-sm font-semibold">{loadError}</p>
+              </div>
+            ) : filteredCourses.length === 0 ? (
+              <div className="surface p-12 text-center rounded-3xl border border-dashed border-border/80 text-muted-foreground">
+                <HiOutlineAcademicCap className="mx-auto h-8 w-8 text-muted-foreground" />
+                <p className="mt-3 text-sm font-semibold">No courses found matching your filter.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 pb-8 sm:pb-0 w-full min-w-0">
+                {filteredCourses.map((c) => {
+                  const isEnrolled = s.courses.includes(c.id);
 
-                return (
-                  <div
-                    key={c.id}
-                    className="rounded-2xl sm:rounded-3xl border border-border bg-card p-4 sm:p-6 shadow-xs transition-all duration-200 hover:shadow-md hover:border-primary/40 flex flex-col justify-between space-y-4 sm:space-y-5 group w-full min-w-0 max-w-full overflow-hidden"
-                  >
-                    <div className="space-y-3.5 min-w-0">
-                      {/* Top Row: Category & Accreditation Badge */}
-                      <div className="flex items-center justify-between gap-1.5 flex-wrap min-w-0">
-                        <span className="rounded-full bg-primary/10 text-primary border border-primary/20 px-2 sm:px-2.5 py-0.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider shrink-0">
-                          {c.category}
-                        </span>
-                        <span className="rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 px-2 sm:px-2.5 py-0.5 text-[9.5px] sm:text-[10px] font-bold max-w-[200px] truncate">
-                          {c.accreditationBadge}
-                        </span>
-                      </div>
-
-                      {/* Course Title */}
-                      <div className="min-w-0">
-                        <Link to="/learning/$id" params={{ id: c.id }}>
-                          <h3 className="font-extrabold text-base sm:text-lg text-foreground tracking-tight leading-snug group-hover:text-primary transition-colors line-clamp-2 break-words">
-                            {c.title}
-                          </h3>
-                        </Link>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1.5 font-medium min-w-0">
-                          <HiOutlineAcademicCap className="h-4 w-4 text-primary shrink-0" />
-                          <span className="truncate">{c.instructor.name} · {c.instructor.hospital.split(",")[0]}</span>
-                        </p>
-                      </div>
-
-                      {/* Course Summary */}
-                      <p className="text-xs sm:text-[13px] text-muted-foreground leading-relaxed line-clamp-3 break-words">
-                        {c.summary}
-                      </p>
-
-                      {/* Skills Gained Tags */}
-                      <div className="flex flex-wrap gap-1.5 pt-0.5 min-w-0">
-                        {c.skillsGained.slice(0, 3).map((sk, idx) => (
-                          <span
-                            key={idx}
-                            className="rounded-lg bg-muted/60 px-2.5 py-1 text-[11px] font-semibold text-foreground border border-border/60 max-w-full truncate inline-block"
-                            title={sk}
-                          >
-                            {sk}
+                  return (
+                    <div
+                      key={c.id}
+                      className="rounded-2xl sm:rounded-3xl border border-border bg-card p-4 sm:p-6 shadow-xs transition-all duration-200 hover:shadow-md hover:border-primary/40 flex flex-col justify-between space-y-4 sm:space-y-5 group w-full min-w-0 max-w-full overflow-hidden"
+                    >
+                      <div className="space-y-3.5 min-w-0">
+                        {/* Top Row: Category & Accreditation Badge */}
+                        <div className="flex items-center justify-between gap-1.5 flex-wrap min-w-0">
+                          <span className="rounded-full bg-primary/10 text-primary border border-primary/20 px-2 sm:px-2.5 py-0.5 text-[9.5px] sm:text-[10px] font-bold uppercase tracking-wider shrink-0">
+                            {c.category}
                           </span>
-                        ))}
-                        {c.skillsGained.length > 3 && (
-                          <span className="rounded-lg bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground font-semibold shrink-0">
-                            +{c.skillsGained.length - 3}
+                          <span className="rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 px-2 sm:px-2.5 py-0.5 text-[9.5px] sm:text-[10px] font-bold max-w-[200px] truncate">
+                            {c.accreditationBadge}
                           </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Bottom Meta & Actions */}
-                    <div className="space-y-3.5 pt-3.5 border-t border-border/60 min-w-0">
-                      <div className="flex items-center justify-between text-xs text-muted-foreground font-medium min-w-0">
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
-                          <span>{c.duration}</span>
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <HiStar className="h-4 w-4 text-amber-500 shrink-0" />
-                          <span className="font-bold text-foreground">{c.rating}</span>
-                        </div>
-                        <div className="font-bold text-foreground shrink-0 truncate">
-                          {c.level}
-                        </div>
-                      </div>
 
-                      <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleQuickEnroll(c.id, c.title)}
-                          className={cn(
-                            "rounded-xl sm:rounded-2xl font-bold text-xs h-10 px-2 sm:px-3 transition-all cursor-pointer flex items-center justify-center",
-                            isEnrolled
-                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
-                              : "border-border/80 hover:bg-muted text-foreground"
-                          )}
-                        >
-                          {isEnrolled ? (
-                            <span className="flex items-center gap-1">
-                              <HiCheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
-                              <span>Enrolled</span>
-                            </span>
-                          ) : (
-                            "Quick Enroll"
-                          )}
-                        </Button>
-
-                        <Button
-                          size="sm"
-                          asChild
-                          className="rounded-xl sm:rounded-2xl font-bold text-xs h-10 px-2 sm:px-3 bg-primary hover:bg-primary-hover text-white shadow-xs cursor-pointer flex items-center justify-center"
-                        >
+                        {/* Course Title */}
+                        <div className="min-w-0">
                           <Link to="/learning/$id" params={{ id: c.id }}>
-                            <span>Details</span>
-                            <HiOutlineArrowRight className="ml-1 h-3.5 w-3.5 shrink-0" />
+                            <h3 className="font-extrabold text-base sm:text-lg text-foreground tracking-tight leading-snug group-hover:text-primary transition-colors line-clamp-2 break-words">
+                              {c.title}
+                            </h3>
                           </Link>
-                        </Button>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1.5 font-medium min-w-0">
+                            <HiOutlineAcademicCap className="h-4 w-4 text-primary shrink-0" />
+                            <span className="truncate">{c.instructor.name} · {c.instructor.hospital.split(",")[0]}</span>
+                          </p>
+                        </div>
+
+                        {/* Course Summary */}
+                        <p className="text-xs sm:text-[13px] text-muted-foreground leading-relaxed line-clamp-3 break-words">
+                          {c.summary}
+                        </p>
+
+                        {/* Skills Gained Tags */}
+                        <div className="flex flex-wrap gap-1.5 pt-0.5 min-w-0">
+                          {c.skillsGained.slice(0, 3).map((sk, idx) => (
+                            <span
+                              key={idx}
+                              className="rounded-lg bg-muted/60 px-2.5 py-1 text-[11px] font-semibold text-foreground border border-border/60 max-w-full truncate inline-block"
+                              title={sk}
+                            >
+                              {sk}
+                            </span>
+                          ))}
+                          {c.skillsGained.length > 3 && (
+                            <span className="rounded-lg bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground font-semibold shrink-0">
+                              +{c.skillsGained.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bottom Meta & Actions */}
+                      <div className="space-y-3.5 pt-3.5 border-t border-border/60 min-w-0">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground font-medium min-w-0">
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
+                            <span>{c.duration}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <HiStar className="h-4 w-4 text-amber-500 shrink-0" />
+                            <span className="font-bold text-foreground">{c.rating}</span>
+                          </div>
+                          <div className="font-bold text-foreground shrink-0 truncate">
+                            {c.level}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleQuickEnroll(c.id, c.title)}
+                            className={cn(
+                              "rounded-xl sm:rounded-2xl font-bold text-xs h-10 px-2 sm:px-3 transition-all cursor-pointer flex items-center justify-center",
+                              isEnrolled
+                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                                : "border-border/80 hover:bg-muted text-foreground"
+                            )}
+                          >
+                            {isEnrolled ? (
+                              <span className="flex items-center gap-1">
+                                <HiCheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                                <span>Enrolled</span>
+                              </span>
+                            ) : (
+                              "Quick Enroll"
+                            )}
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            asChild
+                            className="rounded-xl sm:rounded-2xl font-bold text-xs h-10 px-2 sm:px-3 bg-primary hover:bg-primary-hover text-white shadow-xs cursor-pointer flex items-center justify-center"
+                          >
+                            <Link to="/learning/$id" params={{ id: c.id }}>
+                              <span>Details</span>
+                              <HiOutlineArrowRight className="ml-1 h-3.5 w-3.5 shrink-0" />
+                            </Link>
+                          </Button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   HiOutlineBuildingOffice2,
@@ -6,16 +6,17 @@ import {
   HiOutlineShieldCheck,
   HiOutlineCheckBadge,
   HiOutlinePhone,
+  HiOutlineEnvelope,
   HiOutlineShare,
   HiOutlinePencilSquare,
   HiOutlineGlobeAlt,
   HiOutlineBolt,
   HiOutlineArrowTopRightOnSquare,
   HiOutlineDocumentCheck,
-  HiOutlineSparkles,
-  HiOutlineAcademicCap,
-  HiOutlineHeart,
-  HiCheck,
+  HiOutlineIdentification,
+  HiOutlinePlus,
+  HiOutlineXMark,
+  HiOutlineUser,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
@@ -30,6 +31,12 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useApp, setState } from "@/lib/store";
+import { isApiEnabled } from "@/lib/api";
+import {
+  getFacilityProfile,
+  updateFacilityProfile,
+  type FacilityProfileDto,
+} from "@/lib/adapters/facilityAdapter";
 import hospitalBannerImg from "@/assets/hospital-banner.jpg";
 
 export const Route = createFileRoute("/employer/profile")({
@@ -39,7 +46,7 @@ export const Route = createFileRoute("/employer/profile")({
       {
         name: "description",
         content:
-          "Verified hospital institution profile, clinical departments, accreditations, nurse-to-patient ratios, and facility details.",
+          "Verified hospital institution profile, clinical departments, accreditations, and infrastructure details.",
       },
       { property: "og:title", content: "Hospital Profile — FALE Healthcare" },
       {
@@ -53,44 +60,17 @@ export const Route = createFileRoute("/employer/profile")({
   component: HospitalProfileScreen,
 });
 
-const specialtyTags = [
-  "Critical Care Medicine",
-  "Cardiology & Cath Lab",
-  "Emergency Trauma & Stroke",
-  "Robotic Onco Surgery",
+const defaultDepartments = [
+  "Emergency & Trauma",
+  "Critical Care Medicine (ICU)",
+  "General Medicine",
+  "General & Laparoscopic Surgery",
+  "Cardiology",
   "Nephrology & Dialysis",
-  "Neurology & Neuro-ICU",
-  "Neonatal & PICU (Level-3)",
-  "Orthopedics & Joint Replacement",
-  "Organ Transplant Services",
-  "Gastroenterology & Endoscopy",
-];
-
-const accreditationList = [
-  {
-    title: "NABH Full Hospital Accreditation",
-    org: "National Accreditation Board for Hospitals & Healthcare Providers",
-    badge: "5th Edition Certified",
-    validity: "Valid through Dec 2028",
-  },
-  {
-    title: "JCI Gold Seal of Approval®",
-    org: "Joint Commission International, USA",
-    badge: "International Standard",
-    validity: "Valid through Nov 2027",
-  },
-  {
-    title: "NABL Certified Diagnostic Labs",
-    org: "National Accreditation Board for Testing and Calibration Labs",
-    badge: "ISO 15189 Compliant",
-    validity: "Valid through Aug 2028",
-  },
-  {
-    title: "AERB Radiation Safety Clearance",
-    org: "Atomic Energy Regulatory Board of India",
-    badge: "Safety Compliant",
-    validity: "Valid through 2029",
-  },
+  "Pediatrics & Neonatology",
+  "Orthopedics",
+  "Obstetrics & Gynecology",
+  "Anesthesiology",
 ];
 
 const availableCities = [
@@ -102,52 +82,167 @@ const availableCities = [
   "Kolkata",
   "Pune",
   "Kochi",
+  "Coimbatore",
+  "Madurai",
+];
+
+const accreditationOptions = [
+  "NABH Full Hospital Accreditation",
+  "NABH Entry Level Certification",
+  "JCI Gold Seal of Approval®",
+  "NABL Certified Diagnostic Labs",
+  "State Medical Council Approved",
+  "KPME Registered Center",
 ];
 
 function HospitalProfileScreen() {
   const store = useApp();
-  const profile = (store.profile || {}) as Record<string, string>;
+  const profile = (store.profile || {}) as Record<string, any>;
 
-  // Editable Profile State
-  const [hospitalName, setHospitalName] = useState(
-    profile["org"] || "Apollo Hospitals — Main Campus"
-  );
-  const [tagline, setTagline] = useState(
-    profile["tagline"] || "Quaternary Care Multi-Specialty & Organ Transplant Center"
-  );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [facilityData, setFacilityData] = useState<FacilityProfileDto | null>(null);
+
+  // Form / Display State
+  const [hospitalName, setHospitalName] = useState(profile["org"] || "Healthcare Facility");
+  const [facilityType, setFacilityType] = useState("Multispecialty Hospital");
+  const [about, setAbout] = useState("");
   const [city, setCity] = useState(profile["city"] || "Chennai");
-  const [address, setAddress] = useState(
-    profile["address"] || "Ramasamy Street, Ward 180, Zone 13 Adyar, Chennai, Chennai Metropolitan Area, Velachery, Chennai District, Tamil Nadu, 600113, India"
-  );
-  const [bedCapacity, setBedCapacity] = useState(profile["bedCapacity"] || "750");
-  const [icuBeds, setIcuBeds] = useState(profile["icuBeds"] || "180");
-  const [contactPhone, setContactPhone] = useState(profile["contactPhone"] || "+91 80 2630 4050");
-  const [emergencyPhone, setEmergencyPhone] = useState(profile["emergencyPhone"] || "+91 80 1066");
-  const [hrEmail, setHrEmail] = useState(profile["hrEmail"] || "clinical.careers@apollohospitals.com");
-  const [website, setWebsite] = useState(profile["website"] || "https://www.apollohospitals.com");
+  const [stateName, setStateName] = useState("Tamil Nadu");
+  const [pincode, setPincode] = useState("");
+  const [addressLine, setAddressLine] = useState(profile["address"] || "");
+  const [beds, setBeds] = useState("50");
+  const [icuBeds, setIcuBeds] = useState("10");
+  const [licenseNumber, setLicenseNumber] = useState("");
+  const [gst, setGst] = useState("");
+  const [nabhNumber, setNabhNumber] = useState("");
+  const [accreditationLevel, setAccreditationLevel] = useState("NABH Full Accreditation");
+  const [contactPerson, setContactPerson] = useState("Facility Administrator");
+  const [designation, setDesignation] = useState("Medical Superintendent");
+  const [contactPhone, setContactPhone] = useState(profile["phone"] || "");
+  const [contactEmail, setContactEmail] = useState(profile["email"] || "");
+  const [website, setWebsite] = useState("");
+  const [departments, setDepartments] = useState<string[]>(defaultDepartments);
+  const [newDeptInput, setNewDeptInput] = useState("");
 
   // Edit Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
-  // Handle Edit Save
-  const handleSaveProfile = () => {
-    setState((s) => ({
-      profile: {
-        ...s.profile,
-        org: hospitalName,
-        city,
-        tagline,
-        address,
-        bedCapacity,
-        icuBeds,
-        contactPhone,
-        emergencyPhone,
-        hrEmail,
-        website,
-      },
-    }));
-    setIsEditModalOpen(false);
-    toast.success("Hospital profile updated successfully");
+  useEffect(() => {
+    let isMounted = true;
+    async function loadData() {
+      try {
+        if (!isApiEnabled) {
+          setLoading(false);
+          return;
+        }
+        const data = await getFacilityProfile();
+        if (data && isMounted) {
+          setFacilityData(data);
+          if (data.hospitalName) setHospitalName(data.hospitalName);
+          if (data.facilityType) setFacilityType(data.facilityType);
+          if (data.about) setAbout(data.about);
+          if (data.city) setCity(data.city);
+          if (data.state) setStateName(data.state);
+          if (data.pincode) setPincode(data.pincode);
+          if (data.addressLine) setAddressLine(data.addressLine);
+          if (data.beds !== undefined && data.beds !== null) setBeds(String(data.beds));
+          if (data.icuBeds !== undefined && data.icuBeds !== null) setIcuBeds(String(data.icuBeds));
+          if (data.licenseNumber) setLicenseNumber(data.licenseNumber);
+          if (data.gst) setGst(data.gst);
+          if (data.nabhNumber) setNabhNumber(data.nabhNumber);
+          if (data.accreditationLevel) setAccreditationLevel(data.accreditationLevel);
+          if (data.contactPerson) setContactPerson(data.contactPerson);
+          if (data.designation) setDesignation(data.designation);
+          if (data.contactPhone) setContactPhone(data.contactPhone);
+          if (data.contactEmail) setContactEmail(data.contactEmail);
+          if (data.website) setWebsite(data.website);
+          if (data.departments && data.departments.length > 0) {
+            setDepartments(data.departments);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load facility profile:", err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    loadData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleAddDepartment = () => {
+    const val = newDeptInput.trim();
+    if (!val) return;
+    if (departments.some((d) => d.toLowerCase() === val.toLowerCase())) {
+      toast.info("Specialty already added");
+      return;
+    }
+    setDepartments([...departments, val]);
+    setNewDeptInput("");
+  };
+
+  const handleRemoveDepartment = (depToRemove: string) => {
+    setDepartments(departments.filter((d) => d !== depToRemove));
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      setSaving(true);
+      const parsedBeds = parseInt(beds, 10) || 0;
+      const parsedIcuBeds = parseInt(icuBeds, 10) || 0;
+
+      const payload: Partial<FacilityProfileDto> = {
+        hospitalName: hospitalName.trim(),
+        facilityType: facilityType.trim(),
+        about: about.trim(),
+        city: city.trim(),
+        state: stateName.trim(),
+        pincode: pincode.trim(),
+        addressLine: addressLine.trim(),
+        beds: parsedBeds,
+        icuBeds: parsedIcuBeds,
+        licenseNumber: licenseNumber.trim(),
+        gst: gst.trim(),
+        nabhNumber: nabhNumber.trim(),
+        accreditationLevel: accreditationLevel.trim(),
+        contactPerson: contactPerson.trim(),
+        designation: designation.trim(),
+        contactPhone: contactPhone.trim(),
+        contactEmail: contactEmail.trim().toLowerCase(),
+        website: website.trim(),
+        departments,
+      };
+
+      if (isApiEnabled) {
+        const updated = await updateFacilityProfile(payload);
+        setFacilityData(updated);
+      }
+
+      setState((s) => ({
+        profile: {
+          ...s.profile,
+          org: hospitalName,
+          city,
+          address: addressLine,
+          bedCapacity: beds,
+          icuBeds,
+          contactPhone,
+          contactEmail,
+          website,
+        },
+      }));
+
+      setIsEditModalOpen(false);
+      toast.success("Hospital profile updated successfully");
+    } catch (err: any) {
+      console.error("Failed to update profile:", err);
+      toast.error(err?.message || "Failed to update profile. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCopyLink = () => {
@@ -156,9 +251,13 @@ function HospitalProfileScreen() {
   };
 
   const handleCopyAddress = () => {
-    navigator.clipboard?.writeText(address);
+    const fullAddr = [addressLine, city, stateName, pincode].filter(Boolean).join(", ");
+    navigator.clipboard?.writeText(fullAddr || addressLine);
     toast.success("Address copied to clipboard");
   };
+
+  const fullDisplayAddress = [addressLine, city, stateName, pincode].filter(Boolean).join(", ");
+  const isVerified = facilityData?.kycStatus === "VERIFIED" || store.profile?.isVerified;
 
   return (
     <AppShell>
@@ -175,8 +274,12 @@ function HospitalProfileScreen() {
             <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent pointer-events-none" />
             <div className="absolute top-4 right-4 flex items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-background/90 backdrop-blur-md px-3 py-1 text-xs font-semibold text-foreground border border-border/60">
-                <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                <span>Verified Hospital</span>
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    isVerified ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
+                  }`}
+                />
+                <span>{isVerified ? "Verified Hospital" : "KYC Active"}</span>
               </span>
             </div>
           </div>
@@ -204,26 +307,28 @@ function HospitalProfileScreen() {
                   </div>
 
                   <p className="text-xs sm:text-sm text-muted-foreground leading-snug">
-                    {tagline}
+                    {facilityType || "Multispecialty Healthcare Facility"}
                   </p>
 
                   <div className="pt-1 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
                     <span className="inline-flex items-center gap-1 font-medium text-foreground">
                       <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-                      {city}, India
+                      {city}{stateName ? `, ${stateName}` : ""}, India
                     </span>
                     <span className="hidden sm:inline">•</span>
-                    <span>{bedCapacity} Beds ({icuBeds} ICU)</span>
+                    <span>
+                      {beds}+ Beds{Number(icuBeds) > 0 ? ` (${icuBeds} ICU)` : ""}
+                    </span>
                     <span className="hidden sm:inline">•</span>
                     <span className="text-primary font-medium flex items-center gap-1">
                       <HiOutlineShieldCheck className="h-3.5 w-3.5" />
-                      NABH &amp; JCI Accredited
+                      {accreditationLevel || (isVerified ? "Verified Institution" : "KPME Registered")}
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* Action Buttons: Clean balanced row on mobile, right-aligned on desktop */}
+              {/* Action Buttons */}
               <div className="flex items-center gap-2 shrink-0 pt-1 sm:pt-0 w-full sm:w-auto">
                 <Button
                   variant="outline"
@@ -259,15 +364,16 @@ function HospitalProfileScreen() {
             </div>
           </div>
 
-          {/* Quick Metrics Bar (Hospital Specific) */}
+          {/* Quick Dynamic Metrics Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-border/70 border-t border-border/70 text-center overflow-hidden">
             <div className="p-3 bg-card">
               <span className="text-[10px] uppercase font-bold text-muted-foreground block">
                 Total Inpatient Beds
               </span>
               <span className="text-base sm:text-lg font-bold font-mono text-foreground mt-0.5 block">
-                {bedCapacity}+ Beds
+                {beds}+ Beds
               </span>
+              <span className="text-[10px] text-muted-foreground block">Sanctioned &amp; Operational</span>
             </div>
 
             <div className="p-3 bg-card">
@@ -277,23 +383,28 @@ function HospitalProfileScreen() {
               <span className="text-base sm:text-lg font-bold font-mono text-foreground mt-0.5 block">
                 {icuBeds} Beds
               </span>
+              <span className="text-[10px] text-muted-foreground block">Ventilator &amp; Monitored</span>
             </div>
 
             <div className="p-3 bg-card">
               <span className="text-[10px] uppercase font-bold text-muted-foreground block">
-                Modular OT Suites
+                Clinical Specialties
               </span>
               <span className="text-base sm:text-lg font-bold font-mono text-foreground mt-0.5 block">
-                18 OTs &amp; Cath Labs
+                {departments.length} Specialties
               </span>
+              <span className="text-[10px] text-muted-foreground block">Active Departments</span>
             </div>
 
             <div className="p-3 bg-card">
               <span className="text-[10px] uppercase font-bold text-muted-foreground block">
-                Accreditation Standard
+                Accreditation Status
               </span>
-              <span className="text-base sm:text-lg font-bold font-mono text-primary mt-0.5 block">
-                NABH &amp; JCI
+              <span className="text-base sm:text-lg font-bold font-mono text-primary mt-0.5 block truncate px-1">
+                {accreditationLevel.includes("NABH") ? "NABH Standard" : accreditationLevel.slice(0, 15)}
+              </span>
+              <span className="text-[10px] text-muted-foreground block">
+                {isVerified ? "Audited & Verified" : "Council Registered"}
               </span>
             </div>
           </div>
@@ -305,217 +416,145 @@ function HospitalProfileScreen() {
           <div className="lg:col-span-7 space-y-6">
             {/* About Institution */}
             <div className="rounded-2xl border border-border/80 bg-card p-5 shadow-2xs space-y-3.5">
-              <div>
+              <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
                   About the Institution
                 </h3>
-                <p className="mt-1.5 text-xs sm:text-sm text-foreground/90 leading-relaxed font-medium">
-                  {hospitalName} is recognized for delivering high-acuity tertiary and quaternary healthcare, equipped with state-of-the-art surgical theaters, closed ICUs, comprehensive organ transplant capabilities, and 24/7 level-1 emergency response.
-                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(true)}
+                  className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                  <span>Edit</span>
+                </button>
               </div>
+
+              <p className="text-xs sm:text-sm text-foreground/90 leading-relaxed font-normal">
+                {about ||
+                  `${hospitalName} is an accredited healthcare facility located in ${city}${
+                    stateName ? `, ${stateName}` : ""
+                  }, dedicated to patient-centered clinical care, inpatient multi-specialty services, and round-the-clock emergency response.`}
+              </p>
 
               {/* Specialization Tags */}
               <div className="pt-3 border-t border-border/60">
-                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">
-                  Specialties &amp; Centers of Excellence
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {specialtyTags.map((spec) => (
-                    <span
-                      key={spec}
-                      className="rounded-lg bg-muted/70 border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground/90"
-                    >
-                      {spec}
-                    </span>
-                  ))}
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Specialties &amp; Clinical Departments ({departments.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(true)}
+                    className="text-[11px] text-primary hover:underline font-semibold cursor-pointer"
+                  >
+                    + Manage
+                  </button>
                 </div>
+
+                {departments.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">
+                    No departments added yet. Click &quot;Manage&quot; to configure your specialties.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {departments.map((spec) => (
+                      <span
+                        key={spec}
+                        className="rounded-lg bg-muted/70 border border-border/60 px-2.5 py-1 text-xs font-semibold text-foreground/90"
+                      >
+                        {spec}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Clinical Infrastructure & Bed Breakdown */}
+            {/* Regulatory & Institutional Credentials Card */}
             <div className="rounded-2xl border border-border/80 bg-card p-5 shadow-2xs space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
-                    <HiOutlineBuildingOffice2 className="h-4 w-4" />
-                  </div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                    Clinical Infrastructure &amp; Capacity
-                  </h3>
-                </div>
-                <span className="text-[11px] font-semibold text-muted-foreground shrink-0">
-                  Tier-1 Quaternary Center
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 text-center">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground block truncate">
-                    Inpatient Capacity
-                  </span>
-                  <span className="text-base font-bold text-foreground font-mono mt-0.5 block">
-                    {bedCapacity}+ Beds
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block truncate">
-                    Private &amp; Shared
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 text-center">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground block truncate">
-                    Critical Care (ICU)
-                  </span>
-                  <span className="text-base font-bold text-primary font-mono mt-0.5 block">
-                    {icuBeds} Beds
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block truncate">
-                    Ventilator Equipped
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 text-center">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground block truncate">
-                    Operation Theatres
-                  </span>
-                  <span className="text-base font-bold text-foreground font-mono mt-0.5 block">
-                    18 Modular OTs
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block truncate">
-                    Robotic &amp; Laminar
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 text-center">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground block truncate">
-                    Cath Labs
-                  </span>
-                  <span className="text-base font-bold text-foreground font-mono mt-0.5 block">
-                    3 Hybrid Labs
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block truncate">
-                    24/7 Primary PCI
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 text-center">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground block truncate">
-                    Trauma Level
-                  </span>
-                  <span className="text-base font-bold text-foreground font-mono mt-0.5 block">
-                    Level-1 Center
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block truncate">
-                    Dedicated CT/MRI
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 text-center">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground block truncate">
-                    Dialysis Stations
-                  </span>
-                  <span className="text-base font-bold text-foreground font-mono mt-0.5 block">
-                    36 Stations
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block truncate">
-                    CRRT &amp; SLEDD Cover
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Nurse-to-Patient Staffing Standards */}
-            <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs space-y-3.5">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary-soft text-primary shrink-0">
-                    <HiOutlineShieldCheck className="h-4 w-4" />
-                  </div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                    Nurse-to-Patient Staffing Commitment
-                  </h3>
-                </div>
-                <span className="shrink-0 text-[10px] font-bold text-primary bg-primary-soft border border-primary/20 px-2.5 py-0.5 rounded-full">
-                  NABH Standard
-                </span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                <div className="rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 text-center min-w-0">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground block truncate">
-                    Critical Care
-                  </span>
-                  <span className="text-base sm:text-xl font-black text-primary font-mono mt-0.5 block whitespace-nowrap">
-                    1:1
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block truncate">
-                    ICU Bedside
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 text-center min-w-0">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground block truncate">
-                    Step-Down
-                  </span>
-                  <span className="text-base sm:text-xl font-black text-foreground font-mono mt-0.5 block whitespace-nowrap">
-                    1:2
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block truncate">
-                    High Dep.
-                  </span>
-                </div>
-
-                <div className="rounded-xl border border-border/70 bg-muted/20 p-2.5 sm:p-3 text-center min-w-0">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground block truncate">
-                    General Ward
-                  </span>
-                  <span className="text-base sm:text-xl font-black text-foreground font-mono mt-0.5 block whitespace-nowrap">
-                    1:4
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 block truncate">
-                    Routine Care
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Quality Accreditations */}
-            <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs space-y-3.5">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary-soft text-primary shrink-0">
                     <HiOutlineDocumentCheck className="h-4 w-4" />
                   </div>
                   <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                    Quality Accreditations &amp; Certifications
+                    Institutional Credentials &amp; Licensing
                   </h3>
                 </div>
-                <span className="shrink-0 text-[10px] font-bold text-primary bg-primary-soft border border-primary/20 px-2 py-0.5 rounded-full">
-                  100% Verified
+                <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                  {isVerified ? "Verified Facility" : "Active Registration"}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {accreditationList.map((acc) => (
-                  <div
-                    key={acc.title}
-                    className="p-3 rounded-xl border border-border/70 bg-muted/20 space-y-1"
-                  >
-                    <div className="flex items-start justify-between gap-1.5">
-                      <span className="text-xs font-bold text-foreground leading-snug">
-                        {acc.title}
-                      </span>
-                      <span className="text-[9px] font-bold text-primary bg-primary-soft px-2 py-0.5 rounded-full border border-primary/20 shrink-0">
-                        {acc.badge}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-snug line-clamp-1">
-                      {acc.org}
-                    </p>
-                    <span className="text-[10px] font-mono text-muted-foreground block pt-0.5">
-                      {acc.validity}
+                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                      Clinical Establishment Reg.
+                    </span>
+                    <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                      KPME / CEA
                     </span>
                   </div>
-                ))}
+                  <p className="text-xs font-mono font-bold text-foreground">
+                    {licenseNumber || "CEA-REG-PENDING"}
+                  </p>
+                  <span className="text-[10px] text-muted-foreground block">
+                    State Health Authority Verified
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                      Accreditation Level
+                    </span>
+                    <span className="text-[9px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                      Standard
+                    </span>
+                  </div>
+                  <p className="text-xs font-bold text-foreground truncate">
+                    {accreditationLevel}
+                  </p>
+                  <span className="text-[10px] text-muted-foreground block">
+                    NABH / Quality Council of India
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                      NABH Reference No.
+                    </span>
+                    <span className="text-[9px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                      Reference
+                    </span>
+                  </div>
+                  <p className="text-xs font-mono font-bold text-foreground">
+                    {nabhNumber || "NABH-AUDIT-ACTIVE"}
+                  </p>
+                  <span className="text-[10px] text-muted-foreground block">
+                    Hospital Quality Compliance
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl border border-border/70 bg-muted/20 space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground">
+                      GSTIN Identification
+                    </span>
+                    <span className="text-[9px] font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                      Tax Reg
+                    </span>
+                  </div>
+                  <p className="text-xs font-mono font-bold text-foreground">
+                    {gst || "GSTIN-REGISTERED"}
+                  </p>
+                  <span className="text-[10px] text-muted-foreground block">
+                    Valid for GST Input &amp; Tax Invoices
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -540,55 +579,93 @@ function HospitalProfileScreen() {
               </div>
 
               <div className="space-y-3.5 text-xs">
+                {/* Address */}
                 <div>
                   <span className="text-[10px] uppercase font-bold text-muted-foreground block">
                     Campus Address
                   </span>
                   <p className="mt-1 font-medium text-foreground leading-relaxed text-xs">
-                    {address}
+                    {fullDisplayAddress || "Campus address not configured"}
                   </p>
                 </div>
 
+                {/* Contact Person */}
                 <div className="pt-2.5 border-t border-border/60">
                   <span className="text-[10px] uppercase font-bold text-muted-foreground block">
-                    24/7 Emergency Hotline
+                    Administrative Desk
                   </span>
-                  <a
-                    href={`tel:${emergencyPhone}`}
-                    className="mt-1 font-bold text-destructive hover:underline flex items-center gap-1.5 font-mono text-sm"
-                  >
-                    <HiOutlinePhone className="h-4 w-4 shrink-0" />
-                    <span>{emergencyPhone}</span>
-                  </a>
+                  <div className="mt-1 flex items-center gap-1.5 font-semibold text-foreground">
+                    <HiOutlineUser className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span>{contactPerson || "Facility Administrator"}</span>
+                    {designation && (
+                      <span className="text-[11px] text-muted-foreground font-normal">
+                        ({designation})
+                      </span>
+                    )}
+                  </div>
                 </div>
 
+                {/* Phone */}
                 <div className="pt-2.5 border-t border-border/60">
                   <span className="text-[10px] uppercase font-bold text-muted-foreground block">
-                    HR &amp; Staffing Desk
+                    Official Phone / Staffing Desk
                   </span>
-                  <p className="mt-1 font-medium text-foreground">{contactPhone}</p>
-                  <a
-                    href={`mailto:${hrEmail}`}
-                    className="text-primary hover:underline block mt-0.5 text-[11px] truncate"
-                  >
-                    {hrEmail}
-                  </a>
+                  {contactPhone ? (
+                    <a
+                      href={`tel:${contactPhone}`}
+                      className="mt-1 font-mono font-bold text-foreground hover:text-primary flex items-center gap-1.5"
+                    >
+                      <HiOutlinePhone className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <span>{contactPhone}</span>
+                    </a>
+                  ) : (
+                    <p className="mt-1 text-muted-foreground italic">Phone not configured</p>
+                  )}
                 </div>
 
+                {/* Email */}
+                <div className="pt-2.5 border-t border-border/60">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                    Official Email
+                  </span>
+                  {contactEmail ? (
+                    <a
+                      href={`mailto:${contactEmail}`}
+                      className="mt-1 font-medium text-primary hover:underline flex items-center gap-1.5 truncate"
+                    >
+                      <HiOutlineEnvelope className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{contactEmail}</span>
+                    </a>
+                  ) : (
+                    <p className="mt-1 text-muted-foreground italic">Email not configured</p>
+                  )}
+                </div>
+
+                {/* Website */}
                 <div className="pt-2.5 border-t border-border/60">
                   <span className="text-[10px] uppercase font-bold text-muted-foreground block">
                     Website
                   </span>
-                  <a
-                    href={website}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1 font-medium text-primary hover:underline flex items-center gap-1 text-xs"
-                  >
-                    <HiOutlineGlobeAlt className="h-3.5 w-3.5" />
-                    <span>Visit Hospital Portal</span>
-                    <HiOutlineArrowTopRightOnSquare className="h-3 w-3" />
-                  </a>
+                  {website ? (
+                    <a
+                      href={website.startsWith("http") ? website : `https://${website}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 font-medium text-primary hover:underline flex items-center gap-1 text-xs"
+                    >
+                      <HiOutlineGlobeAlt className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">Visit Hospital Portal</span>
+                      <HiOutlineArrowTopRightOnSquare className="h-3 w-3 shrink-0" />
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditModalOpen(true)}
+                      className="mt-1 text-xs text-primary hover:underline font-semibold cursor-pointer"
+                    >
+                      + Add Website
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -596,13 +673,13 @@ function HospitalProfileScreen() {
             {/* Escrow & Council Compliance Card */}
             <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 shadow-2xs space-y-2">
               <div className="flex items-center gap-2">
-                <HiOutlineShieldCheck className="h-4.5 w-4.5 text-primary" />
+                <HiOutlineShieldCheck className="h-4.5 w-4.5 text-primary shrink-0" />
                 <span className="text-xs font-bold text-foreground">
-                  FALE Nodal Escrow Partner
+                  FALE Escrow &amp; Council Verified
                 </span>
               </div>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                NABH 5th Edition &amp; JCI Certified. All clinician shifts posted by {hospitalName} are protected by automated 24-hr escrow signoffs and State Medical/Nursing Council verification.
+                All clinician shifts and emergency deployments hosted by {hospitalName} are protected by automated 24-hr escrow signoffs, biometric attendance, and direct State Medical/Nursing Council verification.
               </p>
             </div>
           </div>
@@ -611,130 +688,325 @@ function HospitalProfileScreen() {
 
       {/* ================= EDIT HOSPITAL PROFILE MODAL ================= */}
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-        <DialogContent className="sm:max-w-xl p-5 sm:p-6 rounded-3xl sm:overflow-y-visible max-h-[92vh] sm:max-h-none shadow-2xl">
+        <DialogContent className="sm:max-w-2xl p-5 sm:p-6 rounded-3xl max-h-[92vh] overflow-y-auto shadow-2xl">
           <DialogHeader className="text-left space-y-1">
             <DialogTitle className="text-lg font-bold text-foreground">
-              Edit Hospital Details
+              Edit Hospital Profile
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Update institutional name, location, beds, and contact hotlines.
+              Update your institutional identity, bed capacity, licensing, and contact details.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3.5 py-1 text-xs">
-            {/* Hospital Name */}
-            <div className="block">
-              <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
-                Hospital Name
-              </span>
-              <input
-                id="modal-hospital-name"
-                type="text"
-                value={hospitalName}
-                onChange={(e) => setHospitalName(e.target.value)}
-                className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
-              />
-            </div>
+          <div className="space-y-4 py-2 text-xs">
+            {/* General Info */}
+            <div className="space-y-3">
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-primary border-b border-border/60 pb-1">
+                1. Basic Institutional Identity
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Hospital / Facility Name *
+                  </span>
+                  <input
+                    type="text"
+                    value={hospitalName}
+                    onChange={(e) => setHospitalName(e.target.value)}
+                    placeholder="e.g. Apollo Hospital"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
 
-            {/* Tagline */}
-            <div className="block">
-              <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
-                Tagline / Specialty
-              </span>
-              <input
-                id="modal-tagline"
-                type="text"
-                value={tagline}
-                onChange={(e) => setTagline(e.target.value)}
-                className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
-              />
-            </div>
-
-            {/* City Custom Select & Beds */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <SelectField
-                label="City"
-                options={availableCities}
-                value={city}
-                onChange={setCity}
-                placeholder="Select City"
-              />
-
-              <div className="block">
-                <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
-                  Total Beds
-                </span>
-                <input
-                  id="modal-bed-capacity"
-                  type="text"
-                  value={bedCapacity}
-                  onChange={(e) => setBedCapacity(e.target.value)}
-                  className="h-[46px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
-                />
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Facility Type / Category *
+                  </span>
+                  <input
+                    type="text"
+                    value={facilityType}
+                    onChange={(e) => setFacilityType(e.target.value)}
+                    placeholder="e.g. Multispecialty Hospital"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
               </div>
 
               <div className="block">
                 <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
-                  ICU Beds
+                  About the Institution
                 </span>
-                <input
-                  id="modal-icu-beds"
-                  type="text"
-                  value={icuBeds}
-                  onChange={(e) => setIcuBeds(e.target.value)}
-                  className="h-[46px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                <textarea
+                  rows={3}
+                  value={about}
+                  onChange={(e) => setAbout(e.target.value)}
+                  placeholder="Describe your hospital, clinical focus, accreditations, and medical services..."
+                  className="w-full rounded-xl border border-input bg-card p-3 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all resize-none leading-relaxed"
                 />
               </div>
             </div>
 
-            {/* Address */}
-            <div className="block">
-              <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
-                Address
-              </span>
-              <textarea
-                id="modal-address"
-                rows={2}
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className="w-full rounded-xl border border-input bg-card p-3 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all resize-none leading-relaxed"
-              />
+            {/* Capacity & Location */}
+            <div className="space-y-3">
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-primary border-b border-border/60 pb-1">
+                2. Bed Infrastructure &amp; Campus Location
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Total Beds *
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={beds}
+                    onChange={(e) => setBeds(e.target.value)}
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
+
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    ICU Beds
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={icuBeds}
+                    onChange={(e) => setIcuBeds(e.target.value)}
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
+
+                <div className="block col-span-2">
+                  <SelectField
+                    label="City *"
+                    options={availableCities}
+                    value={city}
+                    onChange={setCity}
+                    placeholder="Select City"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="block sm:col-span-2">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Campus Address Line
+                  </span>
+                  <input
+                    type="text"
+                    value={addressLine}
+                    onChange={(e) => setAddressLine(e.target.value)}
+                    placeholder="Door No, Street Name, Landmark"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
+
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Pincode
+                  </span>
+                  <input
+                    type="text"
+                    value={pincode}
+                    onChange={(e) => setPincode(e.target.value)}
+                    placeholder="e.g. 600001"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
+              </div>
             </div>
 
-            {/* Contacts */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="block">
-                <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
-                  Emergency Phone
-                </span>
-                <input
-                  id="modal-emergency-phone"
-                  type="text"
-                  value={emergencyPhone}
-                  onChange={(e) => setEmergencyPhone(e.target.value)}
-                  className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
-                />
+            {/* Licensing & Regulatory */}
+            <div className="space-y-3">
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-primary border-b border-border/60 pb-1">
+                3. Regulatory Licensing &amp; Accreditations
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    License / KPME Reg. No.
+                  </span>
+                  <input
+                    type="text"
+                    value={licenseNumber}
+                    onChange={(e) => setLicenseNumber(e.target.value)}
+                    placeholder="e.g. CEA/2024/7821"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all font-mono"
+                  />
+                </div>
+
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Accreditation Standard
+                  </span>
+                  <input
+                    type="text"
+                    value={accreditationLevel}
+                    onChange={(e) => setAccreditationLevel(e.target.value)}
+                    placeholder="e.g. NABH Full Hospital Accreditation"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
+
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    NABH Registration No.
+                  </span>
+                  <input
+                    type="text"
+                    value={nabhNumber}
+                    onChange={(e) => setNabhNumber(e.target.value)}
+                    placeholder="e.g. NABH-2023-4512"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all font-mono"
+                  />
+                </div>
+
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    GSTIN
+                  </span>
+                  <input
+                    type="text"
+                    value={gst}
+                    onChange={(e) => setGst(e.target.value)}
+                    placeholder="e.g. 33AAAAA0000A1Z5"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all font-mono"
+                  />
+                </div>
               </div>
-              <div className="block">
-                <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
-                  HR Phone
-                </span>
+            </div>
+
+            {/* Administrative Contact */}
+            <div className="space-y-3">
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-primary border-b border-border/60 pb-1">
+                4. Administrative &amp; Contact Desk
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Contact Person Name
+                  </span>
+                  <input
+                    type="text"
+                    value={contactPerson}
+                    onChange={(e) => setContactPerson(e.target.value)}
+                    placeholder="e.g. Dr. Ramesh Kumar"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
+
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Designation
+                  </span>
+                  <input
+                    type="text"
+                    value={designation}
+                    onChange={(e) => setDesignation(e.target.value)}
+                    placeholder="e.g. Medical Superintendent / HR Head"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
+
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Official Phone
+                  </span>
+                  <input
+                    type="text"
+                    value={contactPhone}
+                    onChange={(e) => setContactPhone(e.target.value)}
+                    placeholder="e.g. +919876543210"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all font-mono"
+                  />
+                </div>
+
+                <div className="block">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Official Email
+                  </span>
+                  <input
+                    type="email"
+                    value={contactEmail}
+                    onChange={(e) => setContactEmail(e.target.value)}
+                    placeholder="e.g. admin@hospital.com"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
+
+                <div className="block sm:col-span-2">
+                  <span className="mb-1.5 block text-[13px] font-semibold text-foreground">
+                    Hospital Website
+                  </span>
+                  <input
+                    type="url"
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
+                    placeholder="https://www.hospital.com"
+                    className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Specialties & Departments */}
+            <div className="space-y-3">
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-primary border-b border-border/60 pb-1">
+                5. Clinical Specialties &amp; Departments
+              </h4>
+              <div className="flex gap-2">
                 <input
-                  id="modal-hr-phone"
                   type="text"
-                  value={contactPhone}
-                  onChange={(e) => setContactPhone(e.target.value)}
-                  className="h-[44px] w-full rounded-xl border border-input bg-card px-3.5 text-sm font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
+                  value={newDeptInput}
+                  onChange={(e) => setNewDeptInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddDepartment();
+                    }
+                  }}
+                  placeholder="Type department (e.g. Pulmonology) and press Add"
+                  className="h-[42px] flex-1 rounded-xl border border-input bg-card px-3.5 text-xs font-medium text-foreground focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all"
                 />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleAddDepartment}
+                  className="h-[42px] px-3.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold"
+                >
+                  <HiOutlinePlus className="h-4 w-4 mr-1" />
+                  Add
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {departments.map((dept) => (
+                  <span
+                    key={dept}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-muted/80 border border-border/70 px-2.5 py-1 text-xs font-medium text-foreground"
+                  >
+                    <span>{dept}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveDepartment(dept)}
+                      className="text-muted-foreground hover:text-destructive cursor-pointer"
+                    >
+                      <HiOutlineXMark className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-3.5 border-t border-border/60">
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-border/60">
             <Button
               variant="outline"
               size="sm"
               onClick={() => setIsEditModalOpen(false)}
+              disabled={saving}
               className="rounded-xl text-xs font-semibold h-10 px-5 cursor-pointer border-border/80"
             >
               Cancel
@@ -742,9 +1014,10 @@ function HospitalProfileScreen() {
             <Button
               size="sm"
               onClick={handleSaveProfile}
+              disabled={saving}
               className="rounded-xl text-xs font-bold h-10 px-6 shadow-sm bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer"
             >
-              Save Changes
+              {saving ? "Saving Changes..." : "Save Changes"}
             </Button>
           </div>
         </DialogContent>

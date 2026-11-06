@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   HiOutlineChatBubbleLeftRight,
@@ -8,6 +8,7 @@ import {
   HiOutlineExclamationTriangle,
   HiOutlineCheckBadge,
   HiCheck,
+  HiCheckCircle,
   HiOutlineXMark,
   HiOutlineTrash,
   HiOutlineEye,
@@ -37,10 +38,14 @@ import {
   RiMentalHealthLine,
   RiUserSharedLine,
   RiFileShield2Line,
+  RiPushpinLine,
+  RiPushpinFill,
+  RiVerifiedBadgeFill,
 } from "react-icons/ri";
 import { toast } from "sonner";
 import { AdminLayout } from "@/components/fale/AdminLayout";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -85,10 +90,22 @@ import {
   HuddlePost,
   HuddleField,
   HuddlePostType,
-  clinicalMentors as initialMentorsList,
-  ClinicalMentor,
 } from "@/lib/data";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import {
+  getFlaggedHuddlePosts,
+  getReviewCases,
+  approveReviewCase,
+  rejectReviewCase,
+  moderateHuddlePost,
+  togglePinHuddlePost,
+  getAdminMentorApplications,
+  reviewAdminMentorApplication,
+  toggleAdminMentorSeal,
+  type MentorApplicationDto,
+} from "@/lib/adapters/adminAdapter";
+import { getHuddlePosts } from "@/lib/adapters/huddleAdapter";
 
 export const Route = createFileRoute("/admin/huddle")({
   head: () => ({
@@ -104,7 +121,7 @@ export const Route = createFileRoute("/admin/huddle")({
   component: AdminHuddleModeration,
 });
 
-export function AdminHuddleModeration() {
+function AdminHuddleModeration() {
   const s = useApp();
   const navigate = useNavigate();
 
@@ -133,16 +150,85 @@ export function AdminHuddleModeration() {
     "Clinical peer guidelines: Content has been flagged for commercial solicitation or patient privacy risk."
   );
 
-  // Mentor management state
-  const [mentorsList, setMentorsList] = useState<ClinicalMentor[]>(initialMentorsList);
-  const [addMentorModalOpen, setAddMentorModalOpen] = useState(false);
-  const [newMentor, setNewMentor] = useState({
-    name: "",
-    role: "",
-    org: "",
-    yrs: 5,
-    specialties: "",
-  });
+  // Mentor management state (100% dynamic from candidate applications & admin verification)
+  const [mentorApplications, setMentorApplications] = useState<MentorApplicationDto[]>([]);
+  const [loadingMentors, setLoadingMentors] = useState(false);
+
+  const fetchMentorApplications = () => {
+    if (!isApiEnabled) return;
+    setLoadingMentors(true);
+    getAdminMentorApplications()
+      .then((apps) => {
+        setMentorApplications(apps || []);
+      })
+      .catch((err) => {
+        console.warn("Failed to load mentor applications:", err);
+      })
+      .finally(() => setLoadingMentors(false));
+  };
+
+  // Dynamic API state for flagged posts, pending clinical review cases, and live discussions
+  const [apiFlaggedPosts, setApiFlaggedPosts] = useState<HuddlePost[]>([]);
+  const [apiReviewCases, setApiReviewCases] = useState<HuddlePost[]>([]);
+  const [apiLivePosts, setApiLivePosts] = useState<HuddlePost[]>([]);
+  const [loadingFlagged, setLoadingFlagged] = useState(isApiEnabled);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const fetchFlaggedAndCases = () => {
+    if (!isApiEnabled) return;
+    setLoadingFlagged(true);
+    Promise.all([getFlaggedHuddlePosts(), getReviewCases(), getHuddlePosts("All")])
+      .then(([flaggedDtos, reviewDtos, liveDtos]) => {
+        const mapDto = (dto: any, defaultStatus: "hidden" | "review" | "live"): HuddlePost => {
+          const isReview = defaultStatus === "review" || String(dto.status).toUpperCase() === "REVIEW";
+          const isHidden = defaultStatus === "hidden" || String(dto.status).toUpperCase() === "FLAGGED";
+          const isAnon = Boolean(dto.isAnonymous || dto.anon);
+          const authorDisplay = isAnon ? "Anonymous Clinician" : (dto.authorName || "Healthcare Professional");
+          return {
+            id: dto.id,
+            type: (dto.type as any) || "Thought",
+            field: (dto.field as any) || "Medicine",
+            authorId: dto.authorId || "author",
+            authorName: authorDisplay,
+            authorShort: authorDisplay.split(" ")[0],
+            authorRole: isAnon ? "Verified Clinician" : (dto.authorRole || "Verified Professional"),
+            authorLevel: "professional",
+            anon: isAnon,
+            text: dto.body || dto.text || dto.title || "",
+            image: dto.imageUrl || dto.image,
+            pinned: Boolean(dto.isPinned),
+            helpfulCount: dto.upvotes || 0,
+            userHelpful: false,
+            replies: [],
+            reports: isHidden ? Array(dto.flagCount || 1).fill("Flagged by community") : [],
+            status: isReview ? "review" : isHidden ? "hidden" : "live",
+            at: dto.createdAt ? new Date(dto.createdAt).toLocaleDateString("en-IN") : "Today",
+          };
+        };
+
+        setApiFlaggedPosts((flaggedDtos || []).map((d) => mapDto(d, "hidden")));
+        setApiReviewCases((reviewDtos || []).map((d) => mapDto(d, "review")));
+        setApiLivePosts((liveDtos || []).map((d) => mapDto(d, "live")));
+        setLoadError(null);
+      })
+      .catch((err) => {
+        console.error("Failed to load huddle admin queues:", err);
+        setLoadError("Unable to load community posts.");
+      })
+      .finally(() => setLoadingFlagged(false));
+  };
+
+  useEffect(() => {
+    fetchFlaggedAndCases();
+    fetchMentorApplications();
+  }, []);
+
+  // Auto-refresh mentor applications when switching to the Clinical Mentors tab
+  useEffect(() => {
+    if (activeTab === "mentors") {
+      fetchMentorApplications();
+    }
+  }, [activeTab]);
 
   // Checklist for clinical case review
   const [checklist, setChecklist] = useState({
@@ -153,8 +239,16 @@ export function AdminHuddleModeration() {
     clinicalIntent: true,
   });
 
-  // Calculate queue counts
-  const allPosts = s.huddlePosts || [];
+  // Calculate queue counts - merge API queues with store review cases so admin can audit them
+  const allPosts = useMemo(() => {
+    const storePosts = s.huddlePosts || [];
+    if (isApiEnabled) {
+      const apiIds = new Set([...apiFlaggedPosts, ...apiReviewCases, ...apiLivePosts].map((p) => p.id));
+      const storeCases = storePosts.filter((p) => !apiIds.has(p.id));
+      return [...apiFlaggedPosts, ...apiReviewCases, ...apiLivePosts, ...storeCases];
+    }
+    return storePosts;
+  }, [isApiEnabled, apiFlaggedPosts, apiReviewCases, apiLivePosts, s.huddlePosts]);
   const flaggedPosts = useMemo(
     () =>
       allPosts.filter(
@@ -173,6 +267,13 @@ export function AdminHuddleModeration() {
 
   // Handlers
   const handleApprovePost = (post: HuddlePost) => {
+    if (isApiEnabled) {
+      if (post.status === "review") {
+        approveReviewCase(post.id).then(() => fetchFlaggedAndCases()).catch(console.error);
+      } else {
+        moderateHuddlePost(post.id, false).then(() => fetchFlaggedAndCases()).catch(console.error);
+      }
+    }
     approveHuddlePost(post.id);
     toast.success("Post Approved & Live!", {
       description: `Post by ${post.authorName} is now visible to the public Huddle community.`,
@@ -184,6 +285,9 @@ export function AdminHuddleModeration() {
   };
 
   const handleDismissReport = (post: HuddlePost) => {
+    if (isApiEnabled) {
+      moderateHuddlePost(post.id, false).then(() => fetchFlaggedAndCases()).catch(console.error);
+    }
     dismissHuddleReport(post.id);
     toast.success("Report Dismissed", {
       description: `All user reports cleared for "${post.authorName}". Post restored as Live.`,
@@ -196,6 +300,13 @@ export function AdminHuddleModeration() {
 
   const handleDeleteConfirm = () => {
     if (!postToDelete) return;
+    if (isApiEnabled) {
+      if (postToDelete.status === "review") {
+        rejectReviewCase(postToDelete.id).then(() => fetchFlaggedAndCases()).catch(console.error);
+      } else {
+        moderateHuddlePost(postToDelete.id, true).then(() => fetchFlaggedAndCases()).catch(console.error);
+      }
+    }
     deleteHuddlePost(postToDelete.id);
     toast.error("Post Permanently Removed", {
       description: `Post by ${postToDelete.authorName} was deleted from Huddle.`,
@@ -218,51 +329,94 @@ export function AdminHuddleModeration() {
     setPostToWarn(null);
   };
 
-  const handleTogglePin = (post: HuddlePost) => {
+  const handleTogglePin = async (post: HuddlePost) => {
+    const newPinned = !post.pinned;
     togglePostPinned(post.id);
-    toast.info(post.pinned ? "Post Unpinned" : "Post Pinned to Community Top", {
+
+    setApiLivePosts((prev) =>
+      prev.map((p) => (p.id === post.id ? { ...p, pinned: newPinned } : p))
+    );
+
+    if (selectedPost?.id === post.id) {
+      setSelectedPost({ ...selectedPost, pinned: newPinned });
+    }
+
+    toast.info(newPinned ? "Post Pinned to Community Top" : "Post Unpinned", {
       description: `Pin status updated for ${post.authorName}'s discussion.`,
     });
-    if (selectedPost?.id === post.id) {
-      setSelectedPost({ ...selectedPost, pinned: !selectedPost.pinned });
+
+    if (isApiEnabled) {
+      try {
+        await togglePinHuddlePost(post.id);
+      } catch (err) {
+        console.warn("Backend pin toggle sync:", err);
+      }
     }
   };
 
-  const handleToggleMentor = (id: string, name: string) => {
-    setMentorsList((prev) =>
-      prev.map((m) =>
-        m.id === id ? { ...m, verified: !m.verified } : m
-      )
-    );
+  const handleToggleMentor = async (id: string, name: string) => {
+    if (isApiEnabled) {
+      try {
+        const updated = await toggleAdminMentorSeal(id);
+        setMentorApplications((prev) =>
+          prev.map((a) => (a.id === id ? updated : a))
+        );
+      } catch (err) {
+        console.warn("Backend toggle mentor seal:", err);
+      }
+    } else {
+      setMentorApplications((prev) =>
+        prev.map((a) =>
+          a.id === id
+            ? { ...a, verified: !a.verified, status: !a.verified ? "APPROVED" : "REJECTED" }
+            : a
+        )
+      );
+    }
     toast.success("Mentor Status Updated", {
       description: `Verified clinical seal updated for ${name}.`,
     });
   };
 
-  const handleAddMentorSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMentor.name || !newMentor.role || !newMentor.org) {
-      toast.error("Please fill all required mentor details.");
-      return;
+  const pendingMentorApps = useMemo(
+    () => mentorApplications.filter((a) => a.status === "PENDING" && !a.verified),
+    [mentorApplications]
+  );
+
+  const approvedMentorApps = useMemo(
+    () => mentorApplications.filter((a) => a.status === "APPROVED" || a.verified),
+    [mentorApplications]
+  );
+
+  const handleReviewMentor = async (appId: string, approve: boolean, name?: string) => {
+    try {
+      if (isApiEnabled) {
+        const updated = await reviewAdminMentorApplication(appId, approve);
+        setMentorApplications((prev) =>
+          prev.map((a) => (a.id === appId ? updated : a))
+        );
+      } else {
+        setMentorApplications((prev) =>
+          prev.map((a) =>
+            a.id === appId
+              ? { ...a, status: approve ? "APPROVED" : "REJECTED", verified: approve }
+              : a
+          )
+        );
+      }
+      if (approve) {
+        toast.success("Mentor Seal Verified & Granted!", {
+          description: `${name || "Clinician"} has been verified with 3+ years clinical experience and granted the FALE Clinical Mentor seal.`,
+        });
+      } else {
+        toast.error("Mentor Application Rejected", {
+          description: `Application for ${name || "Clinician"} has been rejected.`,
+        });
+      }
+    } catch (err: any) {
+      console.error("Failed to review mentor:", err);
+      toast.error(err?.message || "Failed to update mentor application");
     }
-    const created: ClinicalMentor = {
-      id: `m-${Date.now()}`,
-      name: newMentor.name,
-      role: newMentor.role,
-      org: newMentor.org,
-      yrs: Number(newMentor.yrs) || 3,
-      answersCount: 0,
-      specialties: newMentor.specialties
-        ? newMentor.specialties.split(",").map((s) => s.trim())
-        : ["General Clinical"],
-      verified: true,
-    };
-    setMentorsList((prev) => [created, ...prev]);
-    toast.success("Clinical Mentor Onboarded!", {
-      description: `${created.name} is now certified with a Verified Clinical Mentor badge.`,
-    });
-    setAddMentorModalOpen(false);
-    setNewMentor({ name: "", role: "", org: "", yrs: 5, specialties: "" });
   };
 
   // Filtered views
@@ -315,291 +469,182 @@ export function AdminHuddleModeration() {
 
   return (
     <AdminLayout
-      title={
-        <div className="flex items-center gap-2.5">
-          <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
-            <HiOutlineShieldCheck className="h-5 w-5" />
-          </div>
-          <span>Huddle Moderation & Clinical Trust Desk</span>
-        </div>
-      }
+      title="Huddle Moderation & Clinical Trust Desk"
       subtitle="Strict clinical governance: review flagged discussions, verify zero patient identifiers in clinical case studies, audit community reports, and certify verified mentors."
+      badge={
+        <span className="rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs font-bold text-primary">
+          {pendingCases.length} Cases to Review · {flaggedPosts.length} Flagged
+        </span>
+      }
       actions={
-        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full sm:w-auto">
-          <Link
-            to="/huddle"
-            target="_blank"
-            className="inline-flex items-center justify-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl border border-border/80 bg-card hover:bg-muted text-foreground transition-all shadow-2xs flex-1 sm:flex-initial"
-          >
-            <HiOutlineArrowTopRightOnSquare className="h-4 w-4 text-primary shrink-0" />
-            <span className="whitespace-nowrap">View Public Huddle</span>
-          </Link>
-          <Button
-            size="sm"
-            onClick={() => setActiveTab("rules")}
-            variant="outline"
-            className="text-xs font-bold gap-1.5 rounded-xl h-9 px-3.5 border-border/80 hover:bg-muted shadow-2xs flex-1 sm:flex-initial"
-          >
-            <HiOutlineInformationCircle className="h-4 w-4 text-primary shrink-0" />
-            <span className="whitespace-nowrap">Safety Guidelines</span>
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={fetchFlaggedAndCases}
+          disabled={loadingFlagged}
+          className="text-xs font-bold gap-1.5 h-9 rounded-xl border-border hover:bg-muted cursor-pointer"
+        >
+          <HiOutlineArrowPath className={cn("h-3.5 w-3.5", loadingFlagged && "animate-spin")} />
+          <span>Refresh</span>
+        </Button>
       }
     >
       {/* Top 4 Enterprise KPI Metrics */}
-      <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 min-w-0 w-full">
-        {/* Card 1: Flagged Reports */}
-        <div
-          onClick={() => setActiveTab("flagged")}
-          className={cn(
-            "rounded-2xl border p-4 sm:p-5 shadow-2xs transition-all cursor-pointer",
-            activeTab === "flagged"
-              ? "border-primary bg-primary/5 ring-1 ring-primary/20"
-              : "border-border/80 bg-card hover:border-border"
-          )}
-        >
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-xs font-bold uppercase tracking-wider">
-              Flagged Reports
-            </span>
-            <span
-              className={cn(
-                "flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border",
-                flaggedPosts.length > 0
-                  ? "text-primary bg-primary/10 border-primary/20"
-                  : "text-muted-foreground bg-muted/60 border-border/60"
-              )}
-            >
-              {flaggedPosts.length > 0 ? (
-                <>
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-                  Action Required
-                </>
-              ) : (
-                <>
-                  <HiCheck className="h-3 w-3" /> All Clear
-                </>
-              )}
-            </span>
-          </div>
-          <div className="mt-2.5 flex items-baseline justify-between">
-            <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground">
-              {flaggedPosts.length}
-            </span>
-            <span className="text-[11px] font-semibold text-muted-foreground">
-              Avg SLA: &lt; 2 hrs
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground truncate">
-            Reported by members for privacy, spam, or misconduct
-          </p>
-        </div>
-
-        {/* Card 2: Clinical Privacy Queue */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        {/* Card 1: Clinical Privacy Queue */}
         <div
           onClick={() => setActiveTab("cases")}
           className={cn(
-            "rounded-2xl border p-4 sm:p-5 shadow-2xs transition-all cursor-pointer",
+            "rounded-2xl border bg-card p-4 shadow-2xs space-y-1 transition-all cursor-pointer",
             activeTab === "cases"
               ? "border-primary bg-primary/5 ring-1 ring-primary/20"
-              : "border-border/80 bg-card hover:border-border"
+              : "border-border hover:border-border/80"
           )}
         >
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-xs font-bold uppercase tracking-wider">
-              Clinical Case Audits
-            </span>
-            <span className="flex items-center gap-1 text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full">
-              <HiOutlineClock className="h-3 w-3 text-primary" /> De-ID Audit
-            </span>
+          <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
+            <span>Case Audits</span>
+            {pendingCases.length > 0 ? (
+              <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+            ) : (
+              <HiCheck className="h-4 w-4 text-emerald-500" />
+            )}
           </div>
-          <div className="mt-2.5 flex items-baseline justify-between">
-            <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground">
-              {pendingCases.length}
-            </span>
-            <span className="text-[11px] font-semibold text-muted-foreground">
-              Held for sign-off
-            </span>
+          <div className="text-2xl font-black text-foreground">{pendingCases.length}</div>
+          <p className="text-[11px] text-muted-foreground">Held for privacy review</p>
+        </div>
+
+        {/* Card 2: Flagged Reports */}
+        <div
+          onClick={() => setActiveTab("flagged")}
+          className={cn(
+            "rounded-2xl border bg-card p-4 shadow-2xs space-y-1 transition-all cursor-pointer",
+            activeTab === "flagged"
+              ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+              : "border-border hover:border-border/80"
+          )}
+        >
+          <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
+            <span>Flagged Reports</span>
+            {flaggedPosts.length > 0 ? (
+              <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+            ) : (
+              <HiCheck className="h-4 w-4 text-emerald-500" />
+            )}
           </div>
-          <p className="mt-1 text-[11px] text-muted-foreground truncate">
-            Clinical case studies pending patient anonymity check
-          </p>
+          <div className="text-2xl font-black text-foreground">{flaggedPosts.length}</div>
+          <p className="text-[11px] text-muted-foreground">Community reports</p>
         </div>
 
         {/* Card 3: Active Live Discussions */}
         <div
           onClick={() => setActiveTab("feed")}
           className={cn(
-            "rounded-2xl border p-4 sm:p-5 shadow-2xs transition-all cursor-pointer",
+            "rounded-2xl border bg-card p-4 shadow-2xs space-y-1 transition-all cursor-pointer",
             activeTab === "feed"
               ? "border-primary bg-primary/5 ring-1 ring-primary/20"
-              : "border-border/80 bg-card hover:border-border"
+              : "border-border hover:border-border/80"
           )}
         >
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-xs font-bold uppercase tracking-wider">
-              Live Discussions
-            </span>
-            <span className="flex items-center gap-1 text-[10px] font-bold text-foreground bg-muted/60 border border-border/80 px-2 py-0.5 rounded-full">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Active
-            </span>
+          <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
+            <span>Live Discussions</span>
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
           </div>
-          <div className="mt-2.5 flex items-baseline justify-between">
-            <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground">
-              {livePosts.length}
-            </span>
-            <span className="text-[11px] font-semibold text-muted-foreground">
-              {allPosts.reduce((acc, p) => acc + (p.replies?.length || 0), 0)} peer replies
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground truncate">
-            Cases, questions, and verified CME workshops
-          </p>
+          <div className="text-2xl font-black text-foreground">{livePosts.length}</div>
+          <p className="text-[11px] text-muted-foreground">Public peer stream</p>
         </div>
 
         {/* Card 4: Clinical Mentors */}
         <div
-          onClick={() => setActiveTab("mentors")}
+          onClick={() => {
+            setActiveTab("mentors");
+            fetchMentorApplications();
+          }}
           className={cn(
-            "rounded-2xl border p-4 sm:p-5 shadow-2xs transition-all cursor-pointer",
+            "rounded-2xl border bg-card p-4 shadow-2xs space-y-1 transition-all cursor-pointer",
             activeTab === "mentors"
               ? "border-primary bg-primary/5 ring-1 ring-primary/20"
-              : "border-border/80 bg-card hover:border-border"
+              : "border-border hover:border-border/80"
           )}
         >
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span className="text-xs font-bold uppercase tracking-wider">
-              Verified Mentors
-            </span>
-            <span className="flex items-center gap-1 text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full">
-              <HiOutlineCheckBadge className="h-3 w-3 text-primary" /> FALE Certified
-            </span>
+          <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
+            <span>Verified Mentors</span>
+            <HiOutlineCheckBadge className="h-4 w-4 text-primary" />
           </div>
-          <div className="mt-2.5 flex items-baseline justify-between">
-            <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground">
-              {mentorsList.filter((m) => m.verified).length}
-            </span>
-            <span className="text-[11px] font-semibold text-muted-foreground">
-              {mentorsList.reduce((acc, m) => acc + m.answersCount, 0)} answers logged
-            </span>
+          <div className="text-2xl font-black text-foreground">
+            {approvedMentorApps.length}
           </div>
-          <p className="mt-1 text-[11px] text-muted-foreground truncate">
-            Senior charge nurses, MD doctors & lead therapists
+          <p className="text-[11px] text-muted-foreground">
+            {pendingMentorApps.length > 0 ? `${pendingMentorApps.length} application${pendingMentorApps.length === 1 ? "" : "s"} awaiting review` : "Certified clinical guides"}
           </p>
         </div>
       </div>
 
-      {/* Main Tab Bar Navigation */}
-      <div className="rounded-2xl border border-border/80 bg-card shadow-2xs overflow-hidden">
-        <div className="border-b border-border/80 bg-card/60 p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-muted/60 border border-border/40 overflow-x-auto no-scrollbar max-w-full">
-            <button
-              onClick={() => setActiveTab("flagged")}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
-                activeTab === "flagged"
-                  ? "bg-card text-foreground shadow-xs border border-border/60"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              )}
-            >
-              <HiOutlineShieldExclamation
+      {/* Main Card Container */}
+      <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden min-w-0 w-full">
+        {/* Controls Bar */}
+        <div className="p-3.5 sm:p-4 border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 min-w-0">
+          {/* Segmented Filter Pills */}
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 overflow-x-auto no-scrollbar w-full md:w-auto shrink-0">
+            {[
+              { id: "cases" as const, label: "Case Audits", count: pendingCases.length, icon: HiOutlineDocumentMagnifyingGlass },
+              { id: "flagged" as const, label: "Flagged Reports", count: flaggedPosts.length, icon: HiOutlineShieldExclamation },
+              { id: "feed" as const, label: "Live Feed Audit", count: livePosts.length, icon: HiOutlineChatBubbleLeftRight },
+              { id: "mentors" as const, label: "Clinical Mentors", count: pendingMentorApps.length > 0 ? pendingMentorApps.length : approvedMentorApps.length, icon: HiOutlineCheckBadge },
+              { id: "rules" as const, label: "Policies & Rules", count: null, icon: RiFileShield2Line },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (tab.id === "mentors") {
+                    fetchMentorApplications();
+                  }
+                }}
                 className={cn(
-                  "h-4 w-4",
-                  flaggedPosts.length > 0 ? "text-primary" : "text-muted-foreground"
+                  "px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0",
+                  activeTab === tab.id
+                    ? "bg-card text-foreground shadow-xs border border-border/60"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
                 )}
-              />
-              <span>Flagged Reports</span>
-              {flaggedPosts.length > 0 && (
-                <span className="rounded-full bg-primary text-white px-1.5 py-0.2 text-[9px] font-black">
-                  {flaggedPosts.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab("cases")}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
-                activeTab === "cases"
-                  ? "bg-card text-foreground shadow-xs border border-border/60"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              )}
-            >
-              <HiOutlineDocumentMagnifyingGlass className="h-4 w-4 text-primary" />
-              <span>Clinical Privacy Queue</span>
-              {pendingCases.length > 0 && (
-                <span className="rounded-full bg-primary/15 text-primary border border-primary/30 px-1.5 py-0.2 text-[9px] font-black">
-                  {pendingCases.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab("feed")}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
-                activeTab === "feed"
-                  ? "bg-card text-foreground shadow-xs border border-border/60"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              )}
-            >
-              <HiOutlineChatBubbleLeftRight className="h-4 w-4 text-primary" />
-              <span>Live Feed Audit</span>
-              <span className="rounded-full bg-muted text-muted-foreground px-1.5 py-0.2 text-[9px] font-black border border-border/40">
-                {livePosts.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("mentors")}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
-                activeTab === "mentors"
-                  ? "bg-card text-foreground shadow-xs border border-border/60"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              )}
-            >
-              <HiOutlineCheckBadge className="h-4 w-4 text-primary" />
-              <span>Clinical Mentors Desk</span>
-              <span className="rounded-full bg-muted text-muted-foreground px-1.5 py-0.2 text-[9px] font-black border border-border/40">
-                {mentorsList.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("rules")}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
-                activeTab === "rules"
-                  ? "bg-card text-foreground shadow-xs border border-border/60"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              )}
-            >
-              <RiFileShield2Line className="h-4 w-4 text-primary" />
-              <span>Policies & Guardrails</span>
-            </button>
+              >
+                <tab.icon className={cn("h-3.5 w-3.5 shrink-0", activeTab === tab.id ? "text-primary" : "text-muted-foreground")} />
+                <span>{tab.label}</span>
+                {tab.count !== null && (
+                  <span
+                    className={cn(
+                      "px-1.5 py-0.2 rounded-full text-[10px] font-extrabold",
+                      activeTab === tab.id
+                        ? "bg-primary/10 text-primary"
+                        : "bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
 
-          {/* Quick Search across huddle content */}
-          {(activeTab === "flagged" || activeTab === "feed" || activeTab === "cases") && (
-            <div className="relative w-full sm:w-64">
-              <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search post text, author, role…"
-                className="h-9 w-full rounded-xl border border-border/80 bg-muted/40 pl-9 pr-8 text-xs outline-none focus:border-primary focus:bg-background transition-all"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded cursor-pointer"
-                >
-                  <HiOutlineXMark className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          )}
+          {/* Search Input on Right */}
+          <div className="relative w-full md:w-80 shrink-0">
+            <HiOutlineMagnifyingGlass className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search discussions, author, role..."
+              className="w-full h-9 pl-9 pr-8 rounded-xl border border-border bg-muted/30 focus:bg-card text-xs font-medium outline-none focus:ring-1 focus:ring-primary transition-all placeholder:text-muted-foreground"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded cursor-pointer"
+              >
+                <HiOutlineXMark className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* =========================================================================
@@ -726,6 +771,21 @@ export function AdminHuddleModeration() {
                               </div>
                             ))}
                           </div>
+                        </div>
+                      )}
+
+              {/* Attached Image Preview if present */}
+                      {post.image && (
+                        <div className="rounded-xl overflow-hidden border border-border/80 max-w-md bg-muted/20 p-2">
+                          <span className="text-[10px] font-bold text-muted-foreground block mb-1">Attached Clinical Imagery:</span>
+                          <img
+                            src={post.image}
+                            alt="Submitted clinical scan"
+                            className="max-h-64 w-full rounded-lg object-contain bg-black/5"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLElement).style.display = "none";
+                            }}
+                          />
                         </div>
                       )}
 
@@ -867,54 +927,61 @@ export function AdminHuddleModeration() {
                       {post.text}
                     </div>
 
+                    {/* Attached Image Preview if present */}
+                    {post.image && (
+                      <div className="rounded-xl overflow-hidden border border-border/80 max-w-md bg-muted/20 p-2">
+                        <span className="text-[10px] font-bold text-muted-foreground block mb-1">Attached Clinical Imagery:</span>
+                        <img
+                          src={post.image}
+                          alt="Submitted clinical scan"
+                          className="max-h-64 w-full rounded-lg object-contain bg-black/5"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLElement).style.display = "none";
+                          }}
+                        />
+                      </div>
+                    )}
+
                     {/* De-identification Verification Checklist */}
                     <div className="rounded-xl bg-card border border-border/80 p-3.5 space-y-2.5">
                       <div className="text-[11px] font-extrabold text-foreground flex items-center gap-1.5">
                         <HiOutlineShieldCheck className="h-4 w-4 text-primary" />
                         <span>Clinical Privacy Audit Checklist (Mandatory Sign-off):</span>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                        <label className="flex items-center gap-2 text-foreground/90 cursor-pointer">
-                          <input
-                            type="checkbox"
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+                        <label className="flex items-center gap-2 text-foreground/90 cursor-pointer select-none">
+                          <Checkbox
                             checked={checklist.zeroPatientNames}
-                            onChange={(e) =>
-                              setChecklist({ ...checklist, zeroPatientNames: e.target.checked })
+                            onCheckedChange={(checked) =>
+                              setChecklist({ ...checklist, zeroPatientNames: Boolean(checked) })
                             }
-                            className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
                           />
                           <span>Zero patient names or initials present</span>
                         </label>
-                        <label className="flex items-center gap-2 text-foreground/90 cursor-pointer">
-                          <input
-                            type="checkbox"
+                        <label className="flex items-center gap-2 text-foreground/90 cursor-pointer select-none">
+                          <Checkbox
                             checked={checklist.zeroUhidMrd}
-                            onChange={(e) =>
-                              setChecklist({ ...checklist, zeroUhidMrd: e.target.checked })
+                            onCheckedChange={(checked) =>
+                              setChecklist({ ...checklist, zeroUhidMrd: Boolean(checked) })
                             }
-                            className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
                           />
                           <span>Zero UHID, MRD or IP registration numbers</span>
                         </label>
-                        <label className="flex items-center gap-2 text-foreground/90 cursor-pointer">
-                          <input
-                            type="checkbox"
+                        <label className="flex items-center gap-2 text-foreground/90 cursor-pointer select-none">
+                          <Checkbox
                             checked={checklist.bedWardRedacted}
-                            onChange={(e) =>
-                              setChecklist({ ...checklist, bedWardRedacted: e.target.checked })
+                            onCheckedChange={(checked) =>
+                              setChecklist({ ...checklist, bedWardRedacted: Boolean(checked) })
                             }
-                            className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
                           />
                           <span>Bed numbers &amp; specific ICU ward redacted</span>
                         </label>
-                        <label className="flex items-center gap-2 text-foreground/90 cursor-pointer">
-                          <input
-                            type="checkbox"
+                        <label className="flex items-center gap-2 text-foreground/90 cursor-pointer select-none">
+                          <Checkbox
                             checked={checklist.clinicalIntent}
-                            onChange={(e) =>
-                              setChecklist({ ...checklist, clinicalIntent: e.target.checked })
+                            onCheckedChange={(checked) =>
+                              setChecklist({ ...checklist, clinicalIntent: Boolean(checked) })
                             }
-                            className="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5"
                           />
                           <span>Legitimate peer clinical inquiry &amp; educational intent</span>
                         </label>
@@ -975,86 +1042,65 @@ export function AdminHuddleModeration() {
            ========================================================================= */}
         {activeTab === "feed" && (
           <div className="p-4 sm:p-6 space-y-4">
-            {/* Filter toolbar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/60">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-border/60">
+              <div>
+                <h3 className="text-sm font-extrabold text-foreground flex items-center gap-2">
+                  <span>Live Feed Audit &amp; Activity Stream</span>
+                  <span className="rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5">
+                    {filteredLive.length} Discussions
+                  </span>
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Published peer cases, clinical thoughts, CME events and peer discussions.
+                </p>
+              </div>
+
+              {/* Filters toolbar right above table */}
               <div className="flex flex-wrap items-center gap-2">
-                {/* Cadre Filter */}
-                <Select value={fieldFilter} onValueChange={(val) => setFieldFilter(val)}>
-                  <SelectTrigger
-                    className="h-8 rounded-full border border-border/80 bg-card px-3 text-xs font-semibold text-foreground shadow-none hover:border-primary/50 focus:ring-1 focus:ring-primary/40 focus:border-primary transition-all cursor-pointer min-w-[140px] gap-2"
-                  >
-                    <SelectValue placeholder="All Specialties" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border border-border/80 bg-card p-1 shadow-xl">
-                    <SelectItem value="All" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      All Specialties
-                    </SelectItem>
-                    <SelectItem value="Nursing" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Nursing
-                    </SelectItem>
-                    <SelectItem value="Physio" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Physiotherapy
-                    </SelectItem>
-                    <SelectItem value="Medicine" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Medicine
-                    </SelectItem>
-                    <SelectItem value="Radiology" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Radiology
-                    </SelectItem>
-                    <SelectItem value="Lab" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Lab / Pathology
-                    </SelectItem>
-                    <SelectItem value="Pharmacy" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Pharmacy
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="w-36">
+                  <Select value={fieldFilter} onValueChange={(val) => setFieldFilter(val)}>
+                    <SelectTrigger className="h-8 w-full rounded-xl border border-border bg-card px-2.5 text-xs font-semibold text-foreground hover:bg-muted/40">
+                      <SelectValue placeholder="All Specialties" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl border border-border bg-card p-1 shadow-lg z-50">
+                      <SelectItem value="All" className="text-xs font-medium">All Specialties</SelectItem>
+                      <SelectItem value="Nursing" className="text-xs font-medium">Nursing</SelectItem>
+                      <SelectItem value="Physio" className="text-xs font-medium">Physiotherapy</SelectItem>
+                      <SelectItem value="Medicine" className="text-xs font-medium">Medicine</SelectItem>
+                      <SelectItem value="Radiology" className="text-xs font-medium">Radiology</SelectItem>
+                      <SelectItem value="Lab" className="text-xs font-medium">Lab / Pathology</SelectItem>
+                      <SelectItem value="Pharmacy" className="text-xs font-medium">Pharmacy</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                {/* Post Type Filter */}
-                <Select value={typeFilter} onValueChange={(val) => setTypeFilter(val)}>
-                  <SelectTrigger
-                    className="h-8 rounded-full border border-border/80 bg-card px-3 text-xs font-semibold text-foreground shadow-none hover:border-primary/50 focus:ring-1 focus:ring-primary/40 focus:border-primary transition-all cursor-pointer min-w-[135px] gap-2"
-                  >
-                    <SelectValue placeholder="All Post Types" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl border border-border/80 bg-card p-1 shadow-xl">
-                    <SelectItem value="All" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      All Post Types
-                    </SelectItem>
-                    <SelectItem value="Case" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Clinical Case
-                    </SelectItem>
-                    <SelectItem value="Question" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Peer Question
-                    </SelectItem>
-                    <SelectItem value="Thought" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Thought
-                    </SelectItem>
-                    <SelectItem value="Event" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      CME / Workshop
-                    </SelectItem>
-                    <SelectItem value="Experience" className="rounded-lg text-xs font-medium cursor-pointer py-1.5 focus:bg-primary/10 focus:text-primary">
-                      Shift Experience
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="w-36">
+                  <Select value={typeFilter} onValueChange={(val) => setTypeFilter(val)}>
+                    <SelectTrigger className="h-8 w-full rounded-xl border border-border bg-card px-2.5 text-xs font-semibold text-foreground hover:bg-muted/40">
+                      <SelectValue placeholder="All Post Types" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl border border-border bg-card p-1 shadow-lg z-50">
+                      <SelectItem value="All" className="text-xs font-medium">All Post Types</SelectItem>
+                      <SelectItem value="Case" className="text-xs font-medium">Clinical Case</SelectItem>
+                      <SelectItem value="Question" className="text-xs font-medium">Peer Question</SelectItem>
+                      <SelectItem value="Thought" className="text-xs font-medium">Thought</SelectItem>
+                      <SelectItem value="Event" className="text-xs font-medium">CME / Workshop</SelectItem>
+                      <SelectItem value="Experience" className="text-xs font-medium">Shift Experience</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                {(fieldFilter !== "All" || typeFilter !== "All" || searchQuery) && (
+                {(fieldFilter !== "All" || typeFilter !== "All") && (
                   <button
                     onClick={() => {
                       setFieldFilter("All");
                       setTypeFilter("All");
-                      setSearchQuery("");
                     }}
-                    className="text-[11px] font-bold text-primary hover:underline px-1 cursor-pointer"
+                    className="text-xs font-bold text-primary hover:underline px-2.5 py-1 rounded-lg border border-primary/20 bg-primary/5 cursor-pointer"
                   >
-                    Reset Filters
+                    Reset
                   </button>
                 )}
-              </div>
-
-              <div className="text-xs text-muted-foreground font-semibold">
-                Showing <strong className="text-foreground">{filteredLive.length}</strong> live discussions
               </div>
             </div>
 
@@ -1076,7 +1122,7 @@ export function AdminHuddleModeration() {
                       Engagement
                     </TableHead>
                     <TableHead className="text-xs font-bold text-muted-foreground text-center">
-                      Age
+                      Posted On
                     </TableHead>
                     <TableHead className="text-xs font-bold text-muted-foreground text-right pr-4">
                       Actions
@@ -1138,9 +1184,26 @@ export function AdminHuddleModeration() {
                         </TableCell>
 
                         <TableCell className="max-w-md">
-                          <p className="text-xs text-foreground/90 line-clamp-2 leading-relaxed">
-                            {post.text}
-                          </p>
+                          <div className="flex items-center justify-between gap-3 min-h-[44px]">
+                            <p className="text-xs text-foreground/90 line-clamp-2 leading-relaxed min-w-0 flex-1">
+                              {post.text}
+                            </p>
+                            {(post.image || (post as any).imageUrl) && (
+                              <img
+                                src={post.image || (post as any).imageUrl}
+                                alt=""
+                                className="h-9 w-9 rounded-lg object-cover border border-border/80 shrink-0 bg-muted/20 cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedPost(post);
+                                  setSheetOpen(true);
+                                }}
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLElement).style.display = "none";
+                                }}
+                              />
+                            )}
+                          </div>
                         </TableCell>
 
                         <TableCell className="text-center">
@@ -1168,7 +1231,11 @@ export function AdminHuddleModeration() {
                                 post.pinned ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"
                               )}
                             >
-                              <HiOutlineSparkles className="h-3.5 w-3.5" />
+                              {post.pinned ? (
+                                <RiPushpinFill className="h-3.5 w-3.5 text-primary" />
+                              ) : (
+                                <RiPushpinLine className="h-3.5 w-3.5" />
+                              )}
                             </Button>
 
                             <Button
@@ -1288,7 +1355,11 @@ export function AdminHuddleModeration() {
                             post.pinned ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground"
                           )}
                         >
-                          <HiOutlineSparkles className="h-3.5 w-3.5" />
+                          {post.pinned ? (
+                            <RiPushpinFill className="h-3.5 w-3.5 text-primary" />
+                          ) : (
+                            <RiPushpinLine className="h-3.5 w-3.5" />
+                          )}
                         </Button>
 
                         <Button
@@ -1329,13 +1400,109 @@ export function AdminHuddleModeration() {
             TAB 4: CLINICAL MENTORS DESK
            ========================================================================= */}
         {activeTab === "mentors" && (
-          <div className="p-4 sm:p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/60">
-              <div>
+          <div className="p-4 sm:p-6 space-y-6">
+            {/* Sub-section 1: Pending Clinical Mentor Applications Queue */}
+            <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:p-5 space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-primary">
+                    Clinical Mentor Seal Applications ({pendingMentorApps.length} Pending Review)
+                  </h4>
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  Minimum criterion: 3+ years verified clinical experience
+                </span>
+              </div>
+
+              {pendingMentorApps.length === 0 ? (
+                <div className="text-center py-6 text-muted-foreground text-xs bg-card/60 rounded-xl border border-border/40 space-y-1">
+                  <HiOutlineCheckBadge className="h-6 w-6 mx-auto text-primary/60" />
+                  <p className="font-semibold text-foreground">All Mentor Applications Audited</p>
+                  <p className="text-[11px]">No candidate applications currently pending verification.</p>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {pendingMentorApps.map((app) => (
+                    <div
+                      key={app.id}
+                      className="rounded-xl border border-border bg-card p-4 shadow-2xs space-y-3 hover:border-primary/40 transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-black text-sm shrink-0">
+                            {(app.name || "C")[0]}
+                          </div>
+                          <div className="min-w-0">
+                            <h5 className="text-xs font-black text-foreground truncate">
+                              {app.name || "Healthcare Practitioner"}
+                            </h5>
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {app.profession || "Clinician"} • {app.specialty || "Medicine"}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5 shrink-0 flex items-center gap-1">
+                          <HiOutlineClock className="h-3 w-3" />
+                          Pending Audit
+                        </span>
+                      </div>
+
+                      <div className="rounded-lg bg-muted/40 p-2.5 space-y-1 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Clinical Experience:</span>
+                          <span className="font-extrabold text-primary flex items-center gap-1">
+                            <HiCheckCircle className="h-3.5 w-3.5" />
+                            {app.yearsExperience ?? 3}+ Years (Eligible for Seal)
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Affiliated Org / Hospital:</span>
+                          <span className="font-medium text-foreground truncate max-w-[180px]">
+                            {app.organization || "Private Practice / Clinic"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Applied Date:</span>
+                          <span className="text-muted-foreground font-mono">
+                            {app.appliedAt ? new Date(app.appliedAt).toLocaleDateString("en-IN") : "Today"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          type="button"
+                          onClick={() => handleReviewMentor(app.id!, true, app.name)}
+                          className="flex-1 h-8 text-xs font-bold gap-1.5 bg-primary text-white hover:bg-primary/90 rounded-xl cursor-pointer"
+                        >
+                          <HiOutlineCheckBadge className="h-4 w-4" />
+                          Verify & Grant Seal
+                        </Button>
+                        <Button
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                          onClick={() => handleReviewMentor(app.id!, false, app.name)}
+                          className="h-8 text-xs font-bold text-muted-foreground hover:text-destructive hover:border-destructive/40 rounded-xl cursor-pointer"
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Sub-section 2: Certified Clinical Mentors Directory */}
+            <div className="space-y-4">
+              <div className="pb-3 border-b border-border/60">
                 <h3 className="text-sm font-extrabold text-foreground flex flex-wrap items-center gap-2">
                   <span>Certified Clinical Mentors Directory</span>
                   <span className="rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5 whitespace-nowrap shrink-0">
-                    {mentorsList.filter((m) => m.verified).length} Active Mentors
+                    {approvedMentorApps.length} Active Mentors
                   </span>
                 </h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
@@ -1343,94 +1510,82 @@ export function AdminHuddleModeration() {
                 </p>
               </div>
 
-              <Button
-                size="sm"
-                onClick={() => setAddMentorModalOpen(true)}
-                className="h-9 text-xs font-bold gap-1.5 bg-primary text-white hover:bg-primary/90 rounded-xl shadow-2xs w-full sm:w-auto justify-center"
-              >
-                <HiOutlineUserPlus className="h-4 w-4" />
-                <span>Onboard New Mentor</span>
-              </Button>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {mentorsList.map((mentor) => (
-                <div
-                  key={mentor.id}
-                  className="rounded-xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs space-y-3.5 hover:border-primary/40 transition-all"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-black text-sm shrink-0">
-                        {mentor.name[0]}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <h4 className="text-xs font-black text-foreground truncate">
-                            {mentor.name}
-                          </h4>
-                          {mentor.verified && (
-                            <HiOutlineCheckBadge className="h-4 w-4 text-primary shrink-0" />
-                          )}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground truncate">
-                          {mentor.role}
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleToggleMentor(mentor.id, mentor.name)}
-                      className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all cursor-pointer shrink-0",
-                        mentor.verified
-                          ? "bg-primary/10 text-primary border-primary/20"
-                          : "bg-muted text-muted-foreground border-border/60"
-                      )}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {approvedMentorApps.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground text-xs bg-muted/20 rounded-2xl border border-dashed border-border/60 space-y-1.5 col-span-full">
+                    <HiOutlineCheckBadge className="h-7 w-7 mx-auto text-muted-foreground/60" />
+                    <p className="font-semibold text-foreground text-sm">No Certified Mentors Yet</p>
+                    <p className="text-[11px] max-w-sm mx-auto">
+                      When healthcare practitioners with 3+ years of clinical experience apply and are verified by Admin, their accredited mentor profile will appear here.
+                    </p>
+                  </div>
+                ) : (
+                  approvedMentorApps.map((app) => (
+                    <div
+                      key={`app-${app.id}`}
+                      className="rounded-xl border border-primary/30 bg-card p-4 sm:p-5 shadow-2xs space-y-3.5 hover:border-primary/50 transition-all"
                     >
-                      {mentor.verified ? "Verified Seal" : "Suspended"}
-                    </button>
-                  </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-black text-sm shrink-0">
+                            {(app.name || "M")[0]}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="text-xs font-black text-foreground truncate">
+                                {app.name || "Certified Mentor"}
+                              </h4>
+                              <HiOutlineCheckBadge className="h-4 w-4 text-primary shrink-0" />
+                            </div>
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {app.profession || "Senior Clinician"}
+                            </p>
+                          </div>
+                        </div>
 
-                  <div className="rounded-lg bg-muted/40 p-2.5 space-y-1.5 text-[11px]">
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Affiliated Org:</span>
-                      <strong className="text-foreground truncate max-w-[150px]">
-                        {mentor.org}
-                      </strong>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Clinical Exp:</span>
-                      <strong className="text-foreground">{mentor.yrs} Years</strong>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Q&amp;A Answers:</span>
-                      <strong className="text-foreground font-mono">
-                        {mentor.answersCount} logged
-                      </strong>
-                    </div>
-                  </div>
+                        <button
+                          onClick={() => handleToggleMentor(app.id!, app.name || "Clinician")}
+                          className={cn(
+                            "text-[10px] font-bold px-2 py-0.5 rounded-full border transition-all cursor-pointer shrink-0",
+                            app.verified
+                              ? "bg-primary/10 text-primary border-primary/20"
+                              : "bg-muted text-muted-foreground border-border/60"
+                          )}
+                        >
+                          {app.verified ? "Verified Seal" : "Suspended"}
+                        </button>
+                      </div>
 
-                  {/* Specialty Tags */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {mentor.specialties.map((spec, i) => (
-                      <span
-                        key={i}
-                        className="rounded-md bg-card border border-border/60 px-2 py-0.5 text-[10px] font-bold text-muted-foreground"
-                      >
-                        {spec}
-                      </span>
-                    ))}
-                  </div>
+                      <div className="rounded-lg bg-muted/40 p-2.5 space-y-1.5 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Affiliated Org:</span>
+                          <strong className="text-foreground truncate max-w-[150px]">
+                            {app.organization || "FALE Peer Network"}
+                          </strong>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Clinical Exp:</span>
+                          <strong className="text-foreground">{app.yearsExperience ?? 3}+ Years</strong>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Specialty:</span>
+                          <strong className="text-foreground truncate max-w-[150px]">
+                            {app.specialty || "General Medicine"}
+                          </strong>
+                        </div>
+                      </div>
 
-                  <div className="pt-2 border-t border-border/40 flex items-center justify-between text-[11px]">
-                    <span className="text-muted-foreground font-medium">Status:</span>
-                    <span className="font-bold text-foreground">
-                      {mentor.verified ? "Active on Mentor Panel" : "Badge Revoked"}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                      <div className="pt-2 border-t border-border/40 flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground font-medium">Status:</span>
+                        <span className="font-bold text-primary flex items-center gap-1">
+                          <RiVerifiedBadgeFill className="h-3.5 w-3.5 text-primary" />
+                          Accredited FALE Mentor
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1554,7 +1709,7 @@ export function AdminHuddleModeration() {
           {selectedPost && (
             <div className="p-6 space-y-6">
               <SheetHeader className="space-y-1 text-left pb-4 border-b border-border/80">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between pr-8">
                   <span
                     className={cn(
                       "text-[10px] font-black uppercase px-2 py-0.5 rounded-md border",
@@ -1582,7 +1737,7 @@ export function AdminHuddleModeration() {
                   Discussion Audit &amp; Moderation
                 </SheetTitle>
                 <SheetDescription className="text-xs text-muted-foreground">
-                  Post ID: <span className="font-mono">{selectedPost.id}</span> · Submitted {selectedPost.at}
+                  Submitted {selectedPost.at}
                 </SheetDescription>
               </SheetHeader>
 
@@ -1642,6 +1797,25 @@ export function AdminHuddleModeration() {
                   {selectedPost.text}
                 </div>
               </div>
+
+              {/* Attached Clinical Imagery if present */}
+              {(selectedPost.image || (selectedPost as any).imageUrl) && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                    Attached Clinical Imagery:
+                  </label>
+                  <div className="rounded-xl overflow-hidden border border-border/80 bg-muted/20 p-2 max-w-full">
+                    <img
+                      src={selectedPost.image || (selectedPost as any).imageUrl}
+                      alt="Attached clinical scan"
+                      className="max-h-72 w-full object-contain rounded-lg bg-black/5"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLElement).style.display = "none";
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Engagement Stats */}
               <div className="grid grid-cols-2 gap-3 text-center">
@@ -1858,99 +2032,6 @@ export function AdminHuddleModeration() {
               Issue Notice
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* =========================================================================
-          ONBOARD NEW MENTOR MODAL
-         ========================================================================= */}
-      <Dialog open={addMentorModalOpen} onOpenChange={setAddMentorModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-base font-extrabold text-foreground flex items-center gap-2">
-              <HiOutlineUserPlus className="h-5 w-5 text-primary" />
-              <span>Certify Clinical Mentor</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground pt-1.5 leading-relaxed">
-              Grant a Verified Clinical Mentor seal to a senior doctor, charge nurse, or department lead to answer community peer questions.
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleAddMentorSubmit} className="space-y-3 py-2">
-            <div>
-              <label className="text-xs font-bold text-foreground">Clinician Full Name *</label>
-              <input
-                required
-                value={newMentor.name}
-                onChange={(e) => setNewMentor({ ...newMentor, name: e.target.value })}
-                placeholder="e.g. Dr. Priya Ramachandran"
-                className="mt-1 w-full rounded-xl border border-border/80 bg-muted/40 px-3 py-2 text-xs text-foreground outline-none focus:border-primary"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-foreground">Clinical Designation *</label>
-              <input
-                required
-                value={newMentor.role}
-                onChange={(e) => setNewMentor({ ...newMentor, role: e.target.value })}
-                placeholder="e.g. Lead ICU Intensivist / Senior Nurse Incharge"
-                className="mt-1 w-full rounded-xl border border-border/80 bg-muted/40 px-3 py-2 text-xs text-foreground outline-none focus:border-primary"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-foreground">Hospital / Facility *</label>
-                <input
-                  required
-                  value={newMentor.org}
-                  onChange={(e) => setNewMentor({ ...newMentor, org: e.target.value })}
-                  placeholder="e.g. Apollo Hospital"
-                  className="mt-1 w-full rounded-xl border border-border/80 bg-muted/40 px-3 py-2 text-xs text-foreground outline-none focus:border-primary"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-foreground">Years Experience</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={newMentor.yrs}
-                  onChange={(e) => setNewMentor({ ...newMentor, yrs: Number(e.target.value) })}
-                  className="mt-1 w-full rounded-xl border border-border/80 bg-muted/40 px-3 py-2 text-xs text-foreground outline-none focus:border-primary"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-foreground">Specialties (comma-separated)</label>
-              <input
-                value={newMentor.specialties}
-                onChange={(e) => setNewMentor({ ...newMentor, specialties: e.target.value })}
-                placeholder="e.g. Critical Care, Ventilator Titration, Neuro ICU"
-                className="mt-1 w-full rounded-xl border border-border/80 bg-muted/40 px-3 py-2 text-xs text-foreground outline-none focus:border-primary"
-              />
-            </div>
-
-            <DialogFooter className="gap-2 sm:gap-0 pt-3">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setAddMentorModalOpen(false)}
-                className="text-xs rounded-xl"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                className="text-xs font-bold rounded-xl bg-primary text-white hover:bg-primary/90"
-              >
-                Grant Mentor Seal
-              </Button>
-            </DialogFooter>
-          </form>
         </DialogContent>
       </Dialog>
     </AdminLayout>

@@ -66,6 +66,9 @@ import {
   type AddressValue,
 } from "@/components/fale/fields";
 import { setState, useApp } from "@/lib/store";
+import { isApiEnabled } from "@/lib/api";
+import { onboardCandidate } from "@/lib/adapters/candidateAdapter";
+import { onboardFacility } from "@/lib/adapters/facilityAdapter";
 import {
   councilByProfession,
   councilOptions,
@@ -393,12 +396,19 @@ function Onboarding() {
   const isCandidateParam = roleParam === "candidate" || roleParam === "pro";
 
   useEffect(() => {
+    if (s.signedIn && s.onboarded) {
+      if (s.portal === "facility") navigate({ to: "/employer" });
+      else if (s.portal === "admin") navigate({ to: "/admin" });
+      else navigate({ to: "/home" });
+      return;
+    }
+
     if (isFacilityParam && s.portal !== "facility") {
       setState({ portal: "facility" });
     } else if (isCandidateParam && s.portal !== "candidate") {
       setState({ portal: "candidate" });
     }
-  }, [isFacilityParam, isCandidateParam, s.portal]);
+  }, [s.signedIn, s.onboarded, s.portal, isFacilityParam, isCandidateParam, navigate]);
 
   const f = isFacilityParam ? true : isCandidateParam ? false : s.portal === "facility";
   const [candidateStage, setCandidateStage] = useState<"choose" | "student" | "graduate">(() => {
@@ -648,6 +658,42 @@ function Onboarding() {
       "Proof of study": proofDoc,
     };
 
+    if (isApiEnabled) {
+      const studentResume = docs["Resume / CV"] || docs["CV / Resume"] || docs["Resume"] || undefined;
+      const studentIdDoc = docs["Identity proof"] || undefined;
+      const proofDocName = docs["Proof of study"];
+
+      onboardCandidate({
+        fullName: str("name").trim(),
+        email: str("email") || undefined,
+        gender: str("gender") || undefined,
+        dob: str("dob") || undefined,
+        city: str("area").split(",")[0]?.trim() || str("city") || "Bengaluru",
+        state: str("state") || "Karnataka",
+        pincode: str("pincode") || undefined,
+        addressLine: str("address") || undefined,
+        candidateLevel: "STUDENT",
+        course: str("course"),
+        collegeName: str("college").trim(),
+        studyYear: str("studyYear"),
+        universityRegNo: str("univReg") || undefined,
+        expectedGraduationYear: parseInt(str("grad")) || new Date().getFullYear() + 2,
+        bonafideCertificateUrl: proof === "bonafide" ? (proofDocName || "bonafide.pdf") : undefined,
+        bonafideCertificateFileName: proof === "bonafide" ? (proofDocName || "bonafide.pdf") : undefined,
+        studentIdCardUrl: proof === "college_id" ? (proofDocName || "student_id.pdf") : undefined,
+        studentIdCardFileName: proof === "college_id" ? (proofDocName || "student_id.pdf") : undefined,
+        identityProofUrl: studentIdDoc,
+        identityProofFileName: studentIdDoc,
+        resumeUrl: studentResume,
+        resumeFileName: studentResume,
+        languages: arr("languages"),
+        profilePhotoUrl: photoPreview || undefined,
+        profilePhotoFileName: photoPreview ? "ProfilePhoto.jpg" : undefined,
+      }).catch((err) => {
+        console.error("API onboarding error:", err);
+      });
+    }
+
     setState({
       onboarded: true,
       candidateLevel: "student",
@@ -787,6 +833,79 @@ function Onboarding() {
     if (finalPhoto) {
       finalDocs["Profile photo"] = finalPhoto;
     }
+
+    if (isApiEnabled && !f) {
+      let minSalary: number | undefined = undefined;
+      let maxSalary: number | undefined = undefined;
+      const salaryStr = str("salary");
+      if (salaryStr) {
+        const matches = salaryStr.replace(/,/g, "").match(/\d+/g);
+        if (matches && matches.length >= 2) {
+          minSalary = parseInt(matches[0]);
+          maxSalary = parseInt(matches[1]);
+        } else if (matches && matches.length === 1) {
+          minSalary = parseInt(matches[0]);
+        }
+      }
+
+      const prefCities = arr("preferredCity").length > 0
+        ? arr("preferredCity")
+        : (str("preferredCity") ? [str("preferredCity")] : undefined);
+
+      const resolvedCollege = str("institution") || str("college") || undefined;
+      const resolvedCourse = (p["qual"] === "Other" && p["qualOwn"] ? (p["qualOwn"] as string) : (p["qual"] as string)) || str("course") || undefined;
+      const resolvedGradYear = parseInt(str("year")) || parseInt(str("grad")) || undefined;
+      const resolvedUnivReg = str("univReg") || undefined;
+
+      onboardCandidate({
+        fullName: str("name").trim() || "Candidate",
+        email: str("email") || undefined,
+        gender: str("gender") || undefined,
+        dob: str("dob") || undefined,
+        city: str("city") || str("area")?.split(",")[0]?.trim() || "Chennai",
+        state: str("state") || "Tamil Nadu",
+        pincode: str("pincode") || undefined,
+        addressLine: str("address") || undefined,
+        candidateLevel: isStudent ? "STUDENT" : isFresher ? "FRESHER" : "PROFESSIONAL",
+        collegeName: resolvedCollege,
+        course: resolvedCourse,
+        expectedGraduationYear: resolvedGradYear,
+        universityRegNo: resolvedUnivReg,
+        profession: str("role") || "Doctor",
+        primarySpecialty: p["specialty"] === "Other" && p["deptOwn"] ? p["deptOwn"] : (p["specialty"] as string) || "General",
+        qualification: p["qual"] === "Other" && p["qualOwn"] ? p["qualOwn"] : (p["qual"] as string) || "MBBS",
+        council: str("council") || undefined,
+        councilRegistrationNumber: str("regNo") || undefined,
+        councilState: str("councilState") || str("state") || undefined,
+        regYear: str("regYear") || undefined,
+        experienceYears: formattedExp,
+        bio: str("bio") || str("about") || undefined,
+        expectedSalaryMinRupees: minSalary,
+        expectedSalaryMaxRupees: maxSalary,
+        currentSalary: str("currentSalary") || undefined,
+        noticePeriod: str("notice") || "Immediately",
+        employmentType: Array.isArray(p["employmentType"]) ? (p["employmentType"] as string[]).join(", ") : (p["employmentType"] as string) || "Full-time",
+        availability: str("availability") || str("notice") || "Immediate",
+        openToWork: !!p["shifts"] || !p["otw"] || p["otw"] === "on",
+        relocate: !!p["relocate"],
+        preferredCities: prefCities,
+        skills: arr("skills"),
+        languages: arr("languages"),
+        profilePhotoUrl: finalPhoto || undefined,
+        profilePhotoFileName: finalPhoto ? "ProfilePhoto.jpg" : undefined,
+        resumeUrl: docs["Resume / CV"] || docs["CV / Resume"] || docs["Resume"] || undefined,
+        resumeFileName: docs["Resume / CV"] || docs["CV / Resume"] || docs["Resume"] || undefined,
+        registrationCertificateUrl: docs["Professional registration"] || docs["State Council Registration"] || docs["Registration certificate"] || docs["NMC Certificate"] || undefined,
+        registrationCertificateFileName: docs["Professional registration"] || docs["State Council Registration"] || docs["Registration certificate"] || docs["NMC Certificate"] || undefined,
+        qualificationCertificateUrl: docs["Highest qualification certificate"] || docs["Degree certificate"] || undefined,
+        qualificationCertificateFileName: docs["Highest qualification certificate"] || docs["Degree certificate"] || undefined,
+        identityProofUrl: docs["Identity proof"] || undefined,
+        identityProofFileName: docs["Identity proof"] || undefined,
+      }).catch((err) => {
+        console.error("API onboarding error:", err);
+      });
+    }
+
     setState({
       onboarded: true,
       candidateLevel,
@@ -805,7 +924,7 @@ function Onboarding() {
     }
   };
 
-  const handleFinishHospitalOnboarding = (primary?: string, gallery?: string[]) => {
+  const handleFinishHospitalOnboarding = async (primary?: string, gallery?: string[]) => {
     const finalPrimary = primary || hospitalLogoPreview || (hospitalPhotos.length > 0 ? hospitalPhotos[0] : "");
     const finalPhotos = gallery || hospitalPhotos;
     const profileToSave = {
@@ -820,8 +939,47 @@ function Onboarding() {
     if (finalPhotos.length > 0) {
       finalDocs["Facility photos"] = `${finalPhotos.length} photos uploaded`;
     }
+
+    if (isApiEnabled) {
+      try {
+        const rawPhone = str("mobile") || s.contact.replace(/\D/g, "");
+        const cleanDigits = rawPhone.replace(/\D/g, "").slice(-10);
+        const contactPhone = cleanDigits.length === 10 ? `+91${cleanDigits}` : "+919999933333";
+        const contactEmail = str("email") || (s.contact.includes("@") ? s.contact : `admin@${str("org").toLowerCase().replace(/[^a-z0-9]/g, "") || "hospital"}.com`);
+
+        await onboardFacility({
+          hospitalName: str("org").trim() || "Healthcare Facility",
+          facilityType: str("orgType") || "Multispecialty Hospital",
+          size: str("size") || undefined,
+          about: str("about") || undefined,
+          website: str("website") || undefined,
+          city: str("city") || "Chennai",
+          state: str("state") || "Tamil Nadu",
+          pincode: str("pincode") || "600001",
+          addressLine: str("address") || "Hospital Campus",
+          beds: Math.max(1, parseInt(str("beds")) || 50),
+          icuBeds: Math.max(0, parseInt(str("icuBeds")) || 0),
+          licenseNumber: str("licence").trim() || "CEA-REG-PENDING",
+          gst: str("gst") || undefined,
+          nabhNumber: str("nabhNumber") || (docs["NABH / NABL certificate"] ? "NABH-ONBOARDING" : undefined),
+          accreditationLevel: str("accreditationLevel") || (docs["NABH / NABL certificate"] ? "NABH Accredited" : "State Registered"),
+          contactPerson: str("name").trim() || "Facility Administrator",
+          designation: str("designation") || undefined,
+          contactPhone,
+          contactEmail: contactEmail.includes("@") ? contactEmail : "facility@thefale.com",
+          departments: arr("departments"),
+          hiringNeeds: arr("hiring"),
+          logoUrl: finalPrimary || undefined,
+          facilityPhotos: finalPhotos.length > 0 ? finalPhotos : undefined,
+        });
+      } catch (err: any) {
+        console.error("Facility API onboarding error:", err);
+      }
+    }
+
     setState({
       onboarded: true,
+      portal: "facility",
       profile: profileToSave as Record<string, string | boolean>,
       docs: finalDocs,
     });
@@ -1497,8 +1655,9 @@ function Onboarding() {
           <SelectField label="Organization type" required options={["Hospital", "Clinic", "Diagnostic centre", "Pharmacy", "Rehabilitation centre", "Other healthcare facility"]} value={str("orgType")} onChange={set("orgType")} />
           <SelectField label="Organization size" required options={["1–10 staff", "11–50 staff", "51–200 staff", "201–1000 staff", "1000+ staff"]} value={str("size")} onChange={set("size")} />
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Number of beds" optional inputMode="numeric" {...input("beds")} placeholder="e.g. 150" />
+          <Field label="ICU beds" optional inputMode="numeric" {...input("icuBeds")} placeholder="e.g. 20" />
           <Field label="Website" optional type="url" icon={<HiOutlineGlobeAlt />} {...input("website")} placeholder="https://" />
         </div>
       </FormSection>

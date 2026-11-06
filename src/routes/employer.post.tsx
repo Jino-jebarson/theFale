@@ -17,6 +17,8 @@ import { SelectField } from "@/components/fale/fields";
 import { professions } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import { postFacilityJob } from "@/lib/adapters/facilityAdapter";
 
 export const Route = createFileRoute("/employer/post")({
   head: () => ({
@@ -156,7 +158,7 @@ const shiftOptions = ["Day", "Night", "Rotational"];
 function Post() {
   const store = useApp();
   const navigate = useNavigate();
-  const hospitalName = String(store.profile["org"] || "Apollo Hospitals");
+  const hospitalName = String(store.profile["org"] || (isApiEnabled ? (store.profile["hospitalName"] || "Healthcare Facility") : "Apollo Hospitals"));
   const hospitalCity = String(store.profile["city"] || "Bengaluru");
 
   // Form State
@@ -224,27 +226,44 @@ function Post() {
       ],
       jobApprovals: isPublishing
         ? [
-            {
-              id: newId,
-              title,
-              org: hospitalName,
-              type: "job" as const,
-              dept: dept || "General",
-              city: hospitalCity,
-              compensation,
-              expOrHours: experience,
-              status: "pending" as const,
-              submittedDate: "Just now",
-              openings: Number(openings) || 1,
-              postedBy: String(s.profile["recruiter"] || "Facility HR"),
-              urgent: isUrgent,
-            },
-            ...s.jobApprovals,
-          ]
+          {
+            id: newId,
+            title,
+            org: hospitalName,
+            type: "job" as const,
+            dept: dept || "General",
+            city: hospitalCity,
+            compensation,
+            expOrHours: experience,
+            status: "pending" as const,
+            submittedDate: "Just now",
+            openings: Number(openings) || 1,
+            postedBy: String(s.profile["recruiter"] || "Facility HR"),
+            urgent: isUrgent,
+          },
+          ...s.jobApprovals,
+        ]
         : s.jobApprovals,
     }));
 
     if (isPublishing) {
+      if (isApiEnabled) {
+        postFacilityJob({
+          title: title.trim(),
+          department: dept || "General",
+          employmentType: empType || "Full-time",
+          isInternship: empType === "Internship",
+          city: hospitalCity || "Bengaluru",
+          openings: Number(openings) || 1,
+          salaryMinPaise: (Number(minSalary) || 0) * 100,
+          salaryMaxPaise: (Number(maxSalary) || 0) * 100,
+          experienceRequired: experience || "0–2 yrs",
+          qualificationRequired: requireCouncilReg ? "State Council Registration Required" : "Medical Degree / Diploma",
+          description: description || title,
+        }).catch((err) => {
+          console.error("Failed to post job to API:", err);
+        });
+      }
       toast.success("Submitted for Admin Verification!", {
         description: "Your requirement has been sent to FALE Admin. Once verified, it will reflect on the candidate portal.",
       });

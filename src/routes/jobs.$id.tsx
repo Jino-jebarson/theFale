@@ -20,9 +20,20 @@ import { WithdrawModal } from "@/components/fale/WithdrawModal";
 import { Button } from "@/components/ui/button";
 import { jobs } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
+import { isApiEnabled } from "@/lib/api";
+import { applyForJob, getJobById } from "@/lib/adapters/jobAdapter";
+import { withdrawApplication } from "@/lib/adapters/applicationAdapter";
 
 export const Route = createFileRoute("/jobs/$id")({
-  loader: ({ params }) => {
+  loader: async ({ params }) => {
+    if (isApiEnabled) {
+      try {
+        const job = await getJobById(params.id);
+        return { job };
+      } catch (e) {
+        throw notFound();
+      }
+    }
     const job = jobs.find((j) => j.id === params.id);
     if (!job) throw notFound();
     return { job };
@@ -57,6 +68,11 @@ function JobDetail() {
 
   const apply = () => {
     const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    if (isApiEnabled) {
+      applyForJob(job.id).catch((err) => {
+        console.error("Apply error:", err);
+      });
+    }
     const candidateName = String(s.profile["name"] || "Candidate Professional");
     const candidateRole = String(s.profile["role"] || "Healthcare Professional");
     const candidateCity = String(s.profile["city"] || "Bengaluru");
@@ -93,6 +109,11 @@ function JobDetail() {
 
   const handleWithdrawConfirm = (reason: string, notes: string) => {
     const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    if (isApiEnabled) {
+      withdrawApplication(job.id, reason).catch((err) => {
+        console.error("Withdraw error:", err);
+      });
+    }
     setState((x) => ({
       applied: x.applied.map((item) =>
         item.jobId === job.id ? { ...item, status: "Withdrawn", date: now } : item
@@ -202,7 +223,7 @@ function JobDetail() {
           <div>
             <h3 className="mb-3 font-bold">{isStudent ? "Similar internships" : "Similar jobs"}</h3>
             <div className="space-y-3">
-              {jobs
+              {(isApiEnabled ? [] : jobs)
                 .filter((j) => j.id !== job.id && (!isStudent || j.title.toLowerCase().includes("intern") || j.title.toLowerCase().includes("observership") || j.tags.some((t) => t.toLowerCase().includes("intern"))))
                 .slice(0, 2)
                 .map((j) => <JobCard key={j.id} job={j} compact />)}

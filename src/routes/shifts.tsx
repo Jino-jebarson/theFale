@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   HiOutlineCalendarDays,
   HiOutlineClock,
   HiOutlineMapPin,
   HiCheckCircle,
+  HiCheck,
   HiOutlineBolt,
   HiOutlineCurrencyRupee,
   HiOutlineBanknotes,
@@ -23,7 +24,15 @@ import { toast } from "sonner";
 import { AppShell, PageHead } from "@/components/fale/AppShell";
 import { StudentLockCard } from "@/components/fale/StudentLockCard";
 import { OrgMark } from "@/components/fale/JobCard";
+import { SearchEmptyGraphic } from "@/components/fale/SearchEmptyGraphic";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -34,6 +43,18 @@ import {
 import { shifts } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import {
+  getOpenShifts,
+  claimShift,
+  cancelShiftClaim,
+  getMyClaims,
+  checkInShift,
+  completeShift,
+  type UiShiftItem,
+  type ShiftClaimDto,
+} from "@/lib/adapters/shiftAdapter";
+import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
 
 export const Route = createFileRoute("/shifts")({
   head: () => ({
@@ -56,8 +77,6 @@ const timingOpts = [
   { id: "urgent", label: "Urgent Surge", withIcon: true },
 ] as const;
 
-const cityOpts = ["All Cities", "Bengaluru", "Chennai", "Mumbai", "Hyderabad", "Delhi NCR"];
-
 function Shifts() {
   const s = useApp();
   const candidateLevel =
@@ -72,14 +91,93 @@ function Shifts() {
   const [timingF, setTimingF] = useState<"all" | "day" | "night" | "urgent">("all");
   const [sort, setSort] = useState<"pay" | "rate" | "earliest">("pay");
 
+  // Dynamic API state
+  const [apiShifts, setApiShifts] = useState<UiShiftItem[]>([]);
+  const [myClaims, setMyClaims] = useState<ShiftClaimDto[]>([]);
+  const [loading, setLoading] = useState(isApiEnabled);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    Promise.all([
+      getOpenShifts().catch(() => []),
+      getMyClaims().catch(() => []),
+      getCandidateProfile().catch(() => null),
+    ])
+      .then(([fetchedShifts, fetchedClaims, profile]) => {
+        setApiShifts(fetchedShifts);
+        setMyClaims(fetchedClaims);
+        if (profile) {
+          setState((prev) => ({
+            candidateLevel: profile.isStudent ? "student" : (profile.candidateLevel?.toLowerCase() as any),
+            profile: {
+              ...prev.profile,
+              name: profile.name || prev.profile["name"],
+              role: profile.profession || prev.profile["role"],
+              specialty: profile.specialty || prev.profile["specialty"],
+              city: profile.city || prev.profile["city"],
+            },
+          }));
+        }
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
+
   const allShifts = useMemo(() => {
+    if (isApiEnabled) {
+      return apiShifts;
+    }
     const userPosted = (s.postedShifts ?? []).map((ps) => ({
       ...ps,
       perks: ps.perks ?? [],
       urgent: ps.urgent ?? false,
     }));
     return [...userPosted, ...shifts];
-  }, [s.postedShifts]);
+  }, [s.postedShifts, apiShifts]);
+
+  // Dynamic Unique City Options
+  const cityOpts = useMemo(() => {
+    const defaultCities = ["Bengaluru", "Chennai", "Mumbai", "Hyderabad", "Delhi NCR"];
+    const dynamicCities = allShifts.map((sh) => sh.city).filter(Boolean);
+    return ["All Cities", ...Array.from(new Set([...defaultCities, ...dynamicCities]))];
+  }, [allShifts]);
+
+  const claimedShiftIds = useMemo(() => {
+    const fromClaims = myClaims
+      .filter((c) => !["CANCELLED", "REJECTED", "WITHDRAWN"].includes((c.status || "").toUpperCase()))
+      .map((c) => c.shiftId);
+    const fromApiShifts = apiShifts.filter((sh) => sh.hasClaimed).map((sh) => sh.id);
+    return Array.from(new Set([...fromClaims, ...fromApiShifts, ...(s.shiftApps || [])]));
+  }, [myClaims, apiShifts, s.shiftApps]);
+
+  // Dynamic Shift Counts for Timing Pills
+  const timingCounts = useMemo(() => {
+    const base = allShifts.filter((sh) => {
+      if (q && !`${sh.title} ${sh.org} ${sh.dept} ${sh.city}`.toLowerCase().includes(q.toLowerCase())) return false;
+      if (cityF !== "All Cities" && sh.city.toLowerCase() !== cityF.toLowerCase()) return false;
+      return true;
+    });
+
+    const isDay = (sh: UiShiftItem) => {
+      const startHour = Number.parseInt(sh.time?.split(":")[0] ?? "0", 10);
+      return startHour >= 6 && startHour < 18;
+    };
+    const isNight = (sh: UiShiftItem) => {
+      const startHour = Number.parseInt(sh.time?.split(":")[0] ?? "0", 10);
+      return startHour < 6 || startHour >= 18;
+    };
+
+    return {
+      all: base.length,
+      day: base.filter(isDay).length,
+      night: base.filter(isNight).length,
+      urgent: base.filter((sh) => Boolean(sh.urgent)).length,
+    };
+  }, [allShifts, q, cityF]);
 
   const filteredShifts = useMemo(() => {
     return allShifts
@@ -94,48 +192,169 @@ function Shifts() {
           return false;
         }
         if (timingF === "day") {
-          const startHour = Number.parseInt(sh.time.split(":")[0] ?? "0", 10);
+          const startHour = Number.parseInt(sh.time?.split(":")[0] ?? "0", 10);
           if (startHour >= 18 || startHour < 6) return false;
         }
         if (timingF === "night") {
-          const startHour = Number.parseInt(sh.time.split(":")[0] ?? "0", 10);
+          const startHour = Number.parseInt(sh.time?.split(":")[0] ?? "0", 10);
           if (startHour < 18 && startHour >= 6) return false;
         }
         return true;
       })
       .sort((a, b) => {
-        if (sort === "pay") return b.rate * b.hours - a.rate * a.hours;
-        if (sort === "rate") return b.rate - a.rate;
+        const aRate = typeof a.rate === "number" ? a.rate : (a as any).rateNumber || 0;
+        const bRate = typeof b.rate === "number" ? b.rate : (b as any).rateNumber || 0;
+        const aHours = a.hours || 8;
+        const bHours = b.hours || 8;
+
+        if (sort === "pay") return bRate * bHours - aRate * aHours;
+        if (sort === "rate") return bRate - aRate;
         return a.date.localeCompare(b.date);
       });
   }, [allShifts, q, cityF, timingF, sort]);
 
   const appliedShiftObjects = useMemo(() => {
-    return allShifts.filter((sh) => s.shiftApps.includes(sh.id));
-  }, [allShifts, s.shiftApps]);
+    return allShifts.filter((sh) => claimedShiftIds.includes(sh.id));
+  }, [allShifts, claimedShiftIds]);
+
+  const appliedCount = isApiEnabled ? claimedShiftIds.length : s.shiftApps.length;
+
+  const confirmedCount = useMemo(() => {
+    if (isApiEnabled) {
+      return myClaims.filter((c) => c.status === "CONFIRMED" || c.status === "CHECKED_IN").length;
+    }
+    return 0;
+  }, [isApiEnabled, myClaims]);
+
+  const pendingReviewCount = useMemo(() => {
+    if (isApiEnabled) {
+      return myClaims.filter((c) => !["CONFIRMED", "CHECKED_IN", "COMPLETED", "REJECTED", "CANCELLED"].includes(c.status)).length;
+    }
+    return s.shiftApps.length;
+  }, [isApiEnabled, myClaims, s.shiftApps]);
 
   const totalPotentialEarnings = useMemo(() => {
-    return appliedShiftObjects.reduce((acc, sh) => acc + sh.rate * sh.hours, 0);
+    return appliedShiftObjects.reduce((acc, sh) => {
+      const r = typeof sh.rate === "number" ? sh.rate : (sh as any).rateNumber || 0;
+      const h = sh.hours || 8;
+      const pay = sh.totalPayNumber || (r * h);
+      return acc + pay;
+    }, 0);
   }, [appliedShiftObjects]);
 
-  const handleApply = (id: string, title: string, org: string) => {
-    if (isStudent) {
-      toast.info("Shift duty restricted for active students", {
-        description: "Patient duty shifts require valid State Council Registration. Please explore accredited internships!",
+  const handleApply = async (id: string, title: string, org: string) => {
+    if (applyingId === id) return;
+
+    setApplyingId(id);
+    try {
+      if (isApiEnabled) {
+        const claim = await claimShift(id);
+        setMyClaims((prev) => [...prev.filter((c) => c.shiftId !== id), claim]);
+      }
+      const newAdminApp = {
+        id: "claim-" + Date.now(),
+        candidateName: s.profile?.name || (isStudent ? "Clinical Student" : "Candidate"),
+        candidateRole: s.profile?.course || s.profile?.role || "Healthcare Clinician",
+        exp: s.profile?.exp || (isStudent ? "Final Year Intern" : "1 Year"),
+        candidateCity: s.profile?.city || "Chennai",
+        jobTitle: `${title} (Locum Shift)`,
+        status: "shortlisted",
+        councilVerified: true,
+        matchScore: 96,
+        appliedDate: "Today",
+        regNumber: s.profile?.regNo || (isStudent ? "College Verified" : "Council Verified"),
+        phone: s.profile?.phone || "+91 98401 23456",
+        email: s.profile?.email || "candidate@fale.care",
+        summary: `Applied for ${title} locum shift duty coverage.`,
+      };
+      setState((x) => ({
+        shiftApps: Array.from(new Set([...(x.shiftApps || []), id])),
+        adminApplications: [newAdminApp, ...(x.adminApplications || [])],
+      }));
+      setApiShifts((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, hasClaimed: true } : item))
+      );
+      toast.success("Shift claimed successfully!", {
+        description: `Your interest in ${title} at ${org} was submitted. Hospital notified!`,
       });
-      return;
+    } catch (err: any) {
+      const msg = err?.message || "";
+      if (msg.toLowerCase().includes("already claimed") || err?.status === 409) {
+        // Automatically disable and mark shift as applied in UI
+        setState((x) => ({
+          shiftApps: Array.from(new Set([...(x.shiftApps || []), id])),
+        }));
+        setApiShifts((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, hasClaimed: true } : item))
+        );
+        getMyClaims().then((claims) => setMyClaims(claims)).catch(() => { });
+        toast.info("Shift already claimed", {
+          description: "You have already claimed a slot for this shift. Check status under review.",
+        });
+      } else {
+        toast.error("Shift claim failed", {
+          description: msg || "Slot unavailable or already filled.",
+        });
+      }
+    } finally {
+      setApplyingId(null);
     }
-    setState((x) => ({ shiftApps: [...x.shiftApps, id] }));
-    toast.success("Shift requested successfully!", {
-      description: `Your application was submitted to ${org} for ${title}. You'll be notified upon confirmation.`,
-    });
   };
 
-  const handleWithdraw = (id: string, title: string) => {
-    setState((x) => ({ shiftApps: x.shiftApps.filter((a) => a !== id) }));
-    toast.info("Shift request withdrawn", {
-      description: `Your request for ${title} was removed.`,
-    });
+  const handleWithdraw = async (id: string, title: string) => {
+    setWithdrawingId(id);
+    try {
+      if (isApiEnabled) {
+        const claim = myClaims.find((c) => c.shiftId === id && !["CANCELLED", "REJECTED"].includes((c.status || "").toUpperCase()));
+        if (claim) {
+          try {
+            await cancelShiftClaim(claim.id);
+          } catch (err: any) {
+            if (!err?.message?.includes("CANCELLED")) {
+              throw err;
+            }
+          }
+          setMyClaims((prev) => prev.map((c) => (c.id === claim.id ? { ...c, status: "CANCELLED" } : c)));
+        }
+      }
+      setApiShifts((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, hasClaimed: false } : item))
+      );
+      setState((x) => ({ shiftApps: (x.shiftApps || []).filter((a) => a !== id) }));
+      toast.info("Shift request withdrawn", {
+        description: `Your request for ${title} was removed.`,
+      });
+    } catch (err: any) {
+      toast.error("Cancellation failed", {
+        description: err?.message || "Could not cancel shift claim.",
+      });
+    } finally {
+      setWithdrawingId(null);
+    }
+  };
+
+  const handleCheckIn = async (claimId: string, shiftTitle: string) => {
+    try {
+      const updated = await checkInShift(claimId);
+      setMyClaims((prev) => prev.map((c) => (c.id === claimId ? updated : c)));
+      toast.success("Checked in on hospital floor!", {
+        description: `Duty started for "${shiftTitle}". Payout escrow is locked.`,
+      });
+    } catch (err: any) {
+      toast.error("Check-in failed", { description: err?.message });
+    }
+  };
+
+  const handleCompleteShift = async (claimId: string, shiftTitle: string) => {
+    try {
+      const updated = await completeShift(claimId);
+      setMyClaims((prev) => prev.map((c) => (c.id === claimId ? updated : c)));
+      toast.success("Shift duty marked completed!", {
+        description: `Duty sign-off submitted for "${shiftTitle}". Escrow release scheduled.`,
+      });
+    } catch (err: any) {
+      toast.error("Completion failed", { description: err?.message });
+    }
   };
 
   return (
@@ -149,46 +368,25 @@ function Shifts() {
             : "Transparent hourly rates. Immediate 24-hour direct payouts. Pick up flexible hospital shifts on your terms."
         }
         action={
-          isStudent ? (
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="rounded-xl text-xs font-semibold h-9 px-3.5 cursor-pointer gap-1.5"
-            >
-              <Link to="/jobs" search={{ q: undefined }}>
-                <HiOutlineSparkles className="h-4 w-4 text-primary" />
-                <span>Explore Internships</span>
-              </Link>
-            </Button>
-          ) : (
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" />
-                <span>{allShifts.length} active clinical shifts today</span>
-              </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+              <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" />
+              <span>{loading ? "Syncing shifts..." : `${allShifts.length} verified clinical shifts today`}</span>
+            </div>
+            {s.portal === "facility" && (
               <Button asChild size="sm" variant="outline" className="rounded-xl text-xs font-semibold gap-1.5 h-8 px-3 shadow-2xs">
                 <Link to="/employer/post-shift">
                   <HiOutlineBolt className="h-3.5 w-3.5 text-primary" />
                   <span>Hospital? Post a shift</span>
                 </Link>
               </Button>
-            </div>
-          )
+            )}
+          </div>
         }
       />
 
-      {isStudent ? (
-        <StudentLockCard
-          title="Hospital Shifts Unlock After Graduation"
-          description="Hospital locum duties and on-call shifts will unlock once you complete your graduation and verify your Council Registration."
-          item3Title="Instant Locum Shifts"
-          item3Desc="Access flexible 24/7 on-call duty passes & guaranteed payouts."
-        />
-      ) : (
-        <>
-          {/* ================= APPLE-STYLE METRIC STATS ================= */}
-          <div className="mb-7 grid gap-4 sm:grid-cols-3">
+      {/* ================= APPLE-STYLE METRIC STATS ================= */}
+      <div className="mb-7 grid gap-4 sm:grid-cols-3">
             {/* Metric 1 */}
             <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md">
               <div className="flex items-center justify-between">
@@ -200,13 +398,13 @@ function Shifts() {
                 </div>
               </div>
               <p className="mt-2 text-3xl font-black tracking-tight text-foreground">
-                {s.shiftApps.length}
+                {appliedCount}
               </p>
               <p className="mt-1 text-xs text-muted-foreground flex items-center gap-1.5">
-                {s.shiftApps.length > 0 ? (
-                  <span className="text-primary font-bold">● Facility review in progress</span>
+                {pendingReviewCount > 0 ? (
+                  <span className="text-primary font-bold">● {pendingReviewCount} under facility review</span>
                 ) : (
-                  <span>Ready to book your first shift</span>
+                  <span>Ready to claim your next shift</span>
                 )}
               </p>
             </div>
@@ -222,10 +420,10 @@ function Shifts() {
                 </div>
               </div>
               <p className="mt-2 text-3xl font-black tracking-tight text-foreground">
-                0
+                {confirmedCount}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Clock-in opens 15m prior to start time
+                {confirmedCount > 0 ? "Clock-in opens 15m prior to start time" : "Awaiting facility confirmation"}
               </p>
             </div>
 
@@ -304,31 +502,45 @@ function Shifts() {
 
               {/* Filter Pills & Sort Bar */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3">
-                {/* Timing Pills */}
+                {/* Timing Pills with Dynamic Counts */}
                 <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 min-w-0">
-                  {timingOpts.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setTimingF(t.id)}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition-all cursor-pointer",
-                        timingF === t.id
-                          ? "bg-primary text-white shadow-2xs"
-                          : "bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground"
-                      )}
-                    >
-                      {"withIcon" in t && t.withIcon && (
-                        <HiOutlineBolt
+                  {timingOpts.map((t) => {
+                    const count = timingCounts[t.id] ?? 0;
+                    const isActive = timingF === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setTimingF(t.id)}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold shrink-0 whitespace-nowrap transition-all cursor-pointer",
+                          isActive
+                            ? "bg-primary text-white shadow-2xs"
+                            : "bg-muted/50 text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                        )}
+                      >
+                        {"withIcon" in t && t.withIcon && (
+                          <HiOutlineBolt
+                            className={cn(
+                              "h-3.5 w-3.5 shrink-0",
+                              isActive ? "text-white" : "text-amber-500"
+                            )}
+                          />
+                        )}
+                        <span>{t.label}</span>
+                        <span
                           className={cn(
-                            "h-3.5 w-3.5 shrink-0",
-                            timingF === t.id ? "text-white" : "text-amber-500"
+                            "rounded-full px-1.5 py-0.2 text-[10px] font-bold tabular-nums transition-colors",
+                            isActive
+                              ? "bg-white/20 text-white"
+                              : "bg-muted text-muted-foreground"
                           )}
-                        />
-                      )}
-                      <span>{t.label}</span>
-                    </button>
-                  ))}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {/* Segmented Sort (Apple style) */}
@@ -382,142 +594,247 @@ function Shifts() {
             </div>
 
             {/* Cards Grid */}
-            <div className="grid gap-5 md:grid-cols-2">
-              {filteredShifts.map((sh) => {
-                const applied = s.shiftApps.includes(sh.id);
-                const totalPay = sh.rate * sh.hours;
-
-                return (
+            {loading ? (
+              <div className="grid gap-5 md:grid-cols-2">
+                {[1, 2, 3, 4].map((i) => (
                   <div
-                    key={sh.id}
-                    className={cn(
-                      "surface group relative flex flex-col justify-between overflow-hidden rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs transition-all duration-200 hover:border-primary/40 hover:shadow-md",
-                      applied && "border-emerald-300/80 bg-emerald-50/20 dark:border-emerald-900/40 dark:bg-emerald-950/10"
-                    )}
+                    key={i}
+                    className="surface rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs animate-pulse space-y-4"
                   >
-                    <div>
-                      {/* Card Header: Hospital & Title */}
-                      <div className="flex items-start gap-3 sm:gap-3.5">
-                        <OrgMark name={sh.org} className="h-11 w-11 sm:h-12 sm:w-12 text-xs sm:text-sm shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-start justify-between gap-1.5 sm:gap-2">
-                            <div className="min-w-0 flex-1">
-                              <h2 className="font-black text-base sm:text-lg text-foreground group-hover:text-primary transition-colors leading-snug break-words">
-                                {sh.title}
-                              </h2>
-                              <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs">
-                                <span className="inline-flex items-center gap-1 font-bold text-foreground/90">
-                                  <span>{sh.org}</span>
-                                  <HiCheckBadge className="h-3.5 w-3.5 text-primary shrink-0" title="Verified Hospital" />
+                    <div className="flex items-start gap-3">
+                      <div className="h-12 w-12 rounded-2xl bg-muted/60 shrink-0" />
+                      <div className="space-y-2 flex-1">
+                        <div className="h-4 w-3/4 bg-muted/60 rounded-md" />
+                        <div className="h-3 w-1/2 bg-muted/50 rounded-md" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="h-8 bg-muted/40 rounded-xl" />
+                      <div className="h-8 bg-muted/40 rounded-xl" />
+                      <div className="h-8 bg-muted/40 rounded-xl" />
+                      <div className="h-8 bg-muted/40 rounded-xl" />
+                    </div>
+                    <div className="h-12 bg-muted/30 rounded-2xl" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="grid gap-5 md:grid-cols-2">
+                {filteredShifts.map((sh) => {
+                  const activeClaim = myClaims.find(
+                    (c) => c.shiftId === sh.id && !["CANCELLED", "REJECTED", "WITHDRAWN"].includes((c.status || "").toUpperCase())
+                  );
+                  const isClaimCancelled = myClaims.some(
+                    (c) => c.shiftId === sh.id && ["CANCELLED", "REJECTED", "WITHDRAWN"].includes((c.status || "").toUpperCase())
+                  );
+                  const applied = Boolean(activeClaim) || ((Boolean(sh.hasClaimed) || claimedShiftIds.includes(sh.id)) && !isClaimCancelled);
+                  const rateNumber = typeof sh.rate === "number"
+                    ? sh.rate
+                    : (sh.rateNumber || parseFloat(String(sh.rate).replace(/[^0-9.]/g, "")) || 0);
+                  const hoursNumber = Number(sh.hours) || 8;
+                  const totalPay = sh.totalPayNumber || (rateNumber * hoursNumber);
+
+                  return (
+                    <div
+                      key={sh.id}
+                      className={cn(
+                        "surface group relative flex flex-col justify-between overflow-hidden rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs transition-all duration-200 hover:border-primary/40 hover:shadow-md",
+                        applied && "border-emerald-300/80 bg-emerald-50/20 dark:border-emerald-900/40 dark:bg-emerald-950/10"
+                      )}
+                    >
+                      <div>
+                        {/* Card Header: Hospital & Title */}
+                        <div className="flex items-start gap-3 sm:gap-3.5">
+                          <OrgMark name={sh.org} className="h-11 w-11 sm:h-12 sm:w-12 text-xs sm:text-sm shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-start justify-between gap-1.5 sm:gap-2">
+                              <div className="min-w-0 flex-1">
+                                <h2 className="font-black text-base sm:text-lg text-foreground group-hover:text-primary transition-colors leading-snug break-words">
+                                  {sh.title}
+                                </h2>
+                                <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs">
+                                  <span className="inline-flex items-center gap-1 font-bold text-foreground/90">
+                                    <span>{sh.org}</span>
+                                    <HiCheckBadge className="h-3.5 w-3.5 text-primary shrink-0" title="Verified Hospital" />
+                                  </span>
+                                  <span className="rounded-lg bg-primary-soft/80 px-2 py-0.5 text-[11px] font-bold text-primary shrink-0">
+                                    {sh.dept}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-black text-primary border border-primary/20">
+                                  ₹{rateNumber.toLocaleString("en-IN")}/hr
                                 </span>
-                                <span className="rounded-lg bg-primary-soft/80 px-2 py-0.5 text-[11px] font-bold text-primary shrink-0">
-                                  {sh.dept}
-                                </span>
+                                {sh.urgent && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] sm:text-[11px] font-black text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-900/40">
+                                    <HiOutlineBolt className="h-3 w-3" />
+                                    Urgent Cover
+                                  </span>
+                                )}
                               </div>
                             </div>
+                          </div>
+                        </div>
 
-                            {sh.urgent && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[10px] sm:text-[11px] font-black text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200 dark:border-amber-900/40 shrink-0">
-                                <HiOutlineBolt className="h-3 w-3" />
-                                Urgent Cover
+                        {/* Schedule & Location Grid */}
+                        <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                          <div className="flex items-center gap-2 rounded-2xl bg-muted/40 px-3 py-2 text-foreground font-semibold">
+                            <HiOutlineCalendarDays className="h-4 w-4 text-primary shrink-0" />
+                            <span className="truncate">{sh.date}</span>
+                          </div>
+
+                          <div className="flex items-center gap-2 rounded-2xl bg-muted/40 px-3 py-2 text-foreground font-semibold">
+                            <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
+                            <span className="truncate">{sh.time} ({hoursNumber} hrs duty)</span>
+                          </div>
+
+                          <div className="flex items-center gap-2 rounded-2xl bg-muted/40 px-3 py-2 text-foreground font-semibold">
+                            <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0" />
+                            <span className="truncate">{sh.city}</span>
+                          </div>
+
+                          <div className="flex items-center gap-2 rounded-2xl bg-muted/40 px-3 py-2 text-foreground font-semibold">
+                            <HiOutlineBuildingOffice2 className="h-4 w-4 text-primary shrink-0" />
+                            <span className="truncate">{sh.dept}</span>
+                          </div>
+                        </div>
+
+                        {/* Perks chips */}
+                        {sh.perks && sh.perks.length > 0 && (
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                            {sh.perks.map((p) => (
+                              <span
+                                key={p}
+                                className="rounded-lg bg-muted/50 px-2 py-0.5 text-[11px] font-semibold text-muted-foreground"
+                              >
+                                {p}
+                              </span>
+                            ))}
+                            {sh.surge && (
+                              <span className="rounded-lg bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                                {sh.surge}
                               </span>
                             )}
                           </div>
-                        </div>
+                        )}
                       </div>
 
-                      {/* Schedule & Location Grid */}
-                      <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                        <div className="flex items-center gap-2 rounded-2xl bg-muted/40 px-3 py-2 text-foreground font-semibold">
-                          <HiOutlineCalendarDays className="h-4 w-4 text-primary shrink-0" />
-                          <span className="truncate">{sh.date}</span>
-                        </div>
-
-                        <div className="flex items-center gap-2 rounded-2xl bg-muted/40 px-3 py-2 text-foreground font-semibold">
-                          <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
-                          <span className="truncate">{sh.time} ({sh.hours}h)</span>
-                        </div>
-
-                        <div className="flex items-center gap-2 rounded-2xl bg-muted/40 px-3 py-2 text-foreground font-semibold">
-                          <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0" />
-                          <span className="truncate">{sh.city}</span>
-                        </div>
-
-                        <div className="flex items-center gap-2 rounded-2xl bg-muted/40 px-3 py-2 text-foreground font-semibold">
-                          <HiOutlineBuildingOffice2 className="h-4 w-4 text-primary shrink-0" />
-                          <span className="truncate">{sh.dept}</span>
-                        </div>
-                      </div>
-
-                      {/* Perks chips */}
-                      {sh.perks && sh.perks.length > 0 && (
-                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                          {sh.perks.map((p) => (
-                            <span
-                              key={p}
-                              className="rounded-lg bg-muted/50 px-2 py-0.5 text-[11px] font-semibold text-muted-foreground"
-                            >
-                              {p}
+                      {/* Bottom Earnings & Action Dock */}
+                      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-primary-soft/60 to-primary-soft/30 p-3.5 border border-primary/10">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                            Guaranteed Shift Pay • ₹{rateNumber.toLocaleString("en-IN")}/hr
+                          </p>
+                          <div className="flex items-baseline gap-1.5 mt-0.5">
+                            <span className="text-xl font-black text-primary">
+                              ₹{totalPay.toLocaleString("en-IN")}
                             </span>
-                          ))}
-                          {sh.surge && (
-                            <span className="rounded-lg bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-                              {sh.surge}
+                            <span className="text-xs font-semibold text-muted-foreground">
+                              (₹{rateNumber.toLocaleString("en-IN")}/hr × {hoursNumber} hrs)
                             </span>
-                          )}
+                          </div>
                         </div>
-                      )}
-                    </div>
 
-                    {/* Bottom Earnings & Action Dock */}
-                    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-primary-soft/60 to-primary-soft/30 p-3.5 border border-primary/10">
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
-                          Guaranteed Shift Pay
-                        </p>
-                        <div className="flex items-baseline gap-1.5 mt-0.5">
-                          <span className="text-xl font-black text-primary">
-                            ₹{totalPay.toLocaleString("en-IN")}
-                          </span>
-                          <span className="text-xs font-semibold text-muted-foreground">
-                            (₹{sh.rate}/hr × {sh.hours} hrs)
-                          </span>
-                        </div>
-                      </div>
-
-                      {applied ? (
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 text-white px-3.5 py-2 text-xs font-bold shadow-2xs">
-                            <HiCheckCircle className="h-4 w-4" />
-                            Requested
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleWithdraw(sh.id, sh.title)}
-                            className="text-xs font-semibold text-muted-foreground hover:text-destructive underline cursor-pointer"
+                        {applied ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            {(() => {
+                              const claim = activeClaim;
+                              if (claim?.status === "CONFIRMED") {
+                                return (
+                                  <div className="flex items-center gap-2">
+                                    <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 text-white px-3 py-1.5 text-xs font-bold shadow-2xs">
+                                      <HiCheckBadge className="h-4 w-4" />
+                                      Confirmed
+                                    </span>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleCheckIn(claim.id, sh.title)}
+                                      className="rounded-xl px-3 h-8 font-bold text-xs bg-primary hover:bg-primary-hover text-white shadow-2xs cursor-pointer"
+                                    >
+                                      Check In
+                                    </Button>
+                                  </div>
+                                );
+                              }
+                              if (claim?.status === "CHECKED_IN") {
+                                return (
+                                  <div className="flex items-center gap-2">
+                                    <span className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 text-white px-3 py-1.5 text-xs font-bold shadow-2xs">
+                                      <HiOutlineClock className="h-4 w-4" />
+                                      On Floor
+                                    </span>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleCompleteShift(claim.id, sh.title)}
+                                      className="rounded-xl px-3 h-8 font-bold text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs cursor-pointer"
+                                    >
+                                      Sign Off Duty
+                                    </Button>
+                                  </div>
+                                );
+                              }
+                              if (claim?.status === "COMPLETED") {
+                                return (
+                                  <div className="flex items-center gap-2">
+                                    <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600/90 text-white px-3 py-1.5 text-xs font-bold shadow-2xs">
+                                      <HiCheckBadge className="h-4 w-4" />
+                                      {claim.payoutStatus === "DISBURSED" ? "Paid" : "Completed"}
+                                    </span>
+                                    <Button asChild size="sm" variant="outline" className="rounded-xl px-2.5 h-8 font-bold text-xs">
+                                      <Link to="/earnings">Earnings</Link>
+                                    </Button>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold bg-emerald-600/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                                    <HiCheck className="h-4 w-4 stroke-[3]" />
+                                    <span>Applied</span>
+                                  </span>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={withdrawingId === sh.id}
+                                    onClick={() => handleWithdraw(sh.id, sh.title)}
+                                    className="rounded-xl px-2.5 h-8 text-xs font-bold text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer transition-colors"
+                                  >
+                                    {withdrawingId === sh.id ? "Withdrawing..." : "Withdraw"}
+                                  </Button>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            disabled={applyingId === sh.id || applied}
+                            onClick={() => handleApply(sh.id, sh.title, sh.org)}
+                            className="rounded-xl px-5 font-bold shadow-md h-10 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
                           >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <Button
-                          size="sm"
-                          onClick={() => handleApply(sh.id, sh.title, sh.org)}
-                          className="rounded-xl px-5 font-bold shadow-md h-10"
-                        >
-                          Pick up shift
-                        </Button>
-                      )}
+                            {applyingId === sh.id ? (
+                              <span className="flex items-center gap-2">
+                                <span className="h-3.5 w-3.5 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+                                <span>Applying...</span>
+                              </span>
+                            ) : (
+                              "Pick up shift"
+                            )}
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Empty Search Result State */}
             {!filteredShifts.length && (
               <div className="surface p-12 text-center rounded-3xl border border-border/80">
-                <HiOutlineMagnifyingGlass className="mx-auto h-8 w-8 text-muted-foreground" />
+                <SearchEmptyGraphic className="w-56 h-44 sm:w-64 sm:h-52 mx-auto mb-2" />
                 <p className="mt-3 text-sm font-bold text-foreground">No clinical shifts match your criteria</p>
                 <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
                   Try adjusting your search terms, city filter, or timing to discover more available hospital shifts.
@@ -566,8 +883,6 @@ function Shifts() {
               </div>
             </div>
           </div>
-        </>
-      )}
-    </AppShell>
+        </AppShell>
   );
 }

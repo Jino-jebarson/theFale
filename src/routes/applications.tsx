@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   HiCheck,
@@ -19,12 +19,15 @@ import {
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
-import { OrgMark } from "@/components/fale/JobCard";
-import { WithdrawModal } from "@/components/fale/WithdrawModal";
 import { Button } from "@/components/ui/button";
+import { OrgMark } from "@/components/fale/JobCard";
+import { SearchEmptyGraphic } from "@/components/fale/SearchEmptyGraphic";
+import { WithdrawModal } from "@/components/fale/WithdrawModal";
 import { jobs } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import { getMyApplications, withdrawApplication, type UiApplicationItem } from "@/lib/adapters/applicationAdapter";
 
 export const Route = createFileRoute("/applications")({
   head: () => ({
@@ -97,6 +100,25 @@ function Applications() {
   const [tab, setTab] = useState<"Active" | "Closed">("Active");
   const [q, setQ] = useState("");
   const [withdrawingApp, setWithdrawingApp] = useState<{ jobId: string; title: string; org: string } | null>(null);
+  const [apiApps, setApiApps] = useState<UiApplicationItem[] | null>(null);
+  const [loading, setLoading] = useState(isApiEnabled);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    getMyApplications()
+      .then((apps) => {
+        setApiApps(apps);
+        setLoadError(null);
+      })
+      .catch((err) => {
+        console.error("Failed to load applications:", err);
+        setLoadError("Unable to load applications.");
+        setApiApps([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   const candidateLevel =
     s.candidateLevel ||
@@ -117,7 +139,12 @@ function Applications() {
     ];
   }, [s.applied]);
 
-  const effectiveApplied = isStudent ? studentInternshipApps : s.applied;
+  const effectiveApplied = useMemo(() => {
+    if (isApiEnabled) {
+      return apiApps || [];
+    }
+    return isStudent ? studentInternshipApps : s.applied;
+  }, [isApiEnabled, apiApps, isStudent, studentInternshipApps, s.applied]);
 
   const activeApps = useMemo(
     () => effectiveApplied.filter((a) => !["Not selected", "Withdrawn"].includes(a.status)),
@@ -135,12 +162,15 @@ function Applications() {
     const query = q.toLowerCase();
     return baseList.filter((a) => {
       const j = jobs.find((x) => x.id === a.jobId);
-      if (!j) return false;
+      const title = (a as any).title || j?.title || "";
+      const org = (a as any).org || j?.org || "";
+      const city = (a as any).city || j?.city || "";
+      const dept = (a as any).dept || j?.dept || "";
       return (
-        j.title.toLowerCase().includes(query) ||
-        j.org.toLowerCase().includes(query) ||
-        j.city.toLowerCase().includes(query) ||
-        (j.dept && j.dept.toLowerCase().includes(query))
+        title.toLowerCase().includes(query) ||
+        org.toLowerCase().includes(query) ||
+        city.toLowerCase().includes(query) ||
+        dept.toLowerCase().includes(query)
       );
     });
   }, [tab, activeApps, closedApps, q]);
@@ -148,6 +178,18 @@ function Applications() {
   const handleWithdrawConfirm = (reason: string, notes: string) => {
     if (!withdrawingApp) return;
     const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+    if (isApiEnabled) {
+      withdrawApplication(withdrawingApp.jobId, reason).catch((err) => {
+        console.error("Failed to withdraw application:", err);
+      });
+      setApiApps((prev) =>
+        prev
+          ? prev.map((item) =>
+              item.jobId === withdrawingApp.jobId ? { ...item, status: "Withdrawn", date: now } : item
+            )
+          : null
+      );
+    }
     setState((x) => ({
       applied: x.applied.map((item) =>
         item.jobId === withdrawingApp.jobId ? { ...item, status: "Withdrawn", date: now } : item
@@ -242,10 +284,35 @@ function Applications() {
       </div>
 
       {/* ================= APPLICATIONS LIST ================= */}
-      <div className="space-y-4">
+      {loading ? (
+        <div className="surface p-8 text-center text-muted-foreground">
+          <HiOutlineClock className="mx-auto h-8 w-8 text-primary animate-spin" />
+          <p className="mt-3 text-sm font-semibold">Loading applications...</p>
+        </div>
+      ) : loadError ? (
+        <div className="surface p-8 text-center text-muted-foreground">
+          <p className="text-sm font-semibold text-rose-500">{loadError}</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
         {list.map((a) => {
-          const j = jobs.find((x) => x.id === a.jobId);
-          if (!j) return null;
+          const j = jobs.find((x) => x.id === a.jobId) || {
+            id: a.jobId,
+            title: (a as any).title || "Healthcare Role",
+            org: (a as any).org || "Hospital Partner",
+            city: (a as any).city || "Location",
+            salary: "Competitive",
+            type: "Full-time",
+            shift: "Day",
+            posted: "Recently",
+            tags: [],
+            match: 95,
+            urgent: false,
+            dept: (a as any).dept || "Clinical",
+            qualification: "Degree / Diploma",
+            accredited: true,
+            kind: "job",
+          };
           const idx = stages.indexOf(a.status as (typeof stages)[number]);
           const isWithdrawn = a.status === "Withdrawn";
           const details = getStatusDetails(a.status, a.date, j.org, isStudent);
@@ -474,7 +541,7 @@ function Applications() {
         {/* Empty State */}
         {!list.length && (
           <div className="surface p-12 text-center rounded-3xl border border-border/80">
-            <HiOutlineDocumentCheck className="mx-auto h-9 w-9 text-muted-foreground" />
+            <SearchEmptyGraphic className="w-56 h-44 sm:w-64 sm:h-52 mx-auto mb-2" />
             <h2 className="mt-3 text-sm sm:text-base font-bold text-foreground">
               {tab === "Active" ? "No active applications found" : "No closed applications"}
             </h2>
@@ -495,6 +562,7 @@ function Applications() {
           </div>
         )}
       </div>
+      )}
 
       {/* Confirmation Modal */}
       {withdrawingApp && (

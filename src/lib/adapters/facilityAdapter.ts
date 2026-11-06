@@ -1,0 +1,286 @@
+// src/lib/adapters/facilityAdapter.ts
+// Facility profile, job postings, applicants pipeline, wallet, and candidate sourcing credits
+
+import { apiFetch, paiseToRupees, rupeesToPaise } from "@/lib/api";
+import { type JobPostingDto } from "@/lib/adapters/jobAdapter";
+
+export interface FacilityProfileDto {
+  id: string;
+  userId?: string;
+  hospitalName: string;
+  facilityType?: string;
+  size?: string;
+  about?: string;
+  website?: string;
+  city: string;
+  state?: string;
+  pincode?: string;
+  addressLine?: string;
+  beds?: number;
+  icuBeds?: number;
+  licenseNumber?: string;
+  gst?: string;
+  nabhNumber?: string;
+  accreditationLevel?: string;
+  contactPerson?: string;
+  designation?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  departments?: string[];
+  hiringNeeds?: string[];
+  logoUrl?: string;
+  facilityPhotos?: string[];
+  kycStatus: string;
+  verifiedAt?: string;
+}
+
+export interface FacilityWalletDto {
+  id: string;
+  facilityId: string;
+  availableBalancePaise: number;
+  lockedEscrowBalancePaise: number;
+  totalDisbursedPaise: number;
+  candidateCredits: number;
+  updatedAt?: string;
+}
+
+export interface WalletTransactionDto {
+  id: string;
+  walletId?: string;
+  type: string;
+  amountPaise: number;
+  balanceAfterPaise?: number;
+  status: string;
+  refNumber?: string;
+  utr?: string;
+  title: string;
+  subtitle?: string;
+  invoiceId?: string;
+  createdAt: string;
+}
+
+export interface HospitalBankAccountDto {
+  id: string;
+  facilityId?: string;
+  accountHolderName: string;
+  bankName: string;
+  accountNumberMasked?: string;
+  accountNumberLast4?: string;
+  ifsc?: string;
+  ifscCode?: string;
+  branch?: string;
+  accountType?: string;
+  status?: string;
+  verificationStatus?: string;
+  verifiedAt?: string;
+}
+
+export interface CandidateResdexDto {
+  id: string;
+  candidateId?: string;
+  name: string;
+  profession: string;
+  specialty: string;
+  qualification: string;
+  council: string;
+  regNumber?: string;
+  regNumberMasked?: string;
+  city: string;
+  experienceYears: string;
+  kycStatus?: string;
+  verified: boolean;
+  matchScore?: number;
+  phone?: string;
+  email?: string;
+  phoneMasked?: string;
+  emailMasked?: string;
+  isUnlocked: boolean;
+  isContactUnlocked?: boolean;
+  unlockedPhone?: string;
+  unlockedEmail?: string;
+  resumeUrl?: string;
+  resumeFileName?: string;
+  openToWork?: boolean;
+}
+
+export interface PostJobPayload {
+  title: string;
+  department: string;
+  employmentType: string;
+  isInternship: boolean;
+  city: string;
+  openings: number;
+  salaryMinPaise: number;
+  salaryMaxPaise: number;
+  experienceRequired: string;
+  qualificationRequired: string;
+  description: string;
+}
+
+export interface FacilityOnboardPayload {
+  hospitalName: string;
+  facilityType: string;
+  size?: string;
+  about?: string;
+  website?: string;
+  city: string;
+  state: string;
+  pincode?: string;
+  addressLine?: string;
+  beds: number;
+  icuBeds?: number;
+  licenseNumber: string;
+  gst?: string;
+  nabhNumber?: string;
+  accreditationLevel?: string;
+  contactPerson: string;
+  designation?: string;
+  contactPhone: string;
+  contactEmail: string;
+  departments?: string[];
+  hiringNeeds?: string[];
+  logoUrl?: string;
+  facilityPhotos?: string[];
+}
+
+export async function onboardFacility(payload: FacilityOnboardPayload): Promise<FacilityProfileDto> {
+  return apiFetch<FacilityProfileDto>("/facility/onboard", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getFacilityProfile(): Promise<FacilityProfileDto> {
+  return apiFetch<FacilityProfileDto>("/facility/profile");
+}
+
+export async function updateFacilityProfile(data: Partial<FacilityProfileDto>): Promise<FacilityProfileDto> {
+  return apiFetch<FacilityProfileDto>("/facility/profile", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getFacilityJobs(): Promise<JobPostingDto[]> {
+  return apiFetch<JobPostingDto[]>("/facility/jobs");
+}
+
+export async function postFacilityJob(payload: PostJobPayload): Promise<JobPostingDto> {
+  return apiFetch<JobPostingDto>("/facility/jobs", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": `job-post-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getFacilityApplicants(jobId?: string, status?: string): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (jobId) params.append("jobId", jobId);
+  if (status) params.append("status", status);
+  const q = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<any[]>(`/employer/applications${q}`);
+}
+
+export async function updateApplicantStatus(
+  applicationId: string,
+  status: string,
+  notes?: string,
+  interviewScheduledAt?: string,
+  interviewLocationOrLink?: string
+): Promise<any> {
+  return apiFetch(`/employer/applications/${applicationId}/status`, {
+    method: "PUT",
+    body: JSON.stringify({
+      status,
+      notes,
+      interviewScheduledAt,
+      interviewLocationOrLink,
+    }),
+  });
+}
+
+export async function searchTalentCandidates(
+  query?: string,
+  specialty?: string,
+  city?: string
+): Promise<CandidateResdexDto[]> {
+  const params = new URLSearchParams();
+  if (query) params.append("query", query);
+  if (specialty) params.append("specialty", specialty);
+  if (city) params.append("city", city);
+  const q = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<CandidateResdexDto[]>(`/employer/candidates${q}`);
+}
+
+export async function unlockCandidateContact(candidateId: string): Promise<CandidateResdexDto> {
+  return apiFetch<CandidateResdexDto>(`/employer/candidates/${candidateId}/unlock`, {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": `unlock-${candidateId}-${Date.now()}`,
+    },
+  });
+}
+
+export async function getFacilityWallet(): Promise<FacilityWalletDto> {
+  return apiFetch<FacilityWalletDto>("/employer/wallet");
+}
+
+export async function getWalletTransactions(): Promise<WalletTransactionDto[]> {
+  return apiFetch<WalletTransactionDto[]>("/employer/wallet/transactions");
+}
+
+export async function topUpWallet(amountPaise: number, utr: string, paymentMethod?: string): Promise<FacilityWalletDto> {
+  return apiFetch<FacilityWalletDto>("/employer/wallet/topup", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": `topup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    },
+    body: JSON.stringify({
+      amountPaise,
+      utr,
+      paymentMethod: paymentMethod || "NEFT_RTGS",
+    }),
+  });
+}
+
+export async function buyCandidateCredits(packageId: string, credits: number, pricePaise: number): Promise<FacilityWalletDto> {
+  return apiFetch<FacilityWalletDto>("/employer/wallet/buy-credits", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": `credits-buy-${Date.now()}-${packageId}`,
+    },
+    body: JSON.stringify({
+      packageId,
+      credits,
+      pricePaise,
+    }),
+  });
+}
+
+export async function getHospitalBankAccount(): Promise<HospitalBankAccountDto> {
+  return apiFetch<HospitalBankAccountDto>("/facility/bank-account");
+}
+
+export async function updateHospitalBankAccount(data: {
+  accountHolderName: string;
+  bankName: string;
+  accountNumber: string;
+  ifscCode?: string;
+  ifsc?: string;
+  branch?: string;
+  accountType?: string;
+}): Promise<HospitalBankAccountDto> {
+  return apiFetch<HospitalBankAccountDto>("/facility/bank-account", {
+    method: "PUT",
+    body: JSON.stringify({
+      accountHolderName: data.accountHolderName,
+      bankName: data.bankName,
+      accountNumber: data.accountNumber,
+      ifsc: (data.ifsc || data.ifscCode || "").trim().toUpperCase(),
+      branch: data.branch || "Main Corporate Branch",
+      accountType: data.accountType || "Current",
+    }),
+  });
+}

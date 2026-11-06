@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { isApiEnabled } from "./api";
 import {
   type HuddlePost,
   type HuddleQuestion,
@@ -9,6 +10,17 @@ import {
 } from "./data";
 
 export type Portal = "candidate" | "facility" | "admin";
+
+export interface CandidateKYCDocument {
+  id?: string;
+  documentType: string;
+  originalFileName: string;
+  fileUrl: string;
+  fileSizeBytes?: number;
+  mimeType?: string;
+  verified?: boolean;
+  createdAt?: string;
+}
 
 export interface CandidateKYCItem {
   id: string;
@@ -25,27 +37,81 @@ export interface CandidateKYCItem {
   submittedDate: string;
   notes?: string;
   experience: string;
+  gender?: string;
+  dob?: string;
+  city?: string;
+  pincode?: string;
+  addressLine?: string;
+  candidateLevel?: string;
+  isStudent?: boolean;
+  course?: string;
+  college?: string;
+  studyYear?: string;
+  universityRegNo?: string;
+  expectedGraduationYear?: number;
+  specialty?: string;
+  subSpecialties?: string[];
+  councilState?: string;
+  regYear?: string;
+  bio?: string;
+  skills?: string[];
+  languages?: string[];
+  preferredCities?: string[];
+  openToWork?: boolean;
+  relocate?: boolean;
+  noticePeriod?: string;
+  employmentType?: string;
+  availability?: string;
+  currentSalary?: string;
+  expectedSalaryMinPaise?: number;
+  expectedSalaryMaxPaise?: number;
+  verifiedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  userId?: string;
+  documents?: CandidateKYCDocument[];
+  avatar?: string;
 }
 
 export interface FacilityKYCItem {
   id: string;
+  userId?: string;
   name: string;
   type: string;
+  size?: string;
+  about?: string;
+  website?: string;
   city: string;
   state: string;
-  licenseNumber: string;
-  nabhNumber: string;
+  pincode?: string;
+  addressLine?: string;
   beds: number;
+  icuBeds?: number;
+  licenseNumber: string;
+  gst?: string;
+  nabhNumber: string;
+  accreditation: string;
+  accreditationLevel?: string;
   contactPerson: string;
+  designation?: string;
   contactPhone: string;
+  contactEmail?: string;
+  departments?: string[];
+  hiringNeeds?: string[];
+  logoUrl?: string;
+  facilityPhotos?: string[];
   docName: string;
   status: "pending" | "verified" | "rejected";
   submittedDate: string;
-  accreditation: string;
+  notes?: string;
+  verifiedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface AdminJobApproval {
   id: string;
+  facilityId?: string;
   title: string;
   org: string;
   type: "job" | "shift";
@@ -58,16 +124,40 @@ export interface AdminJobApproval {
   openings: number;
   postedBy: string;
   urgent?: boolean;
+  description?: string;
+  experienceRequired?: string;
+  qualificationRequired?: string;
+  employmentType?: string;
+  internship?: boolean;
+  notes?: string;
+  salaryMin?: number;
+  salaryMax?: number;
+  hours?: number;
+  startAt?: string;
+  endAt?: string;
+  ratePerHourPaise?: number;
+  surgeRatePerHourPaise?: number;
+  surgeLabel?: string;
+  totalPayPaise?: number;
+  slotsClaimed?: number;
+  dutyNotes?: string;
+  rawShift?: any;
 }
 
 export interface AdminApplication {
   id: string;
+  candidateId?: string;
   candidateName: string;
   candidateRole: string;
   candidateCity: string;
+  candidateState?: string;
+  candidateQualification?: string;
+  candidateCouncil?: string;
+  candidateBio?: string;
   jobId: string;
   jobTitle: string;
   hospitalName: string;
+  department?: string;
   matchScore: number;
   councilVerified: boolean;
   regNumber: string;
@@ -77,6 +167,26 @@ export interface AdminApplication {
   summary: string;
   phone: string;
   email: string;
+  expectedSalary?: string;
+  noticePeriod?: string;
+  documents?: Array<{
+    id: string;
+    documentType: string;
+    originalFileName: string;
+    fileUrl: string;
+    fileSizeBytes: number;
+    mimeType: string;
+    verified: boolean;
+    createdAt?: string;
+  }>;
+  type?: "job" | "shift";
+  shiftClaimId?: string;
+  hours?: number;
+  startAt?: string;
+  endAt?: string;
+  grossAmountPaise?: number;
+  netAmountPaise?: number;
+  payoutStatus?: string;
 }
 
 export interface WalletTransaction {
@@ -182,14 +292,14 @@ export interface AppState {
 }
 
 const KEY = "fale-pro-v2";
-const initial: AppState = {
+const initialMockState: AppState = {
   portal: "candidate",
   contact: "",
   signedIn: false,
   onboarded: false,
-  huddlePosts: initialHuddlePosts,
-  huddleQuestions: initialHuddleQuestions,
-  huddleSessions: initialHuddleSessions,
+  huddlePosts: [],
+  huddleQuestions: [],
+  huddleSessions: [],
   profile: {},
   docs: {},
   saved: [],
@@ -632,35 +742,83 @@ const initial: AppState = {
   ],
 };
 
+const initialEmptyState: AppState = {
+  portal: "candidate",
+  contact: "",
+  signedIn: false,
+  onboarded: false,
+  huddlePosts: [],
+  huddleQuestions: [],
+  huddleSessions: [],
+  profile: {},
+  docs: {},
+  saved: [],
+  applied: [],
+  shiftApps: [],
+  courses: [],
+  postedJobs: [],
+  postedShifts: [],
+  candidateCredits: 0,
+  unlockedCandidates: [],
+  candidateKYC: [],
+  facilityKYC: [],
+  jobApprovals: [],
+  adminApplications: [],
+  escrowBalance: 0,
+  lockedEscrow: 0,
+  walletTransactions: [],
+  hospitalBankAccount: undefined,
+  candidatePayoutMethod: undefined,
+  candidatePayouts: [],
+};
+
+const initial: AppState = isApiEnabled ? initialEmptyState : initialMockState;
+
+if (typeof window !== "undefined" && isApiEnabled) {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {}
+}
+
 let state: AppState = initial;
 let loaded = false;
 const listeners = new Set<() => void>();
 
+function sanitizeStateForStorage(s: AppState): Partial<AppState> {
+  if (!isApiEnabled) return s;
+  const { profile, docs, contact, hospitalBankAccount, candidatePayoutMethod, ...safe } = s;
+  return safe;
+}
+
 function load() {
   if (loaded || typeof window === "undefined") return;
   loaded = true;
+  if (isApiEnabled) {
+    try {
+      localStorage.removeItem(KEY);
+    } catch {}
+    state = { ...initialEmptyState };
+    return;
+  }
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
+      if (isApiEnabled) {
+        // Enforce rule: remove tokens & personal data from localStorage
+        delete parsed.profile;
+        delete parsed.docs;
+        delete parsed.contact;
+        delete parsed.hospitalBankAccount;
+        delete parsed.candidatePayoutMethod;
+        localStorage.setItem(KEY, JSON.stringify(parsed));
+      }
       state = {
         ...initial,
         ...parsed,
-        huddlePosts:
-          Array.isArray(parsed.huddlePosts) && parsed.huddlePosts.length > 0
-            ? parsed.huddlePosts.map((p: any, idx: number) => ({
-                ...p,
-                at: p.at && String(p.at).trim() ? p.at : idx % 2 === 0 ? "2 days ago" : "1 week ago",
-                replies: Array.isArray(p.replies)
-                  ? p.replies.map((r: any, rIdx: number) => ({
-                      ...r,
-                      at: r.at && String(r.at).trim() ? r.at : rIdx % 2 === 0 ? "1 day ago" : "2 days ago",
-                    }))
-                  : [],
-              }))
-            : initial.huddlePosts,
-        huddleQuestions: Array.isArray(parsed.huddleQuestions) && parsed.huddleQuestions.length > 0 ? parsed.huddleQuestions : initial.huddleQuestions,
-        huddleSessions: Array.isArray(parsed.huddleSessions) && parsed.huddleSessions.length > 0 ? parsed.huddleSessions : initial.huddleSessions,
+        huddlePosts: Array.isArray(parsed.huddlePosts) ? parsed.huddlePosts.filter((p: any) => p && !String(p.id).startsWith("h")) : [],
+        huddleQuestions: Array.isArray(parsed.huddleQuestions) ? parsed.huddleQuestions.filter((q: any) => q && !String(q.id).startsWith("q")) : [],
+        huddleSessions: Array.isArray(parsed.huddleSessions) ? parsed.huddleSessions.filter((s: any) => s && !String(s.id).startsWith("sess")) : [],
       };
     }
   } catch {
@@ -668,12 +826,20 @@ function load() {
   }
 }
 
+if (typeof window !== "undefined") {
+  window.addEventListener("fale:auth-expired", () => {
+    setState({ signedIn: false });
+  });
+}
+
 export function setState(patch: Partial<AppState> | ((s: AppState) => Partial<AppState>)) {
   load();
   const p = typeof patch === "function" ? patch(state) : patch;
   state = { ...state, ...p };
   try {
-    localStorage.setItem(KEY, JSON.stringify(state));
+    if (isApiEnabled) { localStorage.removeItem(KEY); } else {
+      localStorage.setItem(KEY, JSON.stringify(state));
+    }
   } catch {
     /* ignore */
   }
@@ -681,7 +847,7 @@ export function setState(patch: Partial<AppState> | ((s: AppState) => Partial<Ap
 }
 
 export function resetState() {
-  state = initial;
+  state = isApiEnabled ? initialEmptyState : initialMockState;
   try {
     localStorage.removeItem(KEY);
   } catch {
@@ -733,19 +899,20 @@ export function addHuddlePost(postData: {
   image?: string | undefined;
   isHospital?: boolean | undefined;
 }) {
+  const isAnonymous = Boolean(postData.anon && !postData.isHospital);
   const newPost: HuddlePost = {
     id: `hp-${Date.now()}`,
     type: postData.type,
     field: postData.field,
     authorId: "current-user",
-    authorName: postData.authorName,
-    authorShort: postData.authorName
+    authorName: isAnonymous ? "Anonymous Clinician" : postData.authorName,
+    authorShort: isAnonymous ? "Anonymous" : postData.authorName
       .split(" ")
       .map((w, i) => (i === 0 ? w : w[0] + "."))
       .join(" "),
-    authorRole: postData.authorRole,
+    authorRole: isAnonymous ? "Verified Clinician" : postData.authorRole,
     authorLevel: postData.authorLevel || "professional",
-    anon: postData.anon,
+    anon: isAnonymous,
     text: postData.text,
     helpfulCount: 0,
     userHelpful: false,
@@ -807,6 +974,37 @@ export function reportHuddlePost(postId: string, reason?: string) {
           }
         : p
     ),
+  }));
+}
+
+export function updateHuddlePost(
+  postId: string,
+  updatedData: {
+    type?: HuddlePost["type"];
+    field?: HuddlePost["field"];
+    text?: string;
+    image?: string | null;
+    anon?: boolean;
+  }
+) {
+  setState((prev) => ({
+    huddlePosts: (prev.huddlePosts || []).map((p) => {
+      if (p.id !== postId) return p;
+      return {
+        ...p,
+        ...(updatedData.type ? { type: updatedData.type } : {}),
+        ...(updatedData.field ? { field: updatedData.field } : {}),
+        ...(updatedData.text != null ? { text: updatedData.text } : {}),
+        ...(updatedData.image !== undefined ? { image: updatedData.image || undefined } : {}),
+        ...(updatedData.anon !== undefined ? { anon: updatedData.anon } : {}),
+      };
+    }),
+  }));
+}
+
+export function deleteHuddleQuestion(questionId: string) {
+  setState((prev) => ({
+    huddleQuestions: (prev.huddleQuestions || []).filter((q) => q.id !== questionId),
   }));
 }
 

@@ -17,6 +17,7 @@ import {
 } from "react-icons/hi2";
 import { AppShell } from "@/components/fale/AppShell";
 import { JobCard } from "@/components/fale/JobCard";
+import { SearchEmptyGraphic } from "@/components/fale/SearchEmptyGraphic";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -24,9 +25,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { jobs } from "@/lib/data";
+import { jobs, type Job } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import { getJobs } from "@/lib/adapters/jobAdapter";
 
 export const Route = createFileRoute("/jobs/")({
   validateSearch: (s: Record<string, unknown>): { q?: string | undefined } => ({
@@ -145,14 +148,33 @@ function Jobs() {
   const [perkF, setPerkF] = useState<string[]>([]);
   const [sort, setSort] = useState<"match" | "recent" | "salary">("match");
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
+  const [apiJobs, setApiJobs] = useState<Job[]>([]);
+  const [loading, setLoading] = useState(isApiEnabled);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    getJobs()
+      .then((data) => {
+        setApiJobs(data || []);
+        setError(null);
+      })
+      .catch((err) => {
+        console.error(err);
+        setError("Unable to load jobs right now. Please try again.");
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   const baseJobs = useMemo(() => {
-    return jobs.filter((j) => {
+    const source = isApiEnabled ? apiJobs : jobs;
+    return source.filter((j) => {
       const isIntern = j.kind === "internship" || j.type === "Internship";
       if (isStudent && !isIntern) return false;
       return true;
     });
-  }, [isStudent]);
+  }, [isStudent, isApiEnabled, apiJobs]);
 
   const list = useMemo(() => {
     const r = baseJobs.filter((j) => {
@@ -1132,13 +1154,38 @@ function Jobs() {
 
           {/* Job Cards */}
           <div className="space-y-4">
-            {list.map((j) => (
+            {loading && (
+              <div className="surface p-12 text-center rounded-3xl border border-border/80">
+                <HiOutlineArrowPath className="mx-auto h-8 w-8 text-primary animate-spin" />
+                <p className="mt-3 text-sm font-bold text-foreground">Loading verified healthcare jobs...</p>
+              </div>
+            )}
+
+            {!loading && error && (
+              <div className="surface p-12 text-center rounded-3xl border border-destructive/40 bg-destructive/5">
+                <p className="text-sm font-bold text-destructive">{error}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setLoading(true);
+                    getJobs().then(setApiJobs).catch(console.error).finally(() => setLoading(false));
+                  }}
+                  className="mt-4 rounded-xl font-bold"
+                >
+                  <HiOutlineArrowPath className="h-3.5 w-3.5 mr-1.5" />
+                  Retry
+                </Button>
+              </div>
+            )}
+
+            {!loading && !error && list.map((j) => (
               <JobCard key={j.id} job={j} />
             ))}
 
-            {!list.length && (
+            {!loading && !error && !list.length && (
               <div className="surface p-12 text-center rounded-3xl border border-border/80">
-                <HiOutlineMagnifyingGlass className="mx-auto h-8 w-8 text-muted-foreground" />
+                <SearchEmptyGraphic className="w-56 h-44 sm:w-64 sm:h-52 mx-auto mb-2" />
                 <p className="mt-3 text-sm font-bold text-foreground">No matching healthcare jobs found</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   Try adjusting your search query, city or removing some filters.

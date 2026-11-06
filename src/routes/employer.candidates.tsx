@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   HiOutlineShieldCheck,
@@ -40,6 +40,15 @@ import lottieEmptyAnimation from "@/assets/lottie-error.json";
 import { applicants, type Applicant } from "@/lib/data";
 import { useApp, setState } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled, rupeesToPaise } from "@/lib/api";
+import {
+  searchTalentCandidates,
+  unlockCandidateContact,
+  getFacilityWallet,
+  buyCandidateCredits,
+  type CandidateResdexDto,
+  type FacilityWalletDto,
+} from "@/lib/adapters/facilityAdapter";
 
 export const Route = createFileRoute("/employer/candidates")({
   head: () => ({
@@ -157,35 +166,117 @@ function CoinIcon({ className = "h-4 w-4" }: { className?: string }) {
 
 function FindCandidates() {
   const store = useApp();
-  const credits = store.candidateCredits ?? 3;
-  const unlockedIds = store.unlockedCandidates ?? [];
 
   const [search, setSearch] = useState("");
   const [selectedRole, setSelectedRole] = useState("All");
   const [selectedCity, setSelectedCity] = useState("All");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
 
+  // Dynamic API state
+  const [apiCandidates, setApiCandidates] = useState<CandidateResdexDto[]>([]);
+  const [apiWallet, setApiWallet] = useState<FacilityWalletDto | null>(null);
+  const [loading, setLoading] = useState(isApiEnabled);
+
   // Dialogs state
-  const [candidateToUnlock, setCandidateToUnlock] = useState<Applicant | null>(null);
+  const [candidateToUnlock, setCandidateToUnlock] = useState<any | null>(null);
   const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState(creditPackages[1]);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [viewResumeApplicant, setViewResumeApplicant] = useState<Applicant | null>(null);
+  const [viewResumeApplicant, setViewResumeApplicant] = useState<any | null>(null);
+
+  const fetchCandidates = () => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    const specialtyParam = selectedRole !== "All" ? selectedRole : undefined;
+    const cityParam = selectedCity !== "All" ? selectedCity : undefined;
+    Promise.all([
+      searchTalentCandidates(search.trim() || undefined, specialtyParam, cityParam).catch(() => []),
+      getFacilityWallet().catch(() => null),
+    ])
+      .then(([candidates, wallet]) => {
+        setApiCandidates(candidates);
+        setApiWallet(wallet);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchCandidates();
+  }, [selectedRole, selectedCity, search]);
+
+  const credits = isApiEnabled
+    ? apiWallet?.candidateCredits ?? 0
+    : store.candidateCredits ?? 3;
+
+  const unlockedIds = isApiEnabled
+    ? apiCandidates.filter((c) => Boolean(c.isUnlocked || (c as any).isContactUnlocked)).map((c) => (c as any).candidateId || c.id)
+    : store.unlockedCandidates ?? [];
 
   // Available unique roles and cities for custom select
   const roles = useMemo(() => {
-    const set = new Set(applicants.map((a) => a.role));
+    const source = isApiEnabled
+      ? apiCandidates.filter((c) => c.openToWork !== false).map((c) => c.specialty || c.profession)
+      : applicants.map((a) => a.role);
+    const set = new Set(source.filter(Boolean));
     return ["All", ...Array.from(set)];
-  }, []);
+  }, [isApiEnabled, apiCandidates]);
 
   const cities = useMemo(() => {
-    const set = new Set(applicants.map((a) => a.city));
+    const source = isApiEnabled
+      ? apiCandidates.filter((c) => c.openToWork !== false).map((c) => c.city)
+      : applicants.map((a) => a.city);
+    const set = new Set(source.filter(Boolean));
     return ["All", ...Array.from(set)];
-  }, []);
+  }, [isApiEnabled, apiCandidates]);
 
   // Filtered candidate list
   const filteredCandidates = useMemo(() => {
+    if (isApiEnabled) {
+      return apiCandidates
+        .filter((c) => c.openToWork !== false)
+        .map((c) => {
+        const candidateId = (c as any).candidateId || c.id;
+        const isUnlocked = Boolean(c.isUnlocked || (c as any).isContactUnlocked || unlockedIds.includes(candidateId));
+        const derivedSkills = (() => {
+          const r = (c.profession || c.specialty || "").toLowerCase();
+          if (r.includes("dialysis")) return ["Dialysis Protocols", "Hemodialysis Machine Ops", "Patient Monitoring"];
+          if (r.includes("nurse") || r.includes("scrub") || r.includes("ot")) return ["Surgical Scrubbing", "Sterilization Protocols", "Patient Safety"];
+          if (r.includes("pharmacist")) return ["Clinical Dispensing", "Pharmacovigilance", "Inventory Management"];
+          return ["Clinical Protocols", "Patient Safety", "Emergency Care"];
+        })();
+
+        return {
+          id: candidateId,
+          name: c.name,
+          role: c.specialty || c.profession || "Medical Practitioner",
+          exp: c.experienceYears || "Council Registered",
+          city: c.city || "Chennai",
+          currentOrg: isUnlocked ? "Accredited Healthcare Partner" : "•••••••••••• Hospital",
+          verified: c.verified !== false,
+          match: c.matchScore || 94,
+          matchScore: c.matchScore || 94,
+          for: "Direct Hiring",
+          status: "Active",
+          qualification: c.qualification || "Medical Degree",
+          regNumber: c.regNumber || c.regNumberMasked || "Council Verified",
+          skills: derivedSkills,
+          phone: c.phone || (isUnlocked && c.unlockedPhone ? c.unlockedPhone : c.phoneMasked || "+91 ••••• •••••"),
+          email: c.email || (isUnlocked && c.unlockedEmail ? c.unlockedEmail : c.emailMasked || "•••••@fale.care"),
+          bio: `${c.profession || "Clinician"} registered with ${c.council || "State Medical Council"}. Proven track record in patient care and clinical protocols adherence.`,
+          isUnlocked: isUnlocked,
+          resumeUrl: c.resumeUrl || undefined,
+          resumeFileName: c.resumeFileName || undefined,
+        };
+      });
+    }
+
     return applicants.filter((a) => {
+      if ((a as any).openToWork === false) return false;
+      if (store.profile?.openToWork === false && (a.name.toLowerCase() === (store.profile.fullName || store.candidate?.name || "").toLowerCase())) {
+        return false;
+      }
       if (selectedRole !== "All" && a.role !== selectedRole) return false;
       if (selectedCity !== "All" && a.city !== selectedCity) return false;
       if (verifiedOnly && !a.verified) return false;
@@ -202,9 +293,9 @@ function FindCandidates() {
       }
       return true;
     });
-  }, [selectedRole, selectedCity, verifiedOnly, search]);
+  }, [isApiEnabled, apiCandidates, selectedRole, selectedCity, verifiedOnly, search]);
 
-  const handleUnlockClick = (app: Applicant) => {
+  const handleUnlockClick = (app: any) => {
     if (credits < 1) {
       toast.error("No credits available", {
         description: "Choose a credit package to unlock candidate contact details.",
@@ -215,11 +306,27 @@ function FindCandidates() {
     setCandidateToUnlock(app);
   };
 
-  const handleConfirmUnlock = () => {
+  const handleConfirmUnlock = async () => {
     if (!candidateToUnlock) return;
     if (credits < 1) {
       setCandidateToUnlock(null);
       setBuyCreditsOpen(true);
+      return;
+    }
+
+    if (isApiEnabled) {
+      try {
+        const unlocked = await unlockCandidateContact(candidateToUnlock.id);
+        setCandidateToUnlock(null);
+        toast.success(`Contact details unlocked for ${candidateToUnlock.name}`, {
+          description: `Phone: ${unlocked.phone || unlocked.unlockedPhone} · Email: ${unlocked.email || unlocked.unlockedEmail}`,
+        });
+        fetchCandidates();
+      } catch (err: any) {
+        toast.error("Unlock failed", {
+          description: err?.message || "Could not unlock contact. Check credit balance.",
+        });
+      }
       return;
     }
 
@@ -236,9 +343,31 @@ function FindCandidates() {
     setCandidateToUnlock(null);
   };
 
-  const handleBuyCredits = () => {
+  const handleBuyCredits = async () => {
     if (!selectedPackage) return;
     setIsProcessingPayment(true);
+
+    if (isApiEnabled) {
+      try {
+        const updatedWallet = await buyCandidateCredits(
+          selectedPackage.id,
+          selectedPackage.credits,
+          (selectedPackage as any).pricePaise || rupeesToPaise(4999)
+        );
+        setApiWallet(updatedWallet);
+        setIsProcessingPayment(false);
+        setBuyCreditsOpen(false);
+        toast.success(`${selectedPackage.credits} Credits added successfully`, {
+          description: `Your balance is now ${updatedWallet.candidateCredits} credits.`,
+        });
+      } catch (err: any) {
+        setIsProcessingPayment(false);
+        toast.error("Purchase failed", {
+          description: err?.message || "Ensure available wallet balance is sufficient for credits purchase.",
+        });
+      }
+      return;
+    }
 
     setTimeout(() => {
       setIsProcessingPayment(false);
@@ -436,7 +565,7 @@ function FindCandidates() {
 
                         {isUnlocked ? (
                           <p className="mt-0.5 text-xs text-muted-foreground font-medium truncate">
-                            {a.role} · {a.exp} experience
+                            {a.role} - {a.exp} experience
                           </p>
                         ) : (
                           <p className="mt-0.5 text-xs text-muted-foreground font-medium flex items-center gap-1.5 truncate">
@@ -451,10 +580,10 @@ function FindCandidates() {
                           <span className={cn(isUnlocked ? "font-medium text-foreground" : "font-mono select-none text-muted-foreground/70")}>
                             {displayHospital}
                           </span>
-                          <span>·</span>
+                          <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
                           <HiOutlineMapPin className="h-3.5 w-3.5 shrink-0" />
                           <span>{a.city}</span>
-                          <span>·</span>
+                          <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
                           <span>{a.exp}</span>
                         </p>
                       </div>
@@ -846,11 +975,11 @@ function FindCandidates() {
         open={!!viewResumeApplicant}
         onOpenChange={(open) => !open && setViewResumeApplicant(null)}
       >
-        <DialogContent className="sm:max-w-2xl p-0">
+        <DialogContent className="sm:max-w-4xl p-0">
           {viewResumeApplicant && (
             <div className="flex flex-col">
               {/* Header */}
-              <div className="border-b border-border bg-muted/30 p-6">
+              <div className="border-b border-border bg-muted/30 p-5 sm:p-6">
                 <DialogHeader className="text-left space-y-1">
                   <div className="flex flex-wrap items-center justify-between gap-3 pr-6">
                     <div>
@@ -870,29 +999,33 @@ function FindCandidates() {
                           {viewResumeApplicant.role}
                         </span>
                       </div>
-                      <DialogDescription className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-3">
-                        <span>{viewResumeApplicant.city}</span>
-                        <span>·</span>
+                      <DialogDescription className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+                        <span className="flex items-center gap-1">
+                          <HiOutlineMapPin className="h-3.5 w-3.5" />
+                          {viewResumeApplicant.city}
+                        </span>
+                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
                         <span>{viewResumeApplicant.exp} experience</span>
-                        <span>·</span>
-                        <span>
+                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span className="flex items-center gap-1">
+                          <HiOutlinePhone className="h-3.5 w-3.5" />
                           {unlockedIds.includes(viewResumeApplicant.id)
                             ? viewResumeApplicant.phone
                             : maskPhone()}
                         </span>
+                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span className="flex items-center gap-1">
+                          <HiOutlineEnvelope className="h-3.5 w-3.5" />
+                          {unlockedIds.includes(viewResumeApplicant.id)
+                            ? viewResumeApplicant.email
+                            : maskEmail()}
+                        </span>
                       </DialogDescription>
                     </div>
 
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        toast.success(`Resume downloaded for ${viewResumeApplicant.name}`);
-                      }}
-                      className="rounded-xl text-xs font-semibold gap-1.5 shrink-0"
-                    >
-                      <HiOutlineArrowDownTray className="h-4 w-4" /> Download PDF
-                    </Button>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary-soft text-primary px-3 py-1 text-xs font-semibold shrink-0">
+                      <HiOutlineShieldCheck className="h-4 w-4" /> Preview Only
+                    </span>
                   </div>
                 </DialogHeader>
 
@@ -911,95 +1044,49 @@ function FindCandidates() {
               </div>
 
               {/* Resume Body */}
-              <div className="p-6 space-y-5 text-sm">
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                    Professional Summary
-                  </h3>
-                  <p className="text-xs sm:text-sm text-foreground/90 leading-relaxed bg-muted/20 p-3.5 rounded-xl border border-border/60">
-                    {viewResumeApplicant.bio}
-                  </p>
-                </div>
-
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
-                    Clinical Work Experience
-                  </h3>
+              <div className="p-5 sm:p-6 space-y-4">
+                {viewResumeApplicant.resumeUrl ? (
                   <div className="space-y-3">
-                    {viewResumeApplicant.experienceList?.map((exp, idx) => (
-                      <div
-                        key={idx}
-                        className="relative pl-4 border-l-2 border-primary/50 space-y-1 text-xs"
-                      >
-                        <div className="flex items-center justify-between font-bold text-foreground">
-                          <span className="text-sm">{exp.role}</span>
-                          <span className="text-[11px] font-normal text-muted-foreground">
-                            {exp.duration}
-                          </span>
-                        </div>
-                        <p className="font-semibold text-primary text-xs flex items-center gap-1">
-                          <HiOutlineBuildingOffice2 className="h-3.5 w-3.5" />
-                          {exp.hospital}
-                        </p>
-                        <p className="text-muted-foreground text-xs leading-relaxed pt-0.5">
-                          {exp.details}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                    Clinical Skills & Competencies
-                  </h3>
-                  <div className="flex flex-wrap gap-1.5">
-                    {viewResumeApplicant.skills?.map((sk) => (
-                      <span
-                        key={sk}
-                        className="rounded-lg bg-primary-soft text-primary border border-primary/20 px-2.5 py-1 text-xs font-semibold"
-                      >
-                        {sk}
+                    <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                      <span className="font-semibold text-foreground flex items-center gap-1.5">
+                        <HiOutlineDocumentText className="h-4 w-4 text-primary" />
+                        {viewResumeApplicant.resumeFileName || "Candidate_Resume.pdf"}
                       </span>
-                    ))}
+                      <span className="text-muted-foreground">Original Document Uploaded During Onboarding</span>
+                    </div>
+                    <iframe
+                      src={`${viewResumeApplicant.resumeUrl}#toolbar=0&navpanes=0&scrollbar=1`}
+                      title="Candidate Resume Preview"
+                      className="h-[560px] w-full rounded-2xl border border-border shadow-xs bg-white"
+                    />
                   </div>
-                </div>
+                ) : (
+                  <div className="space-y-4 text-sm">
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
+                        Professional Summary
+                      </h3>
+                      <p className="text-xs sm:text-sm text-foreground/90 leading-relaxed bg-muted/20 p-3.5 rounded-xl border border-border/60">
+                        {viewResumeApplicant.bio}
+                      </p>
+                    </div>
 
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                    Education & Credentials
-                  </h3>
-                  <div className="rounded-xl border border-border p-3.5 space-y-2 text-xs">
-                    <div className="flex items-start gap-2">
-                      <HiOutlineAcademicCap className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold text-foreground">{viewResumeApplicant.education}</p>
-                        <p className="text-muted-foreground">{viewResumeApplicant.qualification}</p>
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
+                        Clinical Competencies & Protocols
+                      </h3>
+                      <div className="flex flex-wrap gap-1.5">
+                        {viewResumeApplicant.skills?.map((s: string) => (
+                          <span
+                            key={s}
+                            className="rounded-lg bg-primary-soft text-primary px-2.5 py-1 text-xs font-bold"
+                          >
+                            {s}
+                          </span>
+                        ))}
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Action Footer */}
-              <div className="border-t border-border bg-muted/20 p-4 flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground">
-                  {unlockedIds.includes(viewResumeApplicant.id)
-                    ? "✓ Full candidate contact details unlocked"
-                    : "🔒 Contact details masked — 1 credit required"}
-                </span>
-
-                {!unlockedIds.includes(viewResumeApplicant.id) && (
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setViewResumeApplicant(null);
-                      handleUnlockClick(viewResumeApplicant);
-                    }}
-                    className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover shadow-xs"
-                  >
-                    Unlock contact (1 Credit)
-                  </Button>
                 )}
               </div>
             </div>

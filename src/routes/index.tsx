@@ -3,7 +3,9 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { HiArrowLeft } from "react-icons/hi2";
 import { FaLinkedin } from "react-icons/fa6";
 import { openCookieSettings } from "@/components/fale/CookieConsent";
-import { setState, useApp } from "@/lib/store";
+import { setState, useApp, type Portal } from "@/lib/store";
+import { isApiEnabled } from "@/lib/api";
+import { sendOtp, verifyOtp } from "@/lib/adapters/authAdapter";
 import heroHandsVideo from "@/assets/hero-hands.mp4";
 import "@/styles/fale-signin.css";
 
@@ -71,9 +73,19 @@ function SignInPage() {
   const [doneTitle, setDoneTitle] = useState("You're in.");
   const [doneText, setDoneText] = useState("Welcome to The Fale.");
   const [shakeField, setShakeField] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [otpErr, setOtpErr] = useState("");
 
   const otpInputs = useRef<(HTMLInputElement | null)[]>([]);
   const cursorGlowRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (s.signedIn && s.onboarded) {
+      if (s.portal === "facility") navigate({ to: "/employer" });
+      else if (s.portal === "admin") navigate({ to: "/admin" });
+      else navigate({ to: "/home" });
+    }
+  }, [s.signedIn, s.onboarded, s.portal, navigate]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // Ensure background video plays reliably and scroll is unlocked
@@ -178,12 +190,73 @@ function SignInPage() {
     setIsSignUp(true);
     setPhone("");
     setPhoneErr("");
+    setOtpErr("");
     setOtpValues(["", "", "", "", "", ""]);
     setView("phone");
   };
 
+  // Submit entered 6-digit OTP
+  const submitOtp = async (code: string) => {
+    const digits = phone.replace(/\D/g, "");
+    if (isApiEnabled) {
+      setIsSubmitting(true);
+      setOtpErr("");
+      try {
+        const roleParam = mode === "hire" ? "ROLE_FACILITY" : "ROLE_CANDIDATE";
+        const authData = await verifyOtp(digits, code, roleParam);
+        const role = authData.role ?? authData.user?.role;
+        const candidateLevel = authData.candidateLevel ?? authData.user?.candidateLevel;
+        const isOnboarded = Boolean(authData.onboarded ?? authData.user?.onboarded);
+
+        const targetPortal: Portal =
+          role === "ROLE_FACILITY" ? "facility" : role === "ROLE_ADMIN" ? "admin" : "candidate";
+
+        setDoneTitle("Verified!");
+        setDoneText(
+          !isOnboarded
+            ? mode === "hire"
+              ? "Mobile verified. Redirecting to employer onboarding…"
+              : "Mobile verified. Redirecting to career pathway setup…"
+            : "Welcome back to The Fale."
+        );
+        setView("done");
+
+        setState({
+          signedIn: true,
+          portal: targetPortal,
+          contact: `+91 ${digits}`,
+          onboarded: isOnboarded,
+          candidateLevel: candidateLevel ? (candidateLevel.toLowerCase() as any) : undefined,
+        });
+
+        setTimeout(() => {
+          if (!isOnboarded) {
+            navigate({
+              to: "/onboarding",
+              search: { role: targetPortal === "facility" ? "employer" : "candidate" },
+            });
+          } else {
+            if (targetPortal === "facility") navigate({ to: "/employer" });
+            else if (targetPortal === "admin") navigate({ to: "/admin" });
+            else navigate({ to: "/home" });
+          }
+        }, 800);
+      } catch (err: any) {
+        setOtpErr(err.message || "Invalid or expired OTP. Please try again.");
+        setShakeField(true);
+        setTimeout(() => setShakeField(false), 400);
+        setOtpValues(["", "", "", "", "", ""]);
+        otpInputs.current[0]?.focus();
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
+      completeSignIn(`+91 ${digits}`);
+    }
+  };
+
   // Phone flow
-  const handleSendOtp = () => {
+  const handleSendOtp = async () => {
     const digits = phone.replace(/\D/g, "");
     if (!/^[6-9]\d{9}$/.test(digits)) {
       setPhoneErr("Enter a valid 10-digit Indian mobile number.");
@@ -192,11 +265,31 @@ function SignInPage() {
       return;
     }
     setPhoneErr("");
-    setOtpValues(["", "", "", "", "", ""]);
-    setView("otp");
-    setTimeout(() => {
-      otpInputs.current[0]?.focus();
-    }, 60);
+    setOtpErr("");
+
+    if (isApiEnabled) {
+      setIsSubmitting(true);
+      try {
+        await sendOtp(digits, mode === "hire" ? "ROLE_FACILITY" : "ROLE_CANDIDATE");
+        setOtpValues(["", "", "", "", "", ""]);
+        setView("otp");
+        setTimeout(() => {
+          otpInputs.current[0]?.focus();
+        }, 60);
+      } catch (err: any) {
+        setPhoneErr(err.message || "Failed to send verification code. Please check your network.");
+        setShakeField(true);
+        setTimeout(() => setShakeField(false), 400);
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
+      setOtpValues(["", "", "", "", "", ""]);
+      setView("otp");
+      setTimeout(() => {
+        otpInputs.current[0]?.focus();
+      }, 60);
+    }
   };
 
   const handleOtpChange = (idx: number, val: string) => {
@@ -211,8 +304,7 @@ function SignInPage() {
 
     if (updated.every((v) => v.length > 0)) {
       setTimeout(() => {
-        const clean = phone.replace(/\D/g, "");
-        completeSignIn(`+91 ${clean}`);
+        submitOtp(updated.join(""));
       }, 300);
     }
   };
@@ -237,8 +329,7 @@ function SignInPage() {
 
     if (updated.every((v) => v.length > 0)) {
       setTimeout(() => {
-        const clean = phone.replace(/\D/g, "");
-        completeSignIn(`+91 ${clean}`);
+        submitOtp(updated.join(""));
       }, 300);
     }
   };
@@ -514,8 +605,9 @@ function SignInPage() {
                 type="button"
                 className="s-btn primary"
                 onClick={handleSendOtp}
+                disabled={isSubmitting}
               >
-                {isSignUp ? "Send Verification OTP" : "Send OTP"}
+                {isSubmitting ? "Sending OTP…" : isSignUp ? "Send Verification OTP" : "Send OTP"}
               </button>
             </div>
           )}
@@ -538,18 +630,34 @@ function SignInPage() {
                     inputMode="numeric"
                     maxLength={1}
                     value={v}
+                    disabled={isSubmitting}
                     className={v ? "filled" : ""}
                     onChange={(e) => handleOtpChange(i, e.target.value)}
                     onKeyDown={(e) => handleOtpKeyDown(i, e)}
                   />
                 ))}
               </div>
+              {otpErr && (
+                <div className="err" style={{ textAlign: "center", marginTop: 4 }}>
+                  {otpErr}
+                </div>
+              )}
               <p className="note">
                 Didn't get it?{" "}
                 <button
                   type="button"
-                  onClick={() => {
+                  disabled={isSubmitting}
+                  onClick={async () => {
                     setOtpValues(["", "", "", "", "", ""]);
+                    setOtpErr("");
+                    if (isApiEnabled) {
+                      const digits = phone.replace(/\D/g, "");
+                      try {
+                        await sendOtp(digits, mode === "hire" ? "ROLE_FACILITY" : "ROLE_CANDIDATE");
+                      } catch (err: any) {
+                        setOtpErr(err.message || "Failed to resend code");
+                      }
+                    }
                     otpInputs.current[0]?.focus();
                   }}
                 >
@@ -658,6 +766,7 @@ function SignInPage() {
         <p className="legal">
           By continuing, you agree to The Fale's <Link to="/terms">Terms</Link> and{" "}
           <Link to="/privacy">Privacy Policy</Link> ·{" "}
+          <Link to="/admin/login" className="hover:text-primary transition-colors">Admin Console</Link> ·{" "}
           <button
             type="button"
             onClick={openCookieSettings}

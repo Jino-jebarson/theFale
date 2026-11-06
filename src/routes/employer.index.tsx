@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   ResponsiveContainer,
@@ -39,6 +39,17 @@ import { useApp } from "@/lib/store";
 import facilityMultispecialtyImg from "@/assets/facilities/facility-multispecialty.jpg";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { isApiEnabled, paiseToRupees } from "@/lib/api";
+import {
+  getFacilityJobs,
+  getFacilityApplicants,
+  getFacilityWallet,
+  getFacilityProfile,
+  type FacilityProfileDto,
+  type FacilityWalletDto,
+} from "@/lib/adapters/facilityAdapter";
+import { getFacilityShifts, type UiShiftItem } from "@/lib/adapters/shiftAdapter";
+import { type JobPostingDto } from "@/lib/adapters/jobAdapter";
 
 export const Route = createFileRoute("/employer/")({
   head: () => ({
@@ -105,14 +116,123 @@ function EmployerDashboard() {
   const [activePieIndex, setActivePieIndex] = useState<number | null>(null);
   const [isCampusModalOpen, setIsCampusModalOpen] = useState(false);
 
-  const orgName = String(s.profile["org"] || "Apollo Hospitals — Main Campus");
-  const rawCity = String(s.profile["city"] || "Chennai");
+  // Dynamic API state
+  const [apiJobs, setApiJobs] = useState<JobPostingDto[]>([]);
+  const [apiShifts, setApiShifts] = useState<UiShiftItem[]>([]);
+  const [apiApplicants, setApiApplicants] = useState<any[]>([]);
+  const [apiWallet, setApiWallet] = useState<FacilityWalletDto | null>(null);
+  const [apiProfile, setApiProfile] = useState<FacilityProfileDto | null>(null);
+  const [loading, setLoading] = useState(isApiEnabled);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    Promise.all([
+      getFacilityJobs().catch(() => []),
+      getFacilityShifts().catch(() => []),
+      getFacilityApplicants().catch(() => []),
+      getFacilityWallet().catch(() => null),
+      getFacilityProfile().catch(() => null),
+    ])
+      .then(([fJobs, fShifts, fApps, fWallet, fProfile]) => {
+        setApiJobs(fJobs);
+        setApiShifts(fShifts);
+        setApiApplicants(fApps);
+        setApiWallet(fWallet);
+        setApiProfile(fProfile);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
+
+  const orgName = isApiEnabled
+    ? apiProfile?.hospitalName || "Healthcare Facility"
+    : String(s.profile["org"] || "Apollo Hospitals — Main Campus");
+  const rawCity = isApiEnabled
+    ? apiProfile?.city || "Chennai"
+    : String(s.profile["city"] || "Chennai");
   const city = /[\u0900-\u0D7F]/.test(rawCity) ? "Chennai" : rawCity;
-  const escrowBalance = s.escrowBalance || 185000;
+
+  const campusLocation = useMemo(() => {
+    if (apiProfile?.addressLine) {
+      return `${apiProfile.addressLine}, ${city}`;
+    }
+    if (apiProfile?.address) {
+      return `${apiProfile.address}, ${city}`;
+    }
+    if (apiProfile?.state) {
+      return `${city}, ${apiProfile.state}`;
+    }
+    return city;
+  }, [apiProfile, city]);
+
+  const bedCount = apiProfile?.beds || apiProfile?.bedCount;
+  const icuCount = apiProfile?.icuBeds;
+  const bedInfo = bedCount
+    ? icuCount && icuCount > 0
+      ? `${bedCount} Beds (${icuCount} ICU)`
+      : `${bedCount} Beds`
+    : "";
+
+  const accreditationText = useMemo(() => {
+    const level = apiProfile?.accreditationLevel;
+    if (!level) return "NABH Accredited";
+    return level.toUpperCase().includes("NABH") ? level : `NABH ${level}`;
+  }, [apiProfile?.accreditationLevel]);
+
+  const facilityTypeText = useMemo(() => {
+    if (apiProfile?.facilityType) return apiProfile.facilityType;
+    if (apiProfile?.size) return `${apiProfile.size} Center`;
+    return "Hospital";
+  }, [apiProfile?.facilityType, apiProfile?.size]);
+
+  const campusPhotoUrl = useMemo(() => {
+    if (apiProfile?.facilityPhotos && apiProfile.facilityPhotos.length > 0) {
+      return apiProfile.facilityPhotos[0];
+    }
+    if (apiProfile?.logoUrl) {
+      return apiProfile.logoUrl;
+    }
+    return facilityMultispecialtyImg;
+  }, [apiProfile?.facilityPhotos, apiProfile?.logoUrl]);
+
+  const escrowReservedPaise =
+    apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
+      ? apiWallet.lockedEscrowBalancePaise
+      : apiWallet?.availableBalancePaise || 0;
+  const escrowBalance = isApiEnabled
+    ? paiseToRupees(escrowReservedPaise)
+    : s.escrowBalance || 185000;
+
+  const formattedEscrow =
+    escrowBalance >= 100000
+      ? `₹${(escrowBalance / 1000).toFixed(0)}k`
+      : escrowBalance > 0
+        ? `₹${escrowBalance.toLocaleString("en-IN")}`
+        : "₹0";
+
+  // Effective applicants list
+  const effectiveApplicants = isApiEnabled ? apiApplicants : applicants;
 
   // Filtered jobs
+  const allJobs = useMemo(() => {
+    return isApiEnabled
+      ? apiJobs.map((j) => ({
+          id: j.id,
+          title: j.title,
+          dept: j.department || "General Medicine",
+          city: j.city || "Chennai",
+          status: j.status || "OPEN",
+          exp: j.experienceRequired || "1-3 Years",
+          type: j.isInternship ? "Internship" : "Full-time",
+          openings: j.openings || 1,
+        }))
+      : s.postedJobs;
+  }, [isApiEnabled, apiJobs, s.postedJobs]);
+
   const filteredJobs = useMemo(() => {
-    return s.postedJobs.filter((j) => {
+    return allJobs.filter((j) => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         return (
@@ -123,12 +243,207 @@ function EmployerDashboard() {
       }
       return true;
     });
-  }, [s.postedJobs, searchQuery, city]);
+  }, [allJobs, searchQuery, city]);
 
-  const activeShifts = s.postedShifts && s.postedShifts.length > 0 ? s.postedShifts : shifts.slice(0, 4);
+  const activeShifts = isApiEnabled
+    ? apiShifts
+    : (s.postedShifts && s.postedShifts.length > 0 ? s.postedShifts : shifts.slice(0, 4));
 
-  // Active trend data
-  const trendData = analyticsTimeframe === "7d" ? shiftFulfillmentData7d : shiftFulfillmentData30d;
+  // Dynamic Telemetry Metrics
+  const activeJobsCount = useMemo(() => {
+    return allJobs.filter((j) => {
+      const st = (j.status || "").toUpperCase();
+      return st === "OPEN" || st === "ACTIVE";
+    }).length;
+  }, [allJobs]);
+
+  const inVerificationJobsCount = useMemo(() => {
+    return allJobs.filter((j) => {
+      const st = (j.status || "").toUpperCase();
+      return st === "PENDING_APPROVAL" || st === "UNDER_REVIEW";
+    }).length;
+  }, [allJobs]);
+
+  // Filter out rejected and cancelled shifts for active operational metrics
+  const validShifts = useMemo(() => {
+    return activeShifts.filter((sh) => {
+      const st = (sh.status || "").toUpperCase();
+      return st !== "CANCELLED" && st !== "REJECTED";
+    });
+  }, [activeShifts]);
+
+  const totalShiftSlots = useMemo(() => {
+    return validShifts.reduce((acc, sh) => acc + (sh.slots || 1), 0);
+  }, [validShifts]);
+
+  const claimedShiftSlots = useMemo(() => {
+    return validShifts.reduce((acc, sh) => acc + (sh.slotsClaimed || 0), 0);
+  }, [validShifts]);
+
+  const liveBroadcastsCount = useMemo(() => {
+    return validShifts.filter((sh) => {
+      const st = (sh.status || "").toUpperCase();
+      return st === "OPEN" || st === "BROADCASTED";
+    }).length;
+  }, [validShifts]);
+
+  const locumFillRate = useMemo(() => {
+    if (totalShiftSlots === 0) return "0.0";
+    return ((claimedShiftSlots / totalShiftSlots) * 100).toFixed(1);
+  }, [totalShiftSlots, claimedShiftSlots]);
+
+  const shortlistedApplicants = useMemo(() => {
+    return effectiveApplicants.filter((a: any) => {
+      const st = (a.status || "").toUpperCase();
+      return st === "SHORTLISTED" || st === "INTERVIEW_SCHEDULED";
+    });
+  }, [effectiveApplicants]);
+
+  const councilVerifiedCount = useMemo(() => {
+    return effectiveApplicants.filter((a: any) => a.councilVerified !== false).length;
+  }, [effectiveApplicants]);
+
+  // Dynamic Candidate Pipeline Funnel Data
+  const dynamicCandidatePipelineData = useMemo(() => {
+    const total = effectiveApplicants.length;
+    if (total === 0) {
+      return [
+        { name: "Shortlisted", value: 0, count: "0 Candidates", color: "#FF5A1F" },
+        { name: "Interview Scheduled", value: 0, count: "0 Candidates", color: "#E04812" },
+        { name: "Offers Extended", value: 0, count: "0 Candidates", color: "#FF7E45" },
+        { name: "Under Screening", value: 0, count: "0 Candidates", color: "#FFA47A" },
+      ];
+    }
+
+    let shortlisted = 0;
+    let interview = 0;
+    let offers = 0;
+    let screening = 0;
+
+    effectiveApplicants.forEach((a: any) => {
+      const st = (a.status || "").toUpperCase();
+      if (st === "SHORTLISTED" || st === "CONFIRMED") shortlisted++;
+      else if (st === "INTERVIEW_SCHEDULED" || st === "INTERVIEW") interview++;
+      else if (st === "OFFERED" || st === "OFFER" || st === "ACCEPTED" || st === "HIRED" || st === "COMPLETED") offers++;
+      else if (st === "NEW" || st === "APPLIED" || st === "PENDING" || st === "UNDER_REVIEW" || st === "UNDER_SCREENING") screening++;
+      else shortlisted++;
+    });
+
+    return [
+      {
+        name: "Shortlisted",
+        value: Math.round((shortlisted / total) * 100),
+        count: `${shortlisted} Candidate${shortlisted !== 1 ? "s" : ""}`,
+        color: "#FF5A1F",
+      },
+      {
+        name: "Interview Scheduled",
+        value: Math.round((interview / total) * 100),
+        count: `${interview} Candidate${interview !== 1 ? "s" : ""}`,
+        color: "#E04812",
+      },
+      {
+        name: "Offers Extended",
+        value: Math.round((offers / total) * 100),
+        count: `${offers} Candidate${offers !== 1 ? "s" : ""}`,
+        color: "#FF7E45",
+      },
+      {
+        name: "Under Screening",
+        value: Math.round((screening / total) * 100),
+        count: `${screening} Candidate${screening !== 1 ? "s" : ""}`,
+        color: "#FFA47A",
+      },
+    ];
+  }, [effectiveApplicants]);
+
+  const pieRenderData = useMemo(() => {
+    const hasData = dynamicCandidatePipelineData.some((d) => d.value > 0);
+    if (!hasData) {
+      return [{ name: "No Candidates", value: 1, color: "hsl(var(--muted) / 0.5)" }];
+    }
+    return dynamicCandidatePipelineData.filter((d) => d.value > 0);
+  }, [dynamicCandidatePipelineData]);
+
+  // Active trend data (100% dynamic from real shift dates & statuses)
+  const trendData = useMemo(() => {
+    if (analyticsTimeframe === "7d") {
+      const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      const dayBuckets: Record<string, { broadcast: number; filled: number; hours: number }> = {
+        Mon: { broadcast: 0, filled: 0, hours: 0 },
+        Tue: { broadcast: 0, filled: 0, hours: 0 },
+        Wed: { broadcast: 0, filled: 0, hours: 0 },
+        Thu: { broadcast: 0, filled: 0, hours: 0 },
+        Fri: { broadcast: 0, filled: 0, hours: 0 },
+        Sat: { broadcast: 0, filled: 0, hours: 0 },
+        Sun: { broadcast: 0, filled: 0, hours: 0 },
+      };
+
+      validShifts.forEach((sh) => {
+        const d = sh.startAt ? new Date(sh.startAt) : new Date(sh.date);
+        const dayIdx = isNaN(d.getTime()) ? 2 : d.getDay();
+        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const dayKey = dayNames[dayIdx];
+
+        if (dayBuckets[dayKey]) {
+          dayBuckets[dayKey].broadcast += sh.slots || 1;
+          dayBuckets[dayKey].filled += sh.slotsClaimed || 0;
+          dayBuckets[dayKey].hours += (sh.hours || 8) * (sh.slotsClaimed || 0);
+        }
+      });
+
+      return days.map((day) => ({
+        period: day,
+        broadcast: dayBuckets[day].broadcast,
+        filled: dayBuckets[day].filled,
+        hours: dayBuckets[day].hours,
+      }));
+    } else {
+      const weekBuckets: Record<string, { broadcast: number; filled: number; hours: number }> = {
+        W1: { broadcast: 0, filled: 0, hours: 0 },
+        W2: { broadcast: 0, filled: 0, hours: 0 },
+        W3: { broadcast: 0, filled: 0, hours: 0 },
+        W4: { broadcast: 0, filled: 0, hours: 0 },
+      };
+
+      validShifts.forEach((sh) => {
+        const d = sh.startAt ? new Date(sh.startAt) : new Date(sh.date);
+        const dayOfMonth = isNaN(d.getTime()) ? 4 : d.getDate();
+        const weekIndex = Math.min(3, Math.floor((dayOfMonth - 1) / 7));
+        const weekKey = ["W1", "W2", "W3", "W4"][weekIndex];
+
+        if (weekBuckets[weekKey]) {
+          weekBuckets[weekKey].broadcast += sh.slots || 1;
+          weekBuckets[weekKey].filled += sh.slotsClaimed || 0;
+          weekBuckets[weekKey].hours += (sh.hours || 8) * (sh.slotsClaimed || 0);
+        }
+      });
+
+      return ["W1", "W2", "W3", "W4"].map((w) => ({
+        period: w,
+        broadcast: weekBuckets[w].broadcast,
+        filled: weekBuckets[w].filled,
+        hours: weekBuckets[w].hours,
+      }));
+    }
+  }, [validShifts, analyticsTimeframe]);
+
+  const totalBroadcastCount = useMemo(() => {
+    return trendData.reduce((acc, curr) => acc + curr.broadcast, 0);
+  }, [trendData]);
+
+  const totalFilledCount = useMemo(() => {
+    return trendData.reduce((acc, curr) => acc + curr.filled, 0);
+  }, [trendData]);
+
+  const totalCoveredHours = useMemo(() => {
+    return trendData.reduce((acc, curr) => acc + curr.hours, 0);
+  }, [trendData]);
+
+  const dynamicFulfillmentRate = useMemo(() => {
+    if (totalBroadcastCount === 0) return "0.0%";
+    return `${((totalFilledCount / totalBroadcastCount) * 100).toFixed(1)}%`;
+  }, [totalBroadcastCount, totalFilledCount]);
 
   return (
     <AppShell>
@@ -141,10 +456,18 @@ function EmployerDashboard() {
             {/* Left on desktop / Top on mobile: Hospital Identity */}
             <div className="flex items-center gap-3 sm:gap-3.5 min-w-0 w-full md:w-auto">
               <div className="relative shrink-0">
-                <OrgMark
-                  name={orgName}
-                  className="h-12 w-12 sm:h-14 sm:w-14 text-xl sm:text-2xl rounded-2xl shadow-sm border-2 border-border/60 bg-muted/40"
-                />
+                {apiProfile?.logoUrl ? (
+                  <img
+                    src={apiProfile.logoUrl}
+                    alt={orgName}
+                    className="h-12 w-12 sm:h-14 sm:w-14 rounded-2xl object-cover shadow-sm border-2 border-border/60 bg-muted/40"
+                  />
+                ) : (
+                  <OrgMark
+                    name={orgName}
+                    className="h-12 w-12 sm:h-14 sm:w-14 text-xl sm:text-2xl rounded-2xl shadow-sm border-2 border-border/60 bg-muted/40"
+                  />
+                )}
                 <span
                   title="Verified Institutional Partner"
                   className="absolute -bottom-1 -right-1 grid h-4.5 w-4.5 place-items-center rounded-full bg-emerald-600 text-white ring-2 ring-card shadow-xs"
@@ -161,19 +484,27 @@ function EmployerDashboard() {
 
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-[10.5px] sm:text-[11px] font-bold text-primary">
                     <RiShieldCheckFill className="h-3.5 w-3.5 text-primary" />
-                    NABH Tier-1 Partner
+                    {accreditationText}
                   </span>
                 </div>
 
                 <div className="text-[11px] sm:text-xs text-muted-foreground flex items-center gap-2 sm:gap-2.5 flex-wrap pt-0.5">
                   <span className="font-semibold text-foreground flex items-center gap-1.5">
                     <HiOutlineMapPin className="h-3.5 w-3.5 text-primary" />
-                    {city} Central Campus
+                    {campusLocation}
                   </span>
-                  <span className="hidden sm:inline text-muted-foreground/40">•</span>
-                  <span className="hidden sm:inline">750 Beds (120 ICU)</span>
-                  <span className="hidden sm:inline text-muted-foreground/40">•</span>
-                  <span className="hidden sm:inline">Level-1 Trauma Care</span>
+                  {bedInfo && (
+                    <>
+                      <span className="hidden sm:inline text-muted-foreground/40">•</span>
+                      <span className="hidden sm:inline">{bedInfo}</span>
+                    </>
+                  )}
+                  {facilityTypeText && (
+                    <>
+                      <span className="hidden sm:inline text-muted-foreground/40">•</span>
+                      <span className="hidden sm:inline">{facilityTypeText}</span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -182,12 +513,12 @@ function EmployerDashboard() {
             <button
               type="button"
               onClick={() => setIsCampusModalOpen(true)}
-              title="Click to view campus masterplan"
+              title="Click to view campus details"
               className="md:hidden relative aspect-[2.4/1] w-full overflow-hidden rounded-xl border border-border/70 bg-slate-900 shadow-2xs cursor-pointer my-1 block"
             >
               <img
-                src={facilityMultispecialtyImg}
-                alt="Full Campus Architecture"
+                src={campusPhotoUrl}
+                alt={orgName}
                 className="h-full w-full object-cover"
               />
             </button>
@@ -215,12 +546,12 @@ function EmployerDashboard() {
               <button
                 type="button"
                 onClick={() => setIsCampusModalOpen(true)}
-                title="Click to view campus masterplan"
+                title="Click to view campus details"
                 className="hidden md:block relative aspect-video w-40 lg:w-48 overflow-hidden rounded-xl border border-border/70 bg-slate-900 shadow-sm cursor-pointer transition-all duration-300 hover:border-primary/50 hover:shadow-md shrink-0"
               >
                 <img
-                  src={facilityMultispecialtyImg}
-                  alt="Full Campus Architecture"
+                  src={campusPhotoUrl}
+                  alt={orgName}
                   className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
                 />
               </button>
@@ -228,22 +559,22 @@ function EmployerDashboard() {
           </div>
         </section>
 
-        {/* Campus Masterplan 4K Modal Dialog */}
+        {/* Campus Overview Modal Dialog */}
         <Dialog open={isCampusModalOpen} onOpenChange={setIsCampusModalOpen}>
           <DialogContent className="max-w-4xl p-0 overflow-hidden border-border/80 bg-card rounded-3xl">
             <DialogHeader className="sr-only">
-              <DialogTitle>{orgName} Campus Masterplan</DialogTitle>
+              <DialogTitle>{orgName} Campus Overview</DialogTitle>
             </DialogHeader>
             <div className="relative aspect-video w-full overflow-hidden bg-slate-950">
               <img
-                src={facilityMultispecialtyImg}
+                src={campusPhotoUrl}
                 alt={orgName}
                 className="h-full w-full object-cover"
               />
               <div className="absolute top-3.5 right-3.5">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-black/70 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white border border-white/20">
                   <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Executive Command Center</span>
+                  <span>{apiProfile?.kycStatus === "VERIFIED" ? "Verified Institution" : "Clinical Partner"}</span>
                 </span>
               </div>
             </div>
@@ -252,25 +583,32 @@ function EmployerDashboard() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-base font-bold text-foreground">{orgName}</h3>
                   <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[11px] font-bold text-primary">
-                    Multi-Specialty Campus
+                    {facilityTypeText}
                   </span>
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-[11px] font-bold text-primary">
                     <RiShieldCheckFill className="h-3.5 w-3.5 text-primary" />
-                    NABH Tier-1 Partner
+                    {accreditationText}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {city} Central Campus · Dual Rooftop Helipads · 24/7 Level-1 Emergency Bay
+                  {campusLocation}{bedInfo ? ` · ${bedInfo}` : ""}{apiProfile?.licenseNumber ? ` · Reg: ${apiProfile.licenseNumber}` : ""}
                 </p>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsCampusModalOpen(false)}
-                className="rounded-xl text-xs font-bold shrink-0 cursor-pointer h-8 px-3"
-              >
-                Close Preview
-              </Button>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button asChild size="sm" className="rounded-xl text-xs font-bold h-8 px-3.5 bg-primary text-primary-foreground hover:bg-primary-hover">
+                  <Link to="/employer/profile">
+                    Edit Profile
+                  </Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsCampusModalOpen(false)}
+                  className="rounded-xl text-xs font-bold shrink-0 cursor-pointer h-8 px-3"
+                >
+                  Close Preview
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
@@ -295,13 +633,13 @@ function EmployerDashboard() {
                   </span>
                 </div>
                 <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
-                  +4 Live
+                  {activeJobsCount > 0 ? `+${activeJobsCount} Live` : `${allJobs.length} Live`}
                 </span>
               </div>
 
               <div className="mt-2.5">
                 <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground leading-none">
-                  {s.postedJobs.length}
+                  {allJobs.length}
                 </div>
                 <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
                   clinical requisitions
@@ -312,7 +650,7 @@ function EmployerDashboard() {
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
               <span className="text-primary font-semibold flex items-center gap-1">
                 <HiOutlineArrowTrendingUp className="h-3.5 w-3.5" />
-                94% Fill Velocity
+                {activeJobsCount > 0 ? `${activeJobsCount} Active Postings` : "94% Fill Velocity"}
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
@@ -334,23 +672,26 @@ function EmployerDashboard() {
                   </span>
                 </div>
                 <span className="shrink-0 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 text-[10px] font-extrabold px-2 py-0.5">
-                  Tonight
+                  {liveBroadcastsCount > 0 ? `${liveBroadcastsCount} Live` : "0 Active"}
                 </span>
               </div>
 
               <div className="mt-2.5">
                 <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground leading-none">
-                  96.4%
+                  {locumFillRate}%
                 </div>
                 <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-                  claimed in &lt; 2.2 hrs
+                  {totalShiftSlots > 0 ? `${claimedShiftSlots} of ${totalShiftSlots} claimed` : "0 shifts broadcasted"}
                 </p>
               </div>
             </div>
 
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
               <span className="text-primary font-semibold truncate flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+                <span className={cn(
+                  "h-1.5 w-1.5 rounded-full shrink-0",
+                  liveBroadcastsCount > 0 ? "bg-primary animate-pulse" : "bg-muted-foreground/50"
+                )} />
                 <span>{`${activeShifts.length} Live Broadcasts`}</span>
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />
@@ -373,13 +714,13 @@ function EmployerDashboard() {
                   </span>
                 </div>
                 <span className="shrink-0 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20 text-[10px] font-extrabold px-2 py-0.5">
-                  {applicants.length} Interview
+                  {shortlistedApplicants.length > 0 ? `${shortlistedApplicants.length} Shortlisted` : `${effectiveApplicants.length} In Review`}
                 </span>
               </div>
 
               <div className="mt-2.5">
                 <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground leading-none">
-                  {applicants.length}
+                  {effectiveApplicants.length}
                 </div>
                 <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
                   verified clinicians
@@ -390,7 +731,7 @@ function EmployerDashboard() {
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
               <span className="text-primary font-semibold truncate flex items-center gap-1">
                 <HiOutlineCheckBadge className="h-3.5 w-3.5" />
-                Council Verified
+                {councilVerifiedCount > 0 ? `${councilVerifiedCount} Council Verified` : "0 Council Verified"}
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
@@ -412,23 +753,29 @@ function EmployerDashboard() {
                   </span>
                 </div>
                 <span className="shrink-0 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-extrabold px-2 py-0.5">
-                  100% Nodal
+                  {apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
+                    ? "Escrow Locked"
+                    : "100% Nodal"}
                 </span>
               </div>
 
               <div className="mt-2.5">
                 <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground leading-none">
-                  ₹{(escrowBalance / 1000).toFixed(0)}k
+                  {formattedEscrow}
                 </div>
                 <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-                  escrow reserved
+                  {apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
+                    ? "locked in shift escrow"
+                    : "available wallet balance"}
                 </p>
               </div>
             </div>
 
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
               <span className="text-primary font-semibold truncate">
-                24h Auto-Release
+                {apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
+                  ? `₹${paiseToRupees(apiWallet.availableBalancePaise).toLocaleString("en-IN")} Available`
+                  : "24h Nodal Protection"}
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
@@ -583,7 +930,7 @@ function EmployerDashboard() {
                 </span>
                 <div className="mt-1 flex items-baseline justify-center gap-1 font-mono leading-none">
                   <span className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400">
-                    96.8%
+                    {dynamicFulfillmentRate}
                   </span>
                   <span className="text-[10px] sm:text-xs font-sans font-semibold text-emerald-700/80 dark:text-emerald-300/80">
                     Claimed
@@ -598,7 +945,7 @@ function EmployerDashboard() {
                 </span>
                 <div className="mt-1 flex items-baseline justify-center gap-1 font-mono leading-none">
                   <span className="text-sm sm:text-base font-black text-foreground">
-                    {trendData.reduce((acc, curr) => acc + curr.hours, 0).toLocaleString()}
+                    {totalCoveredHours.toLocaleString()}
                   </span>
                   <span className="text-[10px] sm:text-xs font-sans font-semibold text-muted-foreground">
                     hrs
@@ -621,7 +968,7 @@ function EmployerDashboard() {
                 </p>
               </div>
               <span className="text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-2.5 py-0.5 rounded-full">
-                30 Active
+                {effectiveApplicants.length} Active
               </span>
             </div>
 
@@ -630,7 +977,7 @@ function EmployerDashboard() {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={candidatePipelineData}
+                    data={pieRenderData}
                     cx="50%"
                     cy="50%"
                     innerRadius={66}
@@ -640,7 +987,7 @@ function EmployerDashboard() {
                     onMouseEnter={(_, index) => setActivePieIndex(index)}
                     onMouseLeave={() => setActivePieIndex(null)}
                   >
-                    {candidatePipelineData.map((entry, index) => (
+                    {pieRenderData.map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
                         fill={entry.color}
@@ -663,7 +1010,7 @@ function EmployerDashboard() {
                   Pipeline
                 </span>
                 <span className="text-xl sm:text-2xl font-black font-mono text-foreground tracking-tight my-1 leading-none">
-                  30
+                  {effectiveApplicants.length}
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[9px] font-bold text-primary leading-none">
                   <span className="h-1.5 w-1.5 rounded-full bg-primary" />
@@ -674,7 +1021,7 @@ function EmployerDashboard() {
 
             {/* Legend Pills below Pie */}
             <div className="space-y-1 pt-2 border-t border-border/50">
-              {candidatePipelineData.map((d, index) => (
+              {dynamicCandidatePipelineData.map((d, index) => (
                 <div
                   key={d.name}
                   onMouseEnter={() => setActivePieIndex(index)}
@@ -774,7 +1121,7 @@ function EmployerDashboard() {
                   )}
                 >
                   <HiOutlineDocumentCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                  <span>Shortlisted ({applicants.length})</span>
+                  <span>Shortlisted ({effectiveApplicants.length})</span>
                 </button>
               </div>
             </div>
@@ -825,12 +1172,30 @@ function EmployerDashboard() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-bold">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          Live Broadcast
+                        <span className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold",
+                          sh.status === "PENDING_APPROVAL"
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
+                            : sh.status === "OPEN"
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20"
+                            : sh.status === "FILLED"
+                            ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
+                            : "bg-muted text-muted-foreground"
+                        )}>
+                          <span className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            sh.status === "PENDING_APPROVAL" ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
+                          )} />
+                          {sh.status === "PENDING_APPROVAL"
+                            ? "Awaiting Admin Verification"
+                            : sh.status === "OPEN"
+                            ? "Live Broadcast"
+                            : sh.status === "FILLED"
+                            ? "Clinician Assigned"
+                            : sh.status}
                         </span>
                         <h4 className="mt-1 text-sm font-bold text-foreground">{sh.title}</h4>
-                        <p className="text-xs text-muted-foreground">{sh.dept} • {sh.date}</p>
+                        <p className="text-xs text-muted-foreground">{sh.dept} • {sh.date} • {sh.slotsClaimed}/{sh.slots} Slots Booked</p>
                       </div>
                       <span className="text-sm font-black font-mono text-primary">₹{sh.rate}/hr</span>
                     </div>
@@ -851,28 +1216,34 @@ function EmployerDashboard() {
             {/* TAB 3: Shortlisted */}
             {activeTab === "applicants" && (
               <div className="space-y-3">
-                {applicants.map((a) => (
-                  <div
-                    key={a.id}
-                    className="rounded-2xl border border-border/70 bg-card p-4 shadow-xs hover:border-primary/40 transition-all flex items-center justify-between gap-3"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-sm font-bold text-primary">
-                        {initials(a.name)}
-                      </span>
-                      <div className="min-w-0">
-                        <h4 className="text-sm font-bold text-foreground truncate">{a.name}</h4>
-                        <p className="text-xs text-muted-foreground truncate">{a.role} • {a.exp}</p>
+                {effectiveApplicants.length === 0 ? (
+                  <div className="p-8 rounded-2xl border border-dashed border-border text-center text-sm text-muted-foreground">
+                    No shortlisted applicants yet. When compliance admin shortlists candidates for your postings, they will appear here.
+                  </div>
+                ) : (
+                  effectiveApplicants.map((a) => (
+                    <div
+                      key={a.id}
+                      className="rounded-2xl border border-border/70 bg-card p-4 shadow-xs hover:border-primary/40 transition-all flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-sm font-bold text-primary">
+                          {initials(a.candidateName || a.name || "Candidate")}
+                        </span>
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-bold text-foreground truncate">{a.candidateName || a.name}</h4>
+                          <p className="text-xs text-muted-foreground truncate">{a.jobTitle || a.role || "Healthcare Clinician"} • {a.status || "Shortlisted"}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <StatusBadge status={a.status} />
+                        <Button asChild size="sm" variant="outline" className="h-7 text-xs rounded-lg font-bold">
+                          <Link to="/employer/applicants">Review</Link>
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <StatusBadge status={a.status} />
-                      <Button asChild size="sm" variant="outline" className="h-7 text-xs rounded-lg font-bold">
-                        <Link to="/employer/applicants">Review</Link>
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             )}
           </div>
@@ -900,18 +1271,20 @@ function EmployerDashboard() {
               <div className="rounded-2xl bg-muted/40 p-3.5 space-y-2.5 border border-border/50 text-xs">
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-muted-foreground font-medium">Postings in Verification</span>
-                  <span className="font-bold font-mono text-amber-600 dark:text-amber-400">1 Under Review</span>
+                  <span className="font-bold font-mono text-amber-600 dark:text-amber-400">
+                    {inVerificationJobsCount > 0 ? `${inVerificationJobsCount} Under Review` : "0 Under Review"}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-muted-foreground font-medium">Active Vacancies</span>
                   <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">
-                    {s.postedJobs.filter(j => j.status === "Open").length || 2} Published
+                    {activeJobsCount > 0 ? `${activeJobsCount} Published` : `${allJobs.length} Published`}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-muted-foreground font-medium">Shortlisted Clinicians</span>
                   <span className="font-bold font-mono text-primary font-bold">
-                    {applicants.length || 6} Ready to Interview
+                    {shortlistedApplicants.length > 0 ? `${shortlistedApplicants.length} Ready to Interview` : `${effectiveApplicants.length} In Review`}
                   </span>
                 </div>
               </div>

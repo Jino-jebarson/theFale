@@ -1055,7 +1055,7 @@ export function UploadBox({
   label: string;
   hint?: string;
   file?: string | undefined;
-  onFile: (name: string | undefined) => void;
+  onFile: (name: string | undefined, dataUrl?: string) => void;
   required?: boolean;
   isDigiLocker?: boolean;
   onDigiLocker?: () => void;
@@ -1066,12 +1066,21 @@ export function UploadBox({
 
   const take = (f?: File) => {
     if (!f) return;
-    if (f.size > 10 * 1024 * 1024 || !/\.(pdf|jpe?g|png)$/i.test(f.name)) {
-      toast.error("Choose a PDF, JPG or PNG under 10 MB.");
+    if (f.size > 15 * 1024 * 1024 || !/\.(pdf|jpe?g|png)$/i.test(f.name)) {
+      toast.error("Choose a PDF, JPG or PNG under 15 MB.");
       return;
     }
-    onFile(f.name);
-    toast.success(`${label} attached`);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      onFile(f.name, dataUrl);
+      toast.success(`${label} attached`);
+    };
+    reader.onerror = () => {
+      onFile(f.name);
+      toast.success(`${label} attached`);
+    };
+    reader.readAsDataURL(f);
   };
 
   if (file) {

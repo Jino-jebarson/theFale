@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   HiOutlineShieldCheck,
@@ -6,6 +6,7 @@ import {
   HiOutlineMagnifyingGlass,
   HiOutlineDocumentText,
   HiOutlineArrowDownTray,
+  HiOutlineEye,
   HiOutlineAcademicCap,
   HiOutlinePhone,
   HiOutlineEnvelope,
@@ -36,17 +37,19 @@ import { useApp } from "@/lib/store";
 import { LottieAnimation } from "@/components/fale/LottieAnimation";
 import lottieEmptyAnimation from "@/assets/lottie-error.json";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import { getFacilityApplicants, updateApplicantStatus } from "@/lib/adapters/facilityAdapter";
 
 export const Route = createFileRoute("/employer/applicants")({
   head: () => ({
     meta: [
-      { title: "Shortlisted Clinicians — FALE" },
+      { title: "Shortlisted Clinicians - FALE" },
       {
         name: "description",
         content:
           "Review council-verified healthcare professionals shortlisted for your open roles.",
       },
-      { property: "og:title", content: "Shortlisted Clinicians — FALE" },
+      { property: "og:title", content: "Shortlisted Clinicians - FALE" },
       {
         property: "og:description",
         content: "Review council-verified shortlisted candidates.",
@@ -58,6 +61,38 @@ export const Route = createFileRoute("/employer/applicants")({
   component: Applicants,
 });
 
+function mapBackendStatusToUi(s?: string): string {
+  switch (s?.toUpperCase()) {
+    case "INTERVIEW":
+    case "INTERVIEW_SCHEDULED":
+      return "Interview";
+    case "OFFER":
+    case "OFFERED":
+      return "Offer";
+    case "CONFIRMED":
+      return "Confirmed";
+    case "COMPLETED":
+      return "Completed";
+    case "HIRED":
+    case "ACCEPTED":
+    case "PLACED":
+      return "Hired";
+    case "REJECTED":
+      return "Rejected";
+    case "NEW":
+    case "APPLIED":
+    case "PENDING":
+    case "PENDING_SCREENING":
+    case "UNDER_REVIEW":
+    case "UNDER_SCREENING":
+      return "New";
+    case "SHORTLISTED":
+    case "CONFIRMED":
+    default:
+      return "Shortlisted";
+  }
+}
+
 function Applicants() {
   const s = useApp();
   const [filter, setFilter] = useState("All");
@@ -66,8 +101,125 @@ function Applicants() {
   const [status, setStatus] = useState<Record<string, string>>({});
   const [selectedResume, setSelectedResume] = useState<Applicant | null>(null);
 
+  // Dynamic API state
+  const [apiApplicants, setApiApplicants] = useState<any[]>([]);
+  const [loading, setLoading] = useState(isApiEnabled);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    setLoading(true);
+    getFacilityApplicants()
+      .then((data) => {
+        setApiApplicants(data);
+      })
+      .catch(() => {
+        setApiApplicants([]);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
+
   // Merge live status overrides with applicant records + admin shortlisted applications
   const allApplicants = useMemo(() => {
+    if (isApiEnabled) {
+      return apiApplicants.map((a: any) => {
+        const candidateRole =
+          a.candidateRole ||
+          a.profession ||
+          a.course ||
+          (a.jobTitle ? a.jobTitle.replace(/ \(Locum Shift\)/i, "") : "Clinician");
+
+        const candidateExp =
+          a.candidateExperience ||
+          a.exp ||
+          (a.councilVerified ? "Council Registered" : "Fresher");
+
+        const candidateCity = a.candidateCity || a.city || "Chennai";
+
+        const candidateQual =
+          a.candidateQualification ||
+          (candidateRole.toLowerCase().includes("doctor")
+            ? "MBBS"
+            : candidateRole.toLowerCase().includes("nurse")
+            ? "B.Sc Nursing"
+            : "Certified Clinician");
+
+        const councilName = a.candidateCouncil || "State Medical Council";
+        const regNum =
+          a.regNumber ||
+          (a.councilVerified ? "Council Verified" : "Registration Pending");
+
+        // Dynamic clinical skill chips based on role and job assignment
+        const derivedSkills = (() => {
+          if (a.skills && a.skills.length > 0) return a.skills;
+          const r = (candidateRole + " " + (a.jobTitle || "")).toLowerCase();
+          if (r.includes("dialysis") || r.includes("technician")) {
+            return ["Dialysis Protocols", "Hemodialysis Machine Ops", "Patient Monitoring"];
+          }
+          if (r.includes("nurse") || r.includes("scrub") || r.includes("ot")) {
+            return ["Surgical Scrubbing", "Sterilization Protocols", "Patient Safety"];
+          }
+          if (r.includes("pharmacist")) {
+            return ["Clinical Dispensing", "Pharmacovigilance", "Inventory Management"];
+          }
+          return ["Clinical Protocols", "Inpatient Care", "Emergency Assessment"];
+        })();
+
+        const dynamicBio =
+          a.candidateBio ||
+          `${candidateExp} experienced ${candidateRole} registered with ${councilName}. Proven track record in patient safety, clinical protocol adherence, and emergency intervention.`;
+
+        const uiStatus = status[a.id] ?? mapBackendStatusToUi(a.status);
+
+        return {
+          id: a.id,
+          name: a.candidateName || "Candidate",
+          role: candidateRole,
+          exp: candidateExp,
+          city: candidateCity,
+          for: a.jobTitle || "Clinical Role",
+          status: uiStatus,
+          verified: a.councilVerified !== false,
+          match: a.matchScore || 94,
+          appliedDate: a.appliedAt
+            ? new Date(a.appliedAt).toLocaleDateString("en-IN", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })
+            : "Recent",
+          currentOrg: a.currentOrg || "Clinical Healthcare Partner",
+          qualification: candidateQual,
+          regNumber: regNum,
+          skills: derivedSkills,
+          noticePeriod: a.candidateNoticePeriod || "Immediate / 15 Days",
+          expectedSalary: a.expectedSalary || "Standard Escrow Scale",
+          phone: a.candidatePhone || a.phone || "+91 ***** *****",
+          email: a.candidateEmail || a.email || "*****@fale.care",
+          bio: dynamicBio,
+          education: `${candidateQual} | ${councilName}`,
+          certifications: [
+            a.councilVerified !== false ? "Council Verified" : "Verification in Progress",
+            "BLS / ACLS Certified",
+            "NABH Clinical Protocols",
+          ],
+          experienceList: [
+            {
+              hospital: "Accredited Healthcare Partner",
+              role: candidateRole,
+              duration: candidateExp,
+              details:
+                "Direct patient care, clinical assessment, bedside monitoring, and multidisciplinary care coordination.",
+            },
+          ],
+          resumeUrl: a.resumeUrl || undefined,
+          resumeFileName: a.resumeFileName || undefined,
+          candidateDocuments: a.candidateDocuments || [],
+        };
+      });
+    }
+
     // Dynamically pull candidates shortlisted by Admin
     const adminShortlistedConverted: Applicant[] = (s.adminApplications || [])
       .filter((a) => a.status === "shortlisted")
@@ -100,7 +252,7 @@ function Applicants() {
       ...a,
       status: status[a.id] ?? a.status,
     }));
-  }, [s.adminApplications, status]);
+  }, [isApiEnabled, apiApplicants, s.adminApplications, status]);
 
   // Unique roles for custom Select
   const roles = useMemo(() => {
@@ -114,9 +266,22 @@ function Applicants() {
       All: allApplicants.length,
       New: allApplicants.filter((a) => a.status === "New").length,
       Shortlisted: allApplicants.filter((a) => a.status === "Shortlisted").length,
+      Confirmed: allApplicants.filter((a) => a.status === "Confirmed").length,
       Interview: allApplicants.filter((a) => a.status === "Interview").length,
+      Offer: allApplicants.filter((a) => a.status === "Offer").length,
+      Hired: allApplicants.filter((a) => a.status === "Hired").length,
     };
   }, [allApplicants]);
+
+  // Dynamic filter tabs
+  const filterTabs = useMemo(() => {
+    const list = ["All", "New", "Shortlisted"];
+    if (counts.Confirmed > 0) list.push("Confirmed");
+    list.push("Interview");
+    if (counts.Offer > 0) list.push("Offer");
+    if (counts.Hired > 0) list.push("Hired");
+    return list;
+  }, [counts]);
 
   // Filtered candidate list
   const filteredList = useMemo(() => {
@@ -138,22 +303,83 @@ function Applicants() {
     });
   }, [allApplicants, filter, selectedRole, search]);
 
-  const handleShortlist = (app: Applicant) => {
+  const handleShortlist = async (app: Applicant) => {
+    if (isApiEnabled) {
+      try {
+        await updateApplicantStatus(app.id, "SHORTLISTED");
+      } catch (e: any) {
+        toast.error(e?.message || "Status update failed");
+        return;
+      }
+    }
     setStatus((prev) => ({ ...prev, [app.id]: "Shortlisted" }));
     toast.success(`${app.name} shortlisted`, {
       description: "Candidate moved to shortlisted candidates.",
     });
   };
 
-  const handleInvite = (app: Applicant) => {
+  const handleConfirmShift = async (app: Applicant) => {
+    if (isApiEnabled) {
+      try {
+        await updateApplicantStatus(app.id, "CONFIRMED");
+      } catch (e: any) {
+        toast.error(e?.message || "Status update failed");
+        return;
+      }
+    }
+    setStatus((prev) => ({ ...prev, [app.id]: "Confirmed" }));
+    toast.success(`Shift Confirmed for ${app.name}!`, {
+      description: `Clinician is now confirmed for "${app.for}". Escrow payout is locked.`,
+    });
+  };
+
+  const handleInvite = async (app: Applicant) => {
+    if (isApiEnabled) {
+      try {
+        await updateApplicantStatus(app.id, "INTERVIEW");
+      } catch (e: any) {
+        toast.error(e?.message || "Status update failed");
+        return;
+      }
+    }
     setStatus((prev) => ({ ...prev, [app.id]: "Interview" }));
     toast.success(`Interview invite sent to ${app.name}`, {
       description: "Candidate has been notified for interview scheduling.",
     });
   };
 
+  const handleMakeOffer = async (app: Applicant) => {
+    if (isApiEnabled) {
+      try {
+        await updateApplicantStatus(app.id, "OFFERED");
+      } catch (e: any) {
+        toast.error(e?.message || "Status update failed");
+        return;
+      }
+    }
+    setStatus((prev) => ({ ...prev, [app.id]: "Offer" }));
+    toast.success(`Offer extended to ${app.name}`, {
+      description: "Candidate has been sent formal offer details for review.",
+    });
+  };
+
+  const handleHire = async (app: Applicant) => {
+    if (isApiEnabled) {
+      try {
+        await updateApplicantStatus(app.id, "HIRED");
+      } catch (e: any) {
+        toast.error(e?.message || "Status update failed");
+        return;
+      }
+    }
+    setStatus((prev) => ({ ...prev, [app.id]: "Hired" }));
+    toast.success(`${app.name} confirmed & hired!`, {
+      description: "Candidate onboarding and escrow milestone initiated.",
+    });
+  };
+
   const handleDownloadPDF = (name: string) => {
-    toast.success(`Downloading resume for ${name}…`, {
+    toast.success(`Downloading resume for ${name}...`, {
       description: "Verified clinical credentials & registration report included.",
     });
   };
@@ -176,9 +402,9 @@ function Applicants() {
           <div className="surface rounded-2xl border border-border bg-card p-3 sm:p-3.5 shadow-xs flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             {/* Status Tabs */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
-              {(["All", "New", "Shortlisted", "Interview"] as const).map((f) => {
+              {filterTabs.map((f) => {
                 const active = filter === f;
-                const count = counts[f];
+                const count = counts[f as keyof typeof counts] || 0;
                 return (
                   <button
                     key={f}
@@ -213,7 +439,7 @@ function Applicants() {
                 <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder="Search candidates…"
+                  placeholder="Search candidates..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="h-9 w-full rounded-xl border border-input bg-card pl-9 pr-7 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all"
@@ -274,14 +500,20 @@ function Applicants() {
                         />
                       )}
                     </div>
-                    <p className="mt-0.5 text-xs text-muted-foreground font-medium truncate">
-                      {a.role} · {a.exp}
+                    <p className="mt-0.5 text-xs text-muted-foreground font-medium truncate flex items-center gap-1.5">
+                      <span>{a.role}</span>
+                      {a.exp && (
+                        <>
+                          <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                          <span>{a.exp}</span>
+                        </>
+                      )}
                     </p>
-                    <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground truncate">
+                    <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground truncate">
                       <HiOutlineMapPin className="h-3.5 w-3.5 shrink-0" />
-                      <span>
-                        {a.city} · Applied for {a.for}
-                      </span>
+                      <span>{a.city}</span>
+                      <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <span className="truncate">Applied for {a.for}</span>
                     </p>
                   </div>
 
@@ -318,45 +550,104 @@ function Applicants() {
                 </Button>
 
                 <div className="flex items-center gap-2">
-                  {a.status === "New" && (
+                  {a.for.toLowerCase().includes("shift") ? (
                     <>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => handleShortlist(a)}
-                        className="rounded-xl text-xs font-semibold"
-                      >
-                        Shortlist
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => handleInvite(a)}
-                        className="rounded-xl text-xs font-semibold shadow-xs"
-                      >
-                        Invite to interview
-                      </Button>
+                      {a.status === "Confirmed" ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 px-1.5">
+                          <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Shift Confirmed
+                        </span>
+                      ) : a.status === "Completed" || a.status === "Hired" ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 px-1.5">
+                          <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Duty Completed
+                        </span>
+                      ) : (
+                        <>
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary px-1.5">
+                            <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Claimed
+                          </span>
+                          <Button
+                            size="sm"
+                            onClick={() => handleConfirmShift(a)}
+                            className="rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+                          >
+                            Confirm Shift
+                          </Button>
+                        </>
+                      )}
                     </>
-                  )}
-
-                  {a.status === "Shortlisted" && (
+                  ) : (
                     <>
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary px-1.5">
-                        <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Shortlisted
-                      </span>
-                      <Button
-                        size="sm"
-                        onClick={() => handleInvite(a)}
-                        className="rounded-xl text-xs font-semibold shadow-xs"
-                      >
-                        Invite to interview
-                      </Button>
-                    </>
-                  )}
+                      {a.status === "New" && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleShortlist(a)}
+                            className="rounded-xl text-xs font-semibold"
+                          >
+                            Shortlist
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleInvite(a)}
+                            className="rounded-xl text-xs font-semibold shadow-xs"
+                          >
+                            Invite to interview
+                          </Button>
+                        </>
+                      )}
 
-                  {a.status === "Interview" && (
-                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary px-1.5">
-                      <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Interview Scheduled
-                    </span>
+                      {a.status === "Shortlisted" && (
+                        <>
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary px-1.5">
+                            <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Shortlisted
+                          </span>
+                          <Button
+                            size="sm"
+                            onClick={() => handleInvite(a)}
+                            className="rounded-xl text-xs font-semibold shadow-xs"
+                          >
+                            Invite to interview
+                          </Button>
+                        </>
+                      )}
+
+                      {a.status === "Interview" && (
+                        <>
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary px-1.5">
+                            <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Interview Scheduled
+                          </span>
+                          <Button
+                            size="sm"
+                            onClick={() => handleMakeOffer(a)}
+                            className="rounded-xl text-xs font-semibold shadow-xs"
+                          >
+                            Extend offer
+                          </Button>
+                        </>
+                      )}
+
+                      {a.status === "Offer" && (
+                        <>
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 px-1.5">
+                            <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Offer Extended
+                          </span>
+                          <Button
+                            size="sm"
+                            onClick={() => handleHire(a)}
+                            className="rounded-xl text-xs font-semibold shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                          >
+                            Confirm Hired
+                          </Button>
+                        </>
+                      )}
+
+                      {a.status === "Hired" && (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 px-1.5">
+                          <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Placed / Hired
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -399,7 +690,7 @@ function Applicants() {
         open={!!selectedResume}
         onOpenChange={(open) => !open && setSelectedResume(null)}
       >
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-0">
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl p-0">
           {selectedResume && (
             <div className="flex flex-col">
               {/* Resume Header / Top Toolbar */}
@@ -421,17 +712,17 @@ function Applicants() {
                           {selectedResume.role}
                         </span>
                       </div>
-                      <DialogDescription className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-3">
+                      <DialogDescription className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
                         <span className="flex items-center gap-1">
                           <HiOutlineMapPin className="h-3.5 w-3.5" />
                           {selectedResume.city}
                         </span>
-                        <span>·</span>
+                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
                         <span className="flex items-center gap-1">
                           <HiOutlinePhone className="h-3.5 w-3.5" />
                           {selectedResume.phone}
                         </span>
-                        <span>·</span>
+                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
                         <span className="flex items-center gap-1">
                           <HiOutlineEnvelope className="h-3.5 w-3.5" />
                           {selectedResume.email}
@@ -439,14 +730,9 @@ function Applicants() {
                       </DialogDescription>
                     </div>
 
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDownloadPDF(selectedResume.name)}
-                      className="rounded-xl text-xs font-semibold gap-1.5 shrink-0"
-                    >
-                      <HiOutlineArrowDownTray className="h-4 w-4" /> Download PDF
-                    </Button>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary-soft text-primary px-3 py-1 text-xs font-semibold shrink-0">
+                      <HiOutlineEye className="h-4 w-4" /> Preview Only
+                    </span>
                   </div>
                 </DialogHeader>
 
@@ -460,91 +746,41 @@ function Applicants() {
                 </div>
               </div>
 
-              {/* Resume Body */}
-              <div className="p-6 space-y-5 text-sm">
-                {/* Summary */}
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                    Professional Summary
-                  </h3>
-                  <p className="text-xs sm:text-sm text-foreground/90 leading-relaxed bg-muted/20 p-3.5 rounded-xl border border-border/60">
-                    {selectedResume.bio}
-                  </p>
-                </div>
-
-                {/* Clinical Work Experience */}
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
-                    Clinical Work Experience
-                  </h3>
+              {/* Candidate Onboarding Resume Preview (Preview Only - No Download) */}
+              <div className="w-full bg-muted/20 p-4 sm:p-5">
+                {selectedResume.resumeUrl ? (
                   <div className="space-y-3">
-                    {selectedResume.experienceList?.map((exp, idx) => (
-                      <div
-                        key={idx}
-                        className="relative pl-4 border-l-2 border-primary/50 space-y-1 text-xs"
-                      >
-                        <div className="flex items-center justify-between font-bold text-foreground">
-                          <span className="text-sm">{exp.role}</span>
-                          <span className="text-[11px] font-normal text-muted-foreground">
-                            {exp.duration}
-                          </span>
-                        </div>
-                        <p className="font-semibold text-primary text-xs flex items-center gap-1">
-                          <HiOutlineBuildingOffice2 className="h-3.5 w-3.5" />
-                          {exp.hospital}
-                        </p>
-                        <p className="text-muted-foreground text-xs leading-relaxed pt-0.5">
-                          {exp.details}
-                        </p>
+                    <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-card border border-border text-xs">
+                      <div className="flex items-center gap-2 truncate">
+                        <HiOutlineDocumentText className="h-4 w-4 text-primary shrink-0" />
+                        <span className="font-semibold text-foreground truncate">
+                          {selectedResume.resumeFileName || "Candidate_Onboarding_Resume.pdf"}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                          (Uploaded during onboarding)
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Skills & Competencies */}
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                    Clinical Skills & Competencies
-                  </h3>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedResume.skills?.map((sk) => (
-                      <span
-                        key={sk}
-                        className="rounded-lg bg-primary-soft text-primary border border-primary/20 px-2.5 py-1 text-xs font-semibold"
-                      >
-                        {sk}
+                      <span className="text-[11px] font-semibold text-muted-foreground shrink-0 flex items-center gap-1">
+                        <HiOutlineEye className="h-3.5 w-3.5 text-primary" /> Preview Only
                       </span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Education & Certifications */}
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                    Education & Credentials
-                  </h3>
-                  <div className="rounded-xl border border-border p-3.5 space-y-2 text-xs">
-                    <div className="flex items-start gap-2">
-                      <HiOutlineAcademicCap className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold text-foreground">{selectedResume.education}</p>
-                        <p className="text-muted-foreground">{selectedResume.qualification}</p>
-                      </div>
                     </div>
-                    {selectedResume.certifications && (
-                      <div className="pt-2 border-t border-border flex flex-wrap gap-1.5">
-                        {selectedResume.certifications.map((c) => (
-                          <span
-                            key={c}
-                            className="rounded-md bg-muted px-2 py-0.5 text-[10px] font-semibold text-foreground"
-                          >
-                            {c}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    <iframe
+                      src={`${selectedResume.resumeUrl}#toolbar=0&navpanes=0&scrollbar=1`}
+                      className="w-full h-[65vh] rounded-xl border border-border bg-white shadow-xs"
+                      title={`${selectedResume.name} Resume`}
+                    />
                   </div>
-                </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-20 px-4 text-center">
+                    <div className="h-14 w-14 rounded-2xl bg-muted flex items-center justify-center mb-3 text-muted-foreground">
+                      <HiOutlineDocumentText className="h-7 w-7" />
+                    </div>
+                    <h4 className="font-bold text-foreground text-sm">No Uploaded Resume Available</h4>
+                    <p className="text-xs text-muted-foreground max-w-sm mt-1.5 leading-relaxed">
+                      This candidate has not uploaded a resume document during their onboarding verification.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Resume Footer with Direct Stage Actions */}
@@ -555,27 +791,78 @@ function Applicants() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      handleShortlist(selectedResume);
-                      setSelectedResume(null);
-                    }}
-                    className="rounded-xl text-xs font-semibold"
-                  >
-                    Shortlist
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      handleInvite(selectedResume);
-                      setSelectedResume(null);
-                    }}
-                    className="rounded-xl text-xs font-semibold shadow-xs"
-                  >
-                    Invite to interview
-                  </Button>
+                  {selectedResume.for.toLowerCase().includes("shift") ? (
+                    (status[selectedResume.id] ?? selectedResume.status) === "Confirmed" ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                        <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Shift Confirmed
+                      </span>
+                    ) : (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          handleConfirmShift(selectedResume);
+                          setSelectedResume(null);
+                        }}
+                        className="rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+                      >
+                        Confirm Shift
+                      </Button>
+                    )
+                  ) : (
+                    <>
+                      {selectedResume.status !== "Shortlisted" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            handleShortlist(selectedResume);
+                            setSelectedResume(null);
+                          }}
+                          className="rounded-xl text-xs font-semibold"
+                        >
+                          Shortlist
+                        </Button>
+                      )}
+                      {selectedResume.status !== "Interview" &&
+                        selectedResume.status !== "Offer" &&
+                        selectedResume.status !== "Hired" && (
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              handleInvite(selectedResume);
+                              setSelectedResume(null);
+                            }}
+                            className="rounded-xl text-xs font-semibold shadow-xs"
+                          >
+                            Invite to interview
+                          </Button>
+                        )}
+                      {selectedResume.status === "Interview" && (
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            handleMakeOffer(selectedResume);
+                            setSelectedResume(null);
+                          }}
+                          className="rounded-xl text-xs font-semibold shadow-xs"
+                        >
+                          Extend offer
+                        </Button>
+                      )}
+                      {selectedResume.status === "Offer" && (
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            handleHire(selectedResume);
+                            setSelectedResume(null);
+                          }}
+                          className="rounded-xl text-xs font-semibold shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                          Confirm Hired
+                        </Button>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             </div>

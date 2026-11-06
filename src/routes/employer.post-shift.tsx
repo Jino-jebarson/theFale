@@ -28,7 +28,6 @@ import { AppShell } from "@/components/fale/AppShell";
 import { OrgMark } from "@/components/fale/JobCard";
 import { SelectField } from "@/components/fale/fields";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -36,8 +35,11 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { useApp, setState } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import { postShift } from "@/lib/adapters/shiftAdapter";
 
 export const Route = createFileRoute("/employer/post-shift")({
   head: () => ({
@@ -147,7 +149,7 @@ const staffPerksList = [
 function PostShiftScreen() {
   const store = useApp();
   const navigate = useNavigate();
-  const hospitalName = String(store.profile["org"] || "Apollo Hospitals");
+  const hospitalName = String(store.profile["org"] || (isApiEnabled ? (store.profile["hospitalName"] || "Healthcare Facility") : "Apollo Hospitals"));
 
   // Form State
   const [roleTitle, setRoleTitle] = useState("ICU Staff Nurse");
@@ -180,6 +182,7 @@ function PostShiftScreen() {
 
   // Success Modal State
   const [publishedShiftModalOpen, setPublishedShiftModalOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // Computed timing & hours
   const activeTimeStr = useMemo(() => {
@@ -267,41 +270,11 @@ function PostShiftScreen() {
   };
 
   // Submit Shift
-  const handlePublishShift = (status: "Open" | "Draft" = "Open") => {
+  const handlePublishShift = async (status: "Open" | "Draft" = "Open") => {
     if (!roleTitle.trim()) {
       toast.error("Please enter a clinical role title.");
       return;
     }
-
-    const newShiftId = "shift_" + Date.now();
-    const formattedDate =
-      dateOption === "Today · Urgent"
-        ? "Tonight"
-        : dateOption === "Tomorrow"
-          ? "Tomorrow"
-          : customDate;
-
-    const newShift = {
-      id: newShiftId,
-      title: roleTitle,
-      org: hospitalName,
-      city,
-      date: `${formattedDate} · ${activeTimeStr}`,
-      time: activeTimeStr,
-      hours: activeHours,
-      rate: hourlyRate,
-      dept,
-      urgent: isUrgent,
-      surge: isUrgent ? surgeReason : undefined,
-      perks: selectedPerks,
-      verified: true,
-      openings,
-      status,
-    };
-
-    setState((s) => ({
-      postedShifts: [newShift, ...(s.postedShifts ?? [])],
-    }));
 
     if (status === "Draft") {
       toast.success("Shift draft saved successfully", {
@@ -311,7 +284,139 @@ function PostShiftScreen() {
       return;
     }
 
-    setPublishedShiftModalOpen(true);
+    const newShiftId = "shift_" + Date.now();
+    const formattedDate =
+      dateOption === "Today · Urgent"
+        ? "Tonight"
+        : dateOption === "Tomorrow"
+          ? "Tomorrow"
+          : dateOption === "Weekend"
+            ? "This Weekend"
+            : customDate;
+
+    // Resolve accurate start and end timestamps based on user selections
+    const now = new Date();
+    let targetYear = now.getFullYear();
+    let targetMonth = now.getMonth();
+    let targetDay = now.getDate();
+
+    if (dateOption === "Tomorrow") {
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      targetYear = tomorrow.getFullYear();
+      targetMonth = tomorrow.getMonth();
+      targetDay = tomorrow.getDate();
+    } else if (dateOption === "Weekend") {
+      const dayOfWeek = now.getDay();
+      const daysUntilSaturday = (6 - dayOfWeek + 7) % 7 || 7;
+      const saturday = new Date(now.getTime() + daysUntilSaturday * 24 * 60 * 60 * 1000);
+      targetYear = saturday.getFullYear();
+      targetMonth = saturday.getMonth();
+      targetDay = saturday.getDate();
+    } else if (dateOption === "Custom Date" && customDate) {
+      const [y, m, d] = customDate.split("-").map(Number);
+      if (y && m && d) {
+        targetYear = y;
+        targetMonth = m - 1;
+        targetDay = d;
+      }
+    }
+
+    let startHour = 20;
+    let startMinute = 0;
+    let endHour = 8;
+    let endMinute = 0;
+
+    if (selectedSlot === "morning") {
+      startHour = 7;
+      startMinute = 0;
+      endHour = 15;
+      endMinute = 0;
+    } else if (selectedSlot === "evening") {
+      startHour = 14;
+      startMinute = 0;
+      endHour = 22;
+      endMinute = 0;
+    } else if (selectedSlot === "night") {
+      startHour = 20;
+      startMinute = 0;
+      endHour = 8;
+      endMinute = 0;
+    } else if (selectedSlot === "custom") {
+      if (customStartTime) {
+        const [ch, cm] = customStartTime.split(":").map(Number);
+        startHour = isNaN(ch) ? 9 : ch;
+        startMinute = isNaN(cm) ? 0 : cm;
+      }
+      if (customEndTime) {
+        const [eh, em] = customEndTime.split(":").map(Number);
+        endHour = isNaN(eh) ? 17 : eh;
+        endMinute = isNaN(em) ? 0 : em;
+      }
+    }
+
+    const startDate = new Date(targetYear, targetMonth, targetDay, startHour, startMinute, 0);
+    let endDate = new Date(targetYear, targetMonth, targetDay, endHour, endMinute, 0);
+    if (endDate <= startDate) {
+      endDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000);
+    }
+
+    const diffHours = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
+    const effectiveHours = Math.max(4, Math.min(24, activeHours || diffHours));
+    const startIso = startDate.toISOString();
+    const endIso = endDate.toISOString();
+
+    const newShift = {
+      id: newShiftId,
+      title: roleTitle,
+      org: hospitalName,
+      city,
+      date: `${formattedDate} · ${activeTimeStr}`,
+      time: activeTimeStr,
+      hours: effectiveHours,
+      rate: hourlyRate,
+      dept,
+      urgent: isUrgent,
+      surge: isUrgent ? surgeReason : undefined,
+      perks: selectedPerks,
+      verified: true,
+      openings,
+      status: "Pending Approval",
+    };
+
+    setState((s) => ({
+      postedShifts: [newShift, ...(s.postedShifts ?? [])],
+    }));
+
+    setSubmitting(true);
+    try {
+      if (isApiEnabled) {
+        await postShift({
+          title: roleTitle.trim(),
+          department: dept || "Critical care",
+          startAt: startIso,
+          endAt: endIso,
+          hours: effectiveHours,
+          ratePerHourPaise: hourlyRate * 100,
+          surgeRatePerHourPaise: isUrgent ? 5000 : 0,
+          surgeLabel: isUrgent ? (surgeReason || "+₹50/hr Night Surge") : undefined,
+          openings: openings || 1,
+          urgent: isUrgent,
+          isUrgent: isUrgent,
+          description: dutyNotes || `${roleTitle} locum duty coverage for ${dept} on ${formattedDate} (${activeTimeStr}).`,
+        });
+      }
+
+      toast.success("Shift Broadcasted Successfully!", {
+        description: "Your locum shift is now submitted to Compliance Admin for verification.",
+      });
+      setPublishedShiftModalOpen(true);
+    } catch (err: any) {
+      toast.error("Failed to broadcast shift", {
+        description: err?.message || "Please check your escrow wallet balance.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -906,6 +1011,7 @@ function PostShiftScreen() {
               <Button
                 type="button"
                 onClick={() => handlePublishShift("Open")}
+                disabled={submitting}
                 className="flex-2 rounded-xl font-bold text-xs h-11 gap-1.5 shadow-sm bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer"
               >
                 <HiOutlineBolt className="h-4 w-4" />
@@ -983,8 +1089,9 @@ function PostShiftScreen() {
                     <span className="font-mono font-bold text-foreground block">
                       ₹{payPerWorker.toLocaleString("en-IN")}
                     </span>
-                    <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">
-                      ✓ 24h Escrow
+                    <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold flex items-center justify-end gap-1">
+                      <HiCheck className="h-3 w-3 stroke-[2.5]" />
+                      <span>24h Escrow</span>
                     </span>
                   </div>
                 </div>
@@ -1019,6 +1126,7 @@ function PostShiftScreen() {
                 type="button"
                 size="lg"
                 onClick={() => handlePublishShift("Open")}
+                disabled={submitting}
                 className="w-full rounded-xl h-11 text-sm font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer flex items-center justify-center gap-2"
               >
                 <HiOutlineBolt className="h-4.5 w-4.5" />

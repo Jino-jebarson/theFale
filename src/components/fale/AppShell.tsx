@@ -11,7 +11,7 @@ import {
   HiOutlineBanknotes, HiBanknotes,
   HiOutlineChatBubbleLeftRight, HiChatBubbleLeftRight,
 } from "react-icons/hi2";
-import { RiBuilding4Line, RiStethoscopeLine, RiVerifiedBadgeFill } from "react-icons/ri";
+import { RiStethoscopeLine, RiVerifiedBadgeFill } from "react-icons/ri";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 import { useApp, setState, Portal } from "@/lib/store";
@@ -23,6 +23,18 @@ import {
 import {
   Sheet, SheetTrigger, SheetContent, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { isApiEnabled } from "@/lib/api";
+import { logout } from "@/lib/adapters/authAdapter";
 
 const candidateNav = [
   { to: "/home", label: "Home", icon: HiOutlineHome, active: HiHome, badge: 0 },
@@ -103,9 +115,9 @@ function AccountMenuContent({
               : portal === "facility"
                 ? String(profile["org"] || "Your Organization")
                 : profile["level"] === "student"
-                ? `Student · ${profile["course"] || profile["role"] || "Healthcare"}`
+                ? `Student - ${profile["course"] || profile["role"] || "Healthcare"}`
                 : profile["level"] === "fresher"
-                ? `Fresher · ${profile["role"] || "Healthcare"}`
+                ? `Fresher - ${profile["role"] || "Healthcare"}`
                 : String(profile["role"] || "Verified Clinician")}
           </p>
         </div>
@@ -179,114 +191,6 @@ function AccountMenuContent({
             <p className="text-xs font-bold text-foreground">Help Center & Escrow Support</p>
             <p className="text-[10px] text-muted-foreground">24/7 hospital concierge & FAQ</p>
           </div>
-        </button>
-      </div>
-
-      <div className="h-px bg-border/60 my-1" />
-
-      {/* Portal Switcher Header */}
-      <div className="px-2.5 py-1 flex items-center justify-between">
-        <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
-          Switch Active Portal
-        </span>
-        <span className="text-[9px] font-bold text-primary bg-primary-soft px-1.5 py-0.2 rounded-full">
-          Multi-Role
-        </span>
-      </div>
-
-      {/* Portal Items */}
-      <div className="space-y-1">
-        {/* Hospital / Facility */}
-        <button
-          type="button"
-          onClick={() => switchPortal("facility")}
-          className={cn(
-            "w-full flex items-center gap-2.5 rounded-2xl p-2.5 text-xs cursor-pointer transition-all border text-left",
-            portal === "facility"
-              ? "bg-primary-soft/60 border-primary/30 text-foreground font-bold shadow-2xs"
-              : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <span
-            className={cn(
-              "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
-              portal === "facility" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
-            )}
-          >
-            <RiBuilding4Line className="h-4 w-4" />
-          </span>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold">Hospital / Facility</span>
-              {portal === "facility" && (
-                <span className="text-[9px] font-extrabold text-primary uppercase tracking-wider">Active</span>
-              )}
-            </div>
-            <p className="text-[10px] text-muted-foreground truncate">Post openings & verify clinicians</p>
-          </div>
-          {portal === "facility" && <HiCheck className="h-4 w-4 text-primary shrink-0" />}
-        </button>
-
-        {/* Candidate Portal */}
-        <button
-          type="button"
-          onClick={() => switchPortal("candidate")}
-          className={cn(
-            "w-full flex items-center gap-2.5 rounded-2xl p-2.5 text-xs cursor-pointer transition-all border text-left",
-            portal === "candidate"
-              ? "bg-primary/10 border-primary/30 text-foreground font-bold shadow-2xs"
-              : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <span
-            className={cn(
-              "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
-              portal === "candidate" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
-            )}
-          >
-            <RiStethoscopeLine className="h-4 w-4" />
-          </span>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold">Candidate Portal</span>
-              {portal === "candidate" && (
-                <span className="text-[9px] font-extrabold text-primary uppercase tracking-wider">Active</span>
-              )}
-            </div>
-            <p className="text-[10px] text-muted-foreground truncate">Apply for jobs & instant shifts</p>
-          </div>
-          {portal === "candidate" && <HiCheck className="h-4 w-4 text-primary shrink-0" />}
-        </button>
-
-        {/* Admin Operations */}
-        <button
-          type="button"
-          onClick={() => switchPortal("admin")}
-          className={cn(
-            "w-full flex items-center gap-2.5 rounded-2xl p-2.5 text-xs cursor-pointer transition-all border text-left",
-            portal === "admin"
-              ? "bg-amber-500/10 border-amber-500/30 text-foreground font-bold shadow-2xs"
-              : "border-transparent hover:bg-muted/60 text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <span
-            className={cn(
-              "grid h-8 w-8 place-items-center rounded-xl shrink-0 transition-colors",
-              portal === "admin" ? "bg-amber-500 text-white" : "bg-muted text-muted-foreground"
-            )}
-          >
-            <HiOutlineShieldCheck className="h-4 w-4" />
-          </span>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold">Admin Operations</span>
-              {portal === "admin" && (
-                <span className="text-[9px] font-extrabold text-amber-600 uppercase tracking-wider">Active</span>
-              )}
-            </div>
-            <p className="text-[10px] text-muted-foreground truncate">Credentialing, KYC & escrow</p>
-          </div>
-          {portal === "admin" && <HiCheck className="h-4 w-4 text-amber-600 shrink-0" />}
         </button>
       </div>
 
@@ -411,13 +315,34 @@ export function AppShell({ children }: { children: ReactNode }) {
     navigate({ to });
   };
 
-  const handleSwitchPortal = (p: Portal) => {
-    closeMenus();
-    switchPortal(p);
+  const [pendingPortalSwitch, setPendingPortalSwitch] = useState<Portal | null>(null);
+
+  const confirmPortalSwitch = async () => {
+    if (!pendingPortalSwitch) return;
+    const target = pendingPortalSwitch;
+    setPendingPortalSwitch(null);
+    if (isApiEnabled) {
+      await logout();
+    }
+    setState({ signedIn: false, portal: target });
+    navigate({ to: "/", search: { portal: target } });
   };
 
-  const handleSignOut = () => {
+  const handleSwitchPortal = (p: Portal) => {
     closeMenus();
+    if (p === activePortal) return;
+    if (isApiEnabled) {
+      setPendingPortalSwitch(p);
+    } else {
+      switchPortal(p);
+    }
+  };
+
+  const handleSignOut = async () => {
+    closeMenus();
+    if (isApiEnabled) {
+      await logout();
+    }
     setState({ signedIn: false });
     navigate({ to: "/" });
   };
@@ -473,10 +398,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             <input
               placeholder={
                 s.portal === "admin"
-                  ? "Search KYC docs, registrations, hospitals…"
+                  ? "Search KYC docs, registrations, hospitals..."
                   : s.portal === "facility"
-                    ? "Search candidates, roles…"
-                    : "Search jobs, hospitals, skills…"
+                    ? "Search candidates, roles..."
+                    : "Search jobs, hospitals, skills..."
               }
               onKeyDown={(e) => e.key === "Enter" && s.portal === "candidate" && navigate({ to: "/jobs", search: { q: (e.target as HTMLInputElement).value } })}
               className="h-10 w-full rounded-full border-0 bg-muted pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -617,6 +542,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           );
         })}
       </nav>
+
+      {/* Portal switch confirmation dialog for API mode */}
+      <AlertDialog open={!!pendingPortalSwitch} onOpenChange={(open) => !open && setPendingPortalSwitch(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch Portal</AlertDialogTitle>
+            <AlertDialogDescription>
+              Switching to the {pendingPortalSwitch === "facility" ? "Hospital / Facility" : pendingPortalSwitch === "admin" ? "Admin Operations" : "Candidate"} portal requires authenticating with an authorized account.
+              You will be signed out of your current session.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingPortalSwitch(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmPortalSwitch} className="bg-primary text-primary-foreground font-bold">
+              Sign Out & Switch
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -636,8 +580,8 @@ export function PageHead({ title, sub, action }: { title: string; sub?: string; 
 export function StatusBadge({ status }: { status: string }) {
   const tone =
     status === "Withdrawn" ? "bg-rose-50 text-rose-700 border border-rose-200/60 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/50"
-      : ["Interview", "Shortlisted", "Open", "Confirmed", "Offer"].includes(status) ? "bg-primary-soft text-primary"
-        : ["Hired", "Verified", "Approved", "Paid"].includes(status) ? "bg-success-soft text-success"
+      : ["Hired", "Verified", "Approved", "Paid", "Confirmed"].includes(status) ? "bg-success-soft text-success"
+      : ["Interview", "Shortlisted", "Open", "Offer"].includes(status) ? "bg-primary-soft text-primary"
           : ["Under review", "New", "Applied", "Pending", "Draft"].includes(status) ? "bg-warning-soft text-warning"
             : "bg-muted text-muted-foreground";
   return <span className={cn("inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold", tone)}>{status}</span>;
