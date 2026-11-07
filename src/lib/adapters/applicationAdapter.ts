@@ -10,6 +10,7 @@ export interface JobApplicationDto {
   candidateId?: string;
   candidateName?: string;
   candidateRole?: string;
+  candidateSpecialty?: string;
   candidateCity?: string;
   candidateState?: string;
   candidateQualification?: string;
@@ -58,26 +59,41 @@ export interface UiApplicationItem {
 export function mapApplicationStatus(status: string): string {
   switch (status?.toUpperCase()) {
     case "PENDING_ADMIN":
+    case "UNDER_ADMIN_SCREENING":
+    case "PENDING":
     case "NEW":
+    case "SUBMITTED":
     case "APPLIED":
       return "Applied";
     case "SHORTLISTED":
     case "UNDER_REVIEW":
+    case "IN_REVIEW":
       return "Under review";
     case "INTERVIEW":
     case "INTERVIEW_SCHEDULED":
       return "Interview";
     case "CONFIRMED":
     case "OFFER":
+    case "OFFER_EXTENDED":
       return "Offer";
     case "HIRED":
+    case "ACCEPTED":
       return "Hired";
     case "WITHDRAWN":
       return "Withdrawn";
     case "REJECTED":
       return "Not selected";
-    default:
-      return status || "Applied";
+    default: {
+      if (!status) return "Applied";
+      const s = status.toLowerCase();
+      if (s.includes("withdrawn")) return "Withdrawn";
+      if (s.includes("reject")) return "Not selected";
+      if (s.includes("hire") || s.includes("accept")) return "Hired";
+      if (s.includes("offer") || s.includes("confirm")) return "Offer";
+      if (s.includes("interview")) return "Interview";
+      if (s.includes("review") || s.includes("shortlist")) return "Under review";
+      return "Applied";
+    }
   }
 }
 

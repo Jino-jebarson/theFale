@@ -104,6 +104,7 @@ export interface FacilityKYCItem {
   status: "pending" | "verified" | "rejected";
   submittedDate: string;
   notes?: string;
+  documents?: any[];
   verifiedAt?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -333,7 +334,7 @@ const initialMockState: AppState = {
       status: "Open",
     },
   ],
-  candidateCredits: 3,
+  candidateCredits: 0,
   unlockedCandidates: [],
   escrowBalance: 48500,
   lockedEscrow: 7200,
@@ -406,25 +407,8 @@ const initialMockState: AppState = {
       refNumber: "FALE-STB-0144",
     },
   ],
-  hospitalBankAccount: {
-    bankName: "HDFC Bank Ltd",
-    accountNumber: "50200084920194",
-    ifsc: "HDFC0000060",
-    accountType: "Current",
-    accountHolderName: "Apollo Health City Private Limited",
-    branch: "Koramangala, Bengaluru",
-    status: "Verified",
-    documentName: "Apollo_Cancelled_Cheque_2026.pdf",
-    documentDate: "14 Oct 2026",
-    verifiedAt: "Cashfree ₹1 Penny Drop Verified",
-  },
-  candidatePayoutMethod: {
-    type: "upi",
-    upiId: "jinovj250@oksbi",
-    accountHolderName: "Jino Jebarson R",
-    status: "Verified",
-    verifiedAt: "Cashfree Instant VPA Validated",
-  },
+  hospitalBankAccount: undefined,
+  candidatePayoutMethod: undefined,
   candidatePayouts: [
     {
       id: "pay-101",
@@ -804,14 +788,23 @@ function load() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (isApiEnabled) {
-        // Enforce rule: remove tokens & personal data from localStorage
-        delete parsed.profile;
-        delete parsed.docs;
-        delete parsed.contact;
-        delete parsed.hospitalBankAccount;
-        delete parsed.candidatePayoutMethod;
-        localStorage.setItem(KEY, JSON.stringify(parsed));
+      if (parsed) {
+        if (parsed.candidateCredits === 3) {
+          parsed.candidateCredits = 0;
+        }
+        if (parsed.candidatePayoutMethod?.upiId === "jinovj250@oksbi" || parsed.candidatePayoutMethod?.upiId === "clinician@oksbi") {
+          delete parsed.candidatePayoutMethod;
+        }
+        if (isApiEnabled) {
+          // Enforce rule: remove tokens & personal data from localStorage
+          delete parsed.candidateCredits;
+          delete parsed.profile;
+          delete parsed.docs;
+          delete parsed.contact;
+          delete parsed.hospitalBankAccount;
+          delete parsed.candidatePayoutMethod;
+          localStorage.setItem(KEY, JSON.stringify(parsed));
+        }
       }
       state = {
         ...initial,
@@ -897,6 +890,8 @@ export function addHuddlePost(postData: {
   anon: boolean;
   text: string;
   image?: string | undefined;
+  audioUrl?: string | undefined;
+  audioDuration?: number | undefined;
   isHospital?: boolean | undefined;
 }) {
   const isAnonymous = Boolean(postData.anon && !postData.isHospital);
@@ -922,6 +917,8 @@ export function addHuddlePost(postData: {
     status: postData.type === "Case" || Boolean(postData.image) ? "review" : "live",
     at: "Just now",
     image: postData.image,
+    audioUrl: postData.audioUrl,
+    audioDuration: postData.audioDuration,
     isHospital: postData.isHospital,
   };
 

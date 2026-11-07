@@ -36,6 +36,7 @@ import { Route as EmployerApplicantsRouteImport } from './routes/employer.applic
 import { Route as EmployerCandidatesRouteImport } from './routes/employer.candidates'
 import { Route as EmployerPostRouteImport } from './routes/employer.post'
 import { Route as EmployerPostShiftRouteImport } from './routes/employer.post-shift'
+import { Route as EmployerPostingsRouteImport } from './routes/employer.postings'
 import { Route as EmployerProfileRouteImport } from './routes/employer.profile'
 import { Route as EmployerWalletRouteImport } from './routes/employer.wallet'
 import { Route as JobsIndexRouteImport } from './routes/jobs.index'
@@ -178,6 +179,11 @@ const EmployerPostShiftRoute = EmployerPostShiftRouteImport.update({
   path: '/employer/post-shift',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EmployerPostingsRoute = EmployerPostingsRouteImport.update({
+  id: '/employer/postings',
+  path: '/employer/postings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EmployerProfileRoute = EmployerProfileRouteImport.update({
   id: '/employer/profile',
   path: '/employer/profile',
@@ -235,6 +241,7 @@ export interface FileRoutesByFullPath {
   '/employer/candidates': typeof EmployerCandidatesRoute
   '/employer/post': typeof EmployerPostRoute
   '/employer/post-shift': typeof EmployerPostShiftRoute
+  '/employer/postings': typeof EmployerPostingsRoute
   '/employer/profile': typeof EmployerProfileRoute
   '/employer/wallet': typeof EmployerWalletRoute
   '/jobs/$id': typeof JobsIdRoute
@@ -270,6 +277,7 @@ export interface FileRoutesByTo {
   '/employer/candidates': typeof EmployerCandidatesRoute
   '/employer/post': typeof EmployerPostRoute
   '/employer/post-shift': typeof EmployerPostShiftRoute
+  '/employer/postings': typeof EmployerPostingsRoute
   '/employer/profile': typeof EmployerProfileRoute
   '/employer/wallet': typeof EmployerWalletRoute
   '/jobs/$id': typeof JobsIdRoute
@@ -306,6 +314,7 @@ export interface FileRoutesById {
   '/employer/candidates': typeof EmployerCandidatesRoute
   '/employer/post': typeof EmployerPostRoute
   '/employer/post-shift': typeof EmployerPostShiftRoute
+  '/employer/postings': typeof EmployerPostingsRoute
   '/employer/profile': typeof EmployerProfileRoute
   '/employer/wallet': typeof EmployerWalletRoute
   '/jobs/$id': typeof JobsIdRoute
@@ -343,6 +352,7 @@ export interface FileRouteTypes {
     | '/employer/candidates'
     | '/employer/post'
     | '/employer/post-shift'
+    | '/employer/postings'
     | '/employer/profile'
     | '/employer/wallet'
     | '/jobs/$id'
@@ -378,6 +388,7 @@ export interface FileRouteTypes {
     | '/employer/candidates'
     | '/employer/post'
     | '/employer/post-shift'
+    | '/employer/postings'
     | '/employer/profile'
     | '/employer/wallet'
     | '/jobs/$id'
@@ -413,6 +424,7 @@ export interface FileRouteTypes {
     | '/employer/candidates'
     | '/employer/post'
     | '/employer/post-shift'
+    | '/employer/postings'
     | '/employer/profile'
     | '/employer/wallet'
     | '/jobs/$id'
@@ -449,6 +461,7 @@ export interface RootRouteChildren {
   EmployerCandidatesRoute: typeof EmployerCandidatesRoute
   EmployerPostRoute: typeof EmployerPostRoute
   EmployerPostShiftRoute: typeof EmployerPostShiftRoute
+  EmployerPostingsRoute: typeof EmployerPostingsRoute
   EmployerProfileRoute: typeof EmployerProfileRoute
   EmployerWalletRoute: typeof EmployerWalletRoute
   JobsIdRoute: typeof JobsIdRoute
@@ -650,6 +663,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EmployerPostShiftRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/employer/postings': {
+      id: '/employer/postings'
+      path: '/employer/postings'
+      fullPath: '/employer/postings'
+      preLoaderRoute: typeof EmployerPostingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/employer/profile': {
       id: '/employer/profile'
       path: '/employer/profile'
@@ -721,6 +741,7 @@ const rootRouteChildren: RootRouteChildren = {
   EmployerCandidatesRoute: EmployerCandidatesRoute,
   EmployerPostRoute: EmployerPostRoute,
   EmployerPostShiftRoute: EmployerPostShiftRoute,
+  EmployerPostingsRoute: EmployerPostingsRoute,
   EmployerProfileRoute: EmployerProfileRoute,
   EmployerWalletRoute: EmployerWalletRoute,
   JobsIdRoute: JobsIdRoute,

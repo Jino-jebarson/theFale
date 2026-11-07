@@ -20,16 +20,23 @@ import {
 import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
-import { OrgMark } from "@/components/fale/JobCard";
-import { SearchEmptyGraphic } from "@/components/fale/SearchEmptyGraphic";
+import { JobCard, OrgMark } from "@/components/fale/JobCard";
+import { EmptyEarningsGraphic } from "@/components/fale/EmptyEarningsGraphic";
 import { WithdrawModal } from "@/components/fale/WithdrawModal";
-import { jobs } from "@/lib/data";
+import { jobs, type Job } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
+import { getJobs } from "@/lib/adapters/jobAdapter";
 import { getMyApplications, withdrawApplication, type UiApplicationItem } from "@/lib/adapters/applicationAdapter";
 
 export const Route = createFileRoute("/applications")({
+  validateSearch: (s: Record<string, unknown>): { tab?: "Active" | "Saved" | "Closed" | undefined } => ({
+    tab:
+      typeof s["tab"] === "string" && ["active", "saved", "closed"].includes(s["tab"].toLowerCase())
+        ? ((s["tab"].charAt(0).toUpperCase() + s["tab"].slice(1).toLowerCase()) as any)
+        : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "My Applications — FALE" },
@@ -45,8 +52,25 @@ export const Route = createFileRoute("/applications")({
 
 const stages = ["Applied", "Under review", "Interview", "Offer", "Hired"] as const;
 
+export function normalizeStage(
+  status?: string
+): "Applied" | "Under review" | "Interview" | "Offer" | "Hired" | "Withdrawn" | "Not selected" | "Position filled" {
+  if (!status) return "Applied";
+  const s = status.trim().toLowerCase();
+  if (s.includes("withdrawn")) return "Withdrawn";
+  if (s.includes("position_filled") || s.includes("position filled")) return "Position filled";
+  if (s.includes("reject") || s.includes("not selected") || s.includes("declined")) return "Not selected";
+  if (s.includes("hire") || s.includes("accept")) return "Hired";
+  if (s.includes("offer") || s.includes("confirm")) return "Offer";
+  if (s.includes("interview")) return "Interview";
+  if (s.includes("review") || s.includes("shortlist")) return "Under review";
+  // "applied", "under_admin_screening", "pending", "pending_admin", "submitted", "new"
+  return "Applied";
+}
+
 function getStatusDetails(status: string, date: string, org: string, isStudent = false) {
-  switch (status) {
+  const normalized = normalizeStage(status);
+  switch (normalized) {
     case "Applied":
       return {
         badgeColor: "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border-blue-200 dark:border-blue-900/40",
@@ -82,6 +106,16 @@ function getStatusDetails(status: string, date: string, org: string, isStudent =
           ? `Internship confirmed! Hospital clinical onboarding and trainee ID issued.`
           : `Offer accepted! Clinical credentialing and onboarding confirmed.`,
       };
+    case "Not selected":
+      return {
+        badgeColor: "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 border-rose-200 dark:border-rose-900/40",
+        summary: `Application review concluded by ${org}. Candidate not selected for this position. Your profile remains active for other openings.`,
+      };
+    case "Position filled":
+      return {
+        badgeColor: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700",
+        summary: `All available openings for this role at ${org} have been filled. Your verified credentials remain active for other clinical roles.`,
+      };
     case "Withdrawn":
       return {
         badgeColor: "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 border-rose-200 dark:border-rose-900/40",
@@ -97,23 +131,34 @@ function getStatusDetails(status: string, date: string, org: string, isStudent =
 
 function Applications() {
   const s = useApp();
-  const [tab, setTab] = useState<"Active" | "Closed">("Active");
+  const { tab: initialTab } = Route.useSearch();
+  const [tab, setTab] = useState<"Active" | "Saved" | "Closed">(initialTab ?? "Active");
+  useEffect(() => {
+    if (initialTab) {
+      setTab(initialTab);
+    }
+  }, [initialTab]);
   const [q, setQ] = useState("");
   const [withdrawingApp, setWithdrawingApp] = useState<{ jobId: string; title: string; org: string } | null>(null);
   const [apiApps, setApiApps] = useState<UiApplicationItem[] | null>(null);
+  const [apiJobs, setApiJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(isApiEnabled);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isApiEnabled) return;
     setLoading(true);
-    getMyApplications()
-      .then((apps) => {
+    Promise.all([
+      getMyApplications().catch(() => []),
+      getJobs().catch(() => []),
+    ])
+      .then(([apps, jobsList]) => {
         setApiApps(apps);
+        setApiJobs(jobsList || []);
         setLoadError(null);
       })
       .catch((err) => {
-        console.error("Failed to load applications:", err);
+        console.error("Failed to load applications & jobs:", err);
         setLoadError("Unable to load applications.");
         setApiApps([]);
       })
@@ -127,9 +172,16 @@ function Applications() {
     (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
 
+  const allJobs = useMemo(() => {
+    if (isApiEnabled && apiJobs.length > 0) {
+      return apiJobs;
+    }
+    return jobs;
+  }, [isApiEnabled, apiJobs]);
+
   const studentInternshipApps = useMemo(() => {
     const customInternships = s.applied.filter((a) => {
-      const j = jobs.find((x) => x.id === a.jobId);
+      const j = allJobs.find((x) => x.id === a.jobId);
       return j && j.kind === "internship";
     });
     if (customInternships.length > 0) return customInternships;
@@ -137,7 +189,7 @@ function Applications() {
       { jobId: "intern-1", status: "Interview", date: "12 Oct 2026" },
       { jobId: "intern-2", status: "Under review", date: "09 Oct 2026" },
     ];
-  }, [s.applied]);
+  }, [s.applied, allJobs]);
 
   const effectiveApplied = useMemo(() => {
     if (isApiEnabled) {
@@ -147,21 +199,36 @@ function Applications() {
   }, [isApiEnabled, apiApps, isStudent, studentInternshipApps, s.applied]);
 
   const activeApps = useMemo(
-    () => effectiveApplied.filter((a) => !["Not selected", "Withdrawn"].includes(a.status)),
+    () => effectiveApplied.filter((a) => !["Not selected", "Withdrawn", "Position filled"].includes(normalizeStage(a.status))),
     [effectiveApplied]
   );
 
   const closedApps = useMemo(
-    () => effectiveApplied.filter((a) => ["Not selected", "Withdrawn"].includes(a.status)),
+    () => effectiveApplied.filter((a) => ["Not selected", "Withdrawn", "Position filled"].includes(normalizeStage(a.status))),
     [effectiveApplied]
   );
+
+  const savedJobs = useMemo(() => {
+    return allJobs.filter((j) => s.saved.includes(j.id));
+  }, [allJobs, s.saved]);
+
+  const filteredSavedJobs = useMemo(() => {
+    if (!q.trim()) return savedJobs;
+    const query = q.toLowerCase();
+    return savedJobs.filter((j) =>
+      j.title.toLowerCase().includes(query) ||
+      j.org.toLowerCase().includes(query) ||
+      j.city.toLowerCase().includes(query) ||
+      (j.dept && j.dept.toLowerCase().includes(query))
+    );
+  }, [savedJobs, q]);
 
   const list = useMemo(() => {
     const baseList = tab === "Active" ? activeApps : closedApps;
     if (!q.trim()) return baseList;
     const query = q.toLowerCase();
     return baseList.filter((a) => {
-      const j = jobs.find((x) => x.id === a.jobId);
+      const j = allJobs.find((x) => x.id === a.jobId);
       const title = (a as any).title || j?.title || "";
       const org = (a as any).org || j?.org || "";
       const city = (a as any).city || j?.city || "";
@@ -173,7 +240,7 @@ function Applications() {
         dept.toLowerCase().includes(query)
       );
     });
-  }, [tab, activeApps, closedApps, q]);
+  }, [tab, activeApps, closedApps, q, allJobs]);
 
   const handleWithdrawConfirm = (reason: string, notes: string) => {
     if (!withdrawingApp) return;
@@ -233,8 +300,9 @@ function Applications() {
         <div className="surface rounded-3xl border border-border/80 bg-card p-2 sm:p-2.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           {/* Segmented Tabs */}
           <div className="flex items-center rounded-2xl bg-muted/60 p-1 text-xs font-semibold border border-border/50 shrink-0">
-            {(["Active", "Closed"] as const).map((t) => {
-              const count = t === "Active" ? activeApps.length : closedApps.length;
+            {(["Active", "Saved", "Closed"] as const).map((t) => {
+              const count =
+                t === "Active" ? activeApps.length : t === "Saved" ? savedJobs.length : closedApps.length;
               return (
                 <button
                   key={t}
@@ -247,7 +315,7 @@ function Applications() {
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <span>{t === "Active" ? "Active" : "Closed"}</span>
+                  <span>{t}</span>
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-[10px] font-black",
@@ -293,10 +361,37 @@ function Applications() {
         <div className="surface p-8 text-center text-muted-foreground">
           <p className="text-sm font-semibold text-rose-500">{loadError}</p>
         </div>
+      ) : tab === "Saved" ? (
+        <div className="space-y-4">
+          {filteredSavedJobs.map((j) => (
+            <JobCard key={j.id} job={j} />
+          ))}
+
+          {!filteredSavedJobs.length && (
+            <div className="surface p-12 text-center rounded-3xl border border-border/80">
+              <EmptyEarningsGraphic className="w-36 h-36 sm:w-44 sm:h-44 mx-auto mb-2" />
+              <h2 className="mt-3 text-sm sm:text-base font-bold text-foreground">
+                {q ? "No saved jobs matching your search" : "No saved roles in your wishlist"}
+              </h2>
+              <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                {q
+                  ? "Try adjusting your search terms or view all saved roles."
+                  : "Bookmark clinical roles that catch your eye while browsing to compare duties, compensation, and apply when ready."}
+              </p>
+              <div className="mt-4">
+                <Link to="/jobs" search={{ q: undefined }}>
+                  <Button size="sm" className="rounded-xl font-bold h-9 px-4">
+                    {isStudent ? "Browse Clinical Internships" : "Browse Clinical Openings"}
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="space-y-4">
         {list.map((a) => {
-          const j = jobs.find((x) => x.id === a.jobId) || {
+          const j = allJobs.find((x) => x.id === a.jobId) || {
             id: a.jobId,
             title: (a as any).title || "Healthcare Role",
             org: (a as any).org || "Hospital Partner",
@@ -313,9 +408,11 @@ function Applications() {
             accredited: true,
             kind: "job",
           };
-          const idx = stages.indexOf(a.status as (typeof stages)[number]);
-          const isWithdrawn = a.status === "Withdrawn";
-          const details = getStatusDetails(a.status, a.date, j.org, isStudent);
+          const normalizedStatus = normalizeStage(a.status);
+          const rawIdx = stages.indexOf(normalizedStatus as (typeof stages)[number]);
+          const idx = rawIdx >= 0 ? rawIdx : 0;
+          const isWithdrawn = normalizedStatus === "Withdrawn";
+          const details = getStatusDetails(normalizedStatus, a.date, j.org, isStudent);
 
           return (
             <div
@@ -541,7 +638,7 @@ function Applications() {
         {/* Empty State */}
         {!list.length && (
           <div className="surface p-12 text-center rounded-3xl border border-border/80">
-            <SearchEmptyGraphic className="w-56 h-44 sm:w-64 sm:h-52 mx-auto mb-2" />
+            <EmptyEarningsGraphic className="w-36 h-36 sm:w-44 sm:h-44 mx-auto mb-2" />
             <h2 className="mt-3 text-sm sm:text-base font-bold text-foreground">
               {tab === "Active" ? "No active applications found" : "No closed applications"}
             </h2>

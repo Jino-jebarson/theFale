@@ -51,9 +51,11 @@ import {
   buyCandidateCredits,
   getHospitalBankAccount,
   updateHospitalBankAccount,
+  getFacilityProfile,
   type FacilityWalletDto,
   type WalletTransactionDto,
   type HospitalBankAccountDto,
+  type FacilityProfileDto,
 } from "@/lib/adapters/facilityAdapter";
 import {
   generateHospitalInvoicePdf,
@@ -104,6 +106,7 @@ function EmployerWalletPage() {
   const [apiWallet, setApiWallet] = useState<FacilityWalletDto | null>(null);
   const [apiTransactions, setApiTransactions] = useState<WalletTransactionDto[]>([]);
   const [apiBank, setApiBank] = useState<HospitalBankAccountDto | null>(null);
+  const [apiProfile, setApiProfile] = useState<FacilityProfileDto | null>(null);
   const [loading, setLoading] = useState(isApiEnabled);
 
   const fetchWalletData = () => {
@@ -113,11 +116,26 @@ function EmployerWalletPage() {
       getFacilityWallet().catch(() => null),
       getWalletTransactions().catch(() => []),
       getHospitalBankAccount().catch(() => null),
+      getFacilityProfile().catch(() => null),
     ])
-      .then(([wallet, txs, bank]) => {
+      .then(([wallet, txs, bank, prof]) => {
         setApiWallet(wallet);
         setApiTransactions(txs);
         setApiBank(bank);
+        if (prof) {
+          setApiProfile(prof);
+          if (prof.hospitalName && store.profile?.org !== prof.hospitalName) {
+            setState((s) => ({
+              ...s,
+              profile: {
+                ...s.profile,
+                org: prof.hospitalName,
+                hospitalName: prof.hospitalName,
+                city: prof.city || s.profile.city,
+              },
+            }));
+          }
+        }
       })
       .finally(() => {
         setLoading(false);
@@ -126,6 +144,11 @@ function EmployerWalletPage() {
 
   useEffect(() => {
     fetchWalletData();
+    const handleWalletUpdated = () => fetchWalletData();
+    window.addEventListener("fale:wallet-updated", handleWalletUpdated);
+    return () => {
+      window.removeEventListener("fale:wallet-updated", handleWalletUpdated);
+    };
   }, []);
 
   // Top Up State
@@ -137,15 +160,17 @@ function EmployerWalletPage() {
 
   // Bank Form State
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const orgName = String(store.profile["org"] || (isApiEnabled ? "Healthcare Facility" : "Apollo Health City"));
+  const orgName = isApiEnabled
+    ? apiProfile?.hospitalName || String(store.profile["org"] || store.profile["hospitalName"] || (store as any)?.facilityProfile?.hospitalName || "Healthcare Facility")
+    : String(store.profile["org"] || "Apollo Hospitals — Main Campus");
   const defaultHolder = store.hospitalBankAccount?.accountHolderName && !store.hospitalBankAccount.accountHolderName.includes("Apollo")
     ? store.hospitalBankAccount.accountHolderName
     : `${orgName} Private Limited`;
 
-  const currentBank: HospitalBankAccount = isApiEnabled && apiBank ? {
-    bankName: apiBank.bankName || "HDFC Bank Ltd",
-    accountNumber: apiBank.accountNumberMasked || (apiBank.accountNumberLast4 ? `•••• •••• ${apiBank.accountNumberLast4}` : "50200084920194"),
-    ifsc: apiBank.ifsc || apiBank.ifscCode || "HDFC0000060",
+  const currentBank: HospitalBankAccount | null = isApiEnabled && apiBank && (apiBank.accountNumber || apiBank.accountNumberMasked || apiBank.accountNumberLast4) ? {
+    bankName: apiBank.bankName || "Current Bank",
+    accountNumber: apiBank.accountNumberMasked || (apiBank.accountNumberLast4 ? `•••• •••• ${apiBank.accountNumberLast4}` : (apiBank.accountNumber || "")),
+    ifsc: apiBank.ifsc || apiBank.ifscCode || "",
     accountType: (apiBank.accountType as any) || "Current",
     accountHolderName: apiBank.accountHolderName || defaultHolder,
     branch: apiBank.branch || "Central Corporate Branch",
@@ -153,27 +178,18 @@ function EmployerWalletPage() {
     documentName: "Hospital_Bank_Mandate.pdf",
     documentDate: apiBank.verifiedAt ? new Date(apiBank.verifiedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Active",
     verifiedAt: "Cashfree Penny Drop Verified",
-  } : store.hospitalBankAccount || {
-    bankName: "HDFC Bank Ltd",
-    accountNumber: "50200084920194",
-    ifsc: "HDFC0000060",
-    accountType: "Current",
-    accountHolderName: defaultHolder,
-    branch: "Koramangala, Bengaluru",
-    status: "Verified",
-    documentName: "Cancelled_Cheque_Hospital.pdf",
-    documentDate: "14 Oct 2026",
-    verifiedAt: "Cashfree ₹1 Penny Drop Verified",
-  };
+  } : store.hospitalBankAccount || null;
+
+  const hasLinkedBank = Boolean(currentBank && currentBank.accountNumber && currentBank.accountNumber.length > 3);
 
   const [formHolderName, setFormHolderName] = useState(defaultHolder);
-  const [formBankName, setFormBankName] = useState(currentBank.bankName);
-  const [formAccNumber, setFormAccNumber] = useState(currentBank.accountNumber);
-  const [formConfirmAcc, setFormConfirmAcc] = useState(currentBank.accountNumber);
-  const [formIfsc, setFormIfsc] = useState(currentBank.ifsc);
-  const [formBranch, setFormBranch] = useState(currentBank.branch);
-  const [formAccType, setFormAccType] = useState<"Current" | "Escrow Sub-Account">(currentBank.accountType);
-  const [formChequeFile, setFormChequeFile] = useState<string>(currentBank.documentName || "Cancelled_Cheque_Hospital.pdf");
+  const [formBankName, setFormBankName] = useState(currentBank?.bankName || "HDFC Bank Ltd");
+  const [formAccNumber, setFormAccNumber] = useState(currentBank?.accountNumber || "");
+  const [formConfirmAcc, setFormConfirmAcc] = useState(currentBank?.accountNumber || "");
+  const [formIfsc, setFormIfsc] = useState(currentBank?.ifsc || "");
+  const [formBranch, setFormBranch] = useState(currentBank?.branch || "");
+  const [formAccType, setFormAccType] = useState<"Current" | "Escrow Sub-Account">(currentBank?.accountType || "Current");
+  const [formChequeFile, setFormChequeFile] = useState<string>(currentBank?.documentName || "Cancelled_Cheque_Hospital.pdf");
   const [isVerifyingPenny, setIsVerifyingPenny] = useState(false);
 
   const escrowBalance = isApiEnabled
@@ -186,16 +202,21 @@ function EmployerWalletPage() {
     ? (apiWallet ? apiWallet.candidateCredits : 0)
     : (store.candidateCredits ?? 0);
   const totalDisbursed = isApiEnabled
-    ? (apiWallet ? paiseToRupees(apiWallet.totalDisbursedPaise) : 0)
-    : (store.totalDisbursed ?? 1240000);
+    ? (apiWallet ? paiseToRupees(apiWallet.totalDisbursedPaise || 0) : 0)
+    : (store.totalDisbursed ?? 0);
 
   const lockedShiftCount = isApiEnabled
     ? (lockedEscrow > 0 ? Math.max(1, Math.round(lockedEscrow / 5000)) : 0)
-    : 2;
+    : (lockedEscrow > 0 ? 2 : 0);
+
+  const hospitalCode = (store.profile?.hospitalCode || store.profile?.id || "99418290")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 8)
+    .toUpperCase();
 
   const virtualAccount = apiWallet?.facilityId
-    ? `FALEHOSP${apiWallet.facilityId.replace(/-/g, "").slice(0, 8).toUpperCase()}`
-    : "FALEHOSP99418290";
+    ? `FALEHOSP${apiWallet.facilityId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase()}`
+    : `FALEHOSP${hospitalCode}`;
 
   const dynamicInvoices = useMemo(() => {
     // 1. If backend API transactions exist, derive real tax invoices
@@ -385,8 +406,40 @@ function EmployerWalletPage() {
     }
   };
 
+  // Modal Open Handlers with Bank Account Enforcement
+  const handleOpenTopUp = () => {
+    if (!hasLinkedBank) {
+      toast.error("Hospital Settlement Bank Account Required", {
+        description: "Please link and verify your hospital bank account before topping up escrow. This is required for RBI escrow custody and automated refunds.",
+      });
+      setBankModalOpen(true);
+      return;
+    }
+    setTopUpModalOpen(true);
+  };
+
+  const handleOpenBuyCredits = () => {
+    if (!hasLinkedBank) {
+      toast.error("Hospital Settlement Bank Account Required", {
+        description: "Please link and verify your hospital bank account before purchasing sourcing credits. This is required for tax invoices and payment reconciliation.",
+      });
+      setBankModalOpen(true);
+      return;
+    }
+    setBuyCreditsModalOpen(true);
+  };
+
   // Top Up Action
   const handleConfirmTopUp = async () => {
+    if (!hasLinkedBank) {
+      toast.error("Hospital Settlement Bank Account Required", {
+        description: "Please link your hospital settlement bank account before depositing escrow funds.",
+      });
+      setTopUpModalOpen(false);
+      setBankModalOpen(true);
+      return;
+    }
+
     const finalAmount = customTopUpInput ? Number(customTopUpInput) : selectedTopUpAmount;
     if (!finalAmount || finalAmount < 1000) {
       toast.error("Minimum top-up is ₹1,000");
@@ -442,6 +495,14 @@ function EmployerWalletPage() {
 
   // Buy Credits Action
   const handleConfirmBuyCredits = async () => {
+    if (!hasLinkedBank) {
+      toast.error("Hospital Settlement Bank Account Required", {
+        description: "Please link your hospital settlement bank account before purchasing candidate credits.",
+      });
+      setBuyCreditsModalOpen(false);
+      setBankModalOpen(true);
+      return;
+    }
     if (!selectedPkg) return;
     setIsProcessing(true);
     const priceNum = Number(selectedPkg.price.replace(/[^0-9]/g, ""));
@@ -478,7 +539,7 @@ function EmployerWalletPage() {
       };
 
       setState((s) => ({
-        candidateCredits: (s.candidateCredits ?? 48) + selectedPkg.credits,
+        candidateCredits: (s.candidateCredits ?? 0) + selectedPkg.credits,
         walletTransactions: [newTx, ...(s.walletTransactions ?? [])],
       }));
 
@@ -497,7 +558,7 @@ function EmployerWalletPage() {
   };
 
   // Penny Drop Verification
-  const handleSaveBankAccount = (e: React.FormEvent) => {
+  const handleSaveBankAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formAccNumber || formAccNumber.length < 8) {
       toast.error("Please enter a valid bank account number");
@@ -517,6 +578,34 @@ function EmployerWalletPage() {
     }
 
     setIsVerifyingPenny(true);
+
+    if (isApiEnabled) {
+      try {
+        const savedDto = await updateHospitalBankAccount({
+          accountHolderName: formHolderName,
+          bankName: formBankName,
+          accountNumber: formAccNumber,
+          ifsc: formIfsc.toUpperCase(),
+          branch: formBranch || "Central Corporate Branch",
+          accountType: formAccType,
+        });
+        setApiBank(savedDto);
+        setIsVerifyingPenny(false);
+        setBankModalOpen(false);
+        toast.success("Hospital Bank Account Verified via Cashfree Penny Drop!", {
+          description: `Name match confirmed: ${formHolderName} (${formBankName})`,
+        });
+        fetchWalletData();
+        window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
+      } catch (err: any) {
+        setIsVerifyingPenny(false);
+        toast.error("Bank account verification failed", {
+          description: err?.message || "Please check details and IFSC code.",
+        });
+      }
+      return;
+    }
+
     setTimeout(() => {
       setIsVerifyingPenny(false);
       const updatedBank: HospitalBankAccount = {
@@ -540,6 +629,7 @@ function EmployerWalletPage() {
       toast.success("Bank Account Verified via Cashfree Penny Drop!", {
         description: `Name match confirmed: ${formHolderName} (${formBankName})`,
       });
+      window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
     }, 1200);
   };
 
@@ -562,19 +652,21 @@ function EmployerWalletPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setBuyCreditsModalOpen(true)}
+              onClick={handleOpenBuyCredits}
               className="rounded-xl text-xs font-semibold h-9 px-3.5 cursor-pointer gap-1.5"
             >
               <HiOutlineSparkles className="h-4 w-4 text-amber-500" />
               <span>Buy Credits</span>
+              
             </Button>
             <Button
               size="sm"
-              onClick={() => setTopUpModalOpen(true)}
+              onClick={handleOpenTopUp}
               className="rounded-xl text-xs font-semibold h-9 px-4 cursor-pointer gap-1.5 bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs"
             >
               <HiOutlinePlus className="h-4 w-4" />
               <span>Top Up Escrow</span>
+              
             </Button>
           </div>
         </div>
@@ -609,7 +701,7 @@ function EmployerWalletPage() {
                 <HiOutlineLockClosed className="h-4 w-4" />
               </span>
               <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full whitespace-nowrap">
-                2 shifts
+                {lockedShiftCount} {lockedShiftCount === 1 ? "shift" : "shifts"}
               </span>
             </div>
             <div>
@@ -633,7 +725,7 @@ function EmployerWalletPage() {
               </span>
               <button
                 type="button"
-                onClick={() => setBuyCreditsModalOpen(true)}
+                onClick={handleOpenBuyCredits}
                 className="text-[10px] font-bold text-blue-700 dark:text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 cursor-pointer whitespace-nowrap px-2.5 py-0.5 rounded-full transition-colors"
               >
                 + Recharge
@@ -667,7 +759,7 @@ function EmployerWalletPage() {
                 Total Disbursed
               </span>
               <div className="text-lg sm:text-2xl font-bold font-mono tracking-tight text-foreground mt-1">
-                ₹12,40,000
+                ₹{totalDisbursed.toLocaleString("en-IN")}
               </div>
               <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
                 All-time payments
@@ -676,74 +768,149 @@ function EmployerWalletPage() {
           </div>
         </section>
 
-        {/* Compact Institutional Virtual Account Strip */}
-        <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between sm:justify-start gap-2 flex-wrap">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
-                    <HiOutlineBuildingLibrary className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <span className="text-xs sm:text-sm font-bold text-foreground block">
-                      Nodal Escrow Virtual Account
-                    </span>
-                    <span className="text-[10px] font-mono text-muted-foreground block">
-                      RTGS · NEFT · IMPS
+        {/* Hospital Settlement & Payout Bank Account Strip */}
+        {!hasLinkedBank ? (
+          <section className="rounded-2xl border border-dashed border-border/80 bg-card p-5 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary mt-0.5">
+                  <HiOutlineBuildingLibrary className="h-5 w-5" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-foreground">
+                      Hospital Settlement &amp; Payout Bank Account
+                    </h3>
+                    <span className="text-[10px] text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-semibold">
+                      Not Linked
                     </span>
                   </div>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                    Link your hospital's official current account to enable automated shift payouts, security deposits, and escrow refunds.
+                  </p>
                 </div>
-                <span className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap">
-                  RBI Compliant
-                </span>
               </div>
-              <p className="text-[11px] text-muted-foreground pt-1">
-                Bank transfers directly credit your Available Escrow balance within 15 minutes.
-              </p>
+
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => setBankModalOpen(true)}
+                className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary/90 text-white shrink-0 shadow-xs cursor-pointer gap-1.5"
+              >
+                <HiOutlinePlus className="h-4 w-4" />
+                <span>Enter Hospital Bank Details</span>
+              </Button>
             </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-              <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
-                <span className="text-[10px] text-muted-foreground block font-medium">Account No.</span>
-                <div className="flex items-center justify-between gap-1 mt-0.5">
-                  <span className="font-mono font-bold text-foreground truncate">FALEHOSP99418290</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy("FALEHOSP99418290", "acc", "Account number")}
-                    className="text-muted-foreground hover:text-foreground cursor-pointer"
-                  >
-                    {copiedKey === "acc" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
-                  </button>
+          </section>
+        ) : currentBank ? (
+          <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between sm:justify-start gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                      <HiOutlineBuildingLibrary className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <span className="text-xs sm:text-sm font-bold text-foreground block">
+                        Hospital Linked Bank Account
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground block">
+                        {currentBank.accountType} Account
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap">
+                    {currentBank.verifiedAt || "Penny Drop Verified"}
+                  </span>
                 </div>
+                <p className="text-[11px] text-muted-foreground pt-1">
+                  Active settlement account for escrow refunds, shift reimbursements, and payouts.
+                </p>
               </div>
 
-              <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
-                <span className="text-[10px] text-muted-foreground block font-medium">IFSC</span>
-                <div className="flex items-center justify-between gap-1 mt-0.5">
-                  <span className="font-mono font-bold text-foreground">ICIC0000041</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy("ICIC0000041", "ifsc", "IFSC code")}
-                    className="text-muted-foreground hover:text-foreground cursor-pointer"
-                  >
-                    {copiedKey === "ifsc" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
-                  </button>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
+                  <span className="text-[10px] text-muted-foreground block font-medium">Account No.</span>
+                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                    <span className="font-mono font-bold text-foreground truncate">
+                      {showFullAcc
+                        ? currentBank.accountNumber
+                        : `•••• •••• ${currentBank.accountNumber.slice(-4)}`}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowFullAcc(!showFullAcc)}
+                        className="text-muted-foreground hover:text-foreground cursor-pointer"
+                        title={showFullAcc ? "Hide Account" : "Show Account"}
+                      >
+                        {showFullAcc ? <HiOutlineEyeSlash className="h-3.5 w-3.5" /> : <HiOutlineEye className="h-3.5 w-3.5" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(currentBank.accountNumber, "bankacc", "Account number")}
+                        className="text-muted-foreground hover:text-foreground cursor-pointer"
+                        title="Copy Account Number"
+                      >
+                        {copiedKey === "bankacc" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
-                <span className="text-[10px] text-muted-foreground block font-medium">Bank</span>
-                <span className="font-semibold text-foreground block mt-0.5 truncate">ICICI Bank</span>
-              </div>
+                <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
+                  <span className="text-[10px] text-muted-foreground block font-medium">IFSC</span>
+                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                    <span className="font-mono font-bold text-foreground">{currentBank.ifsc}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(currentBank.ifsc, "ifsc", "IFSC code")}
+                      className="text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      {copiedKey === "ifsc" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
 
-              <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
-                <span className="text-[10px] text-muted-foreground block font-medium">Beneficiary</span>
-                <span className="font-semibold text-foreground block mt-0.5 truncate">The Fale Escrow</span>
+                <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
+                  <span className="text-[10px] text-muted-foreground block font-medium">Bank Name</span>
+                  <span className="font-semibold text-foreground block mt-0.5 truncate">{currentBank.bankName}</span>
+                </div>
+
+                <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
+                  <span className="text-[10px] text-muted-foreground block font-medium">Beneficiary</span>
+                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                    <span
+                      className="font-semibold text-foreground truncate"
+                      title={currentBank.accountHolderName}
+                    >
+                      {currentBank.accountHolderName}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleCopy(
+                          currentBank.accountHolderName,
+                          "bene",
+                          "Beneficiary name"
+                        )
+                      }
+                      className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                      title="Copy Beneficiary Name"
+                    >
+                      {copiedKey === "bene" ? (
+                        <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" />
+                      ) : (
+                        <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         {/* Ledger, Statements & Bank Account Management */}
         <section className="rounded-2xl border border-border/80 bg-card shadow-2xs overflow-hidden">
@@ -772,7 +939,13 @@ function EmployerWalletPage() {
                   >
                     <span>{tab.label}</span>
                     {tab.id === "bank" && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      <span
+                        className={cn(
+                          "h-1.5 w-1.5 rounded-full",
+                          hasLinkedBank ? "bg-emerald-500" : "bg-amber-500"
+                        )}
+                        title={hasLinkedBank ? "Bank account verified" : "No bank account linked"}
+                      />
                     )}
                   </button>
                 ))}
@@ -989,8 +1162,32 @@ function EmployerWalletPage() {
           {/* TAB 3: Linked Hospital Bank Account & Cancelled Cheque Management */}
           {activeTab === "bank" && (
             <div className="p-4 sm:p-6 space-y-6">
-              {/* Top Banner with Penny Drop Status */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-muted/30 border border-border/70">
+              {!hasLinkedBank ? (
+                <div className="rounded-2xl border border-dashed border-border/80 bg-card p-10 text-center space-y-4">
+                  <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
+                    <HiOutlineBuildingLibrary className="h-7 w-7" />
+                  </div>
+                  <div className="max-w-md mx-auto space-y-1">
+                    <h3 className="text-base font-bold text-foreground">No Settlement Bank Account Linked</h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Link your hospital's official current account to enable automated escrow refunds, standby reimbursements, and bank mandates.
+                    </p>
+                  </div>
+                  <div>
+                    <Button
+                      size="sm"
+                      onClick={() => setBankModalOpen(true)}
+                      className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary/90 text-white shadow-xs cursor-pointer"
+                    >
+                      <HiOutlinePlus className="h-4 w-4 mr-1.5" />
+                      Link Hospital Bank Account
+                    </Button>
+                  </div>
+                </div>
+              ) : currentBank ? (
+                <>
+                  {/* Top Banner with Penny Drop Status */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-muted/30 border border-border/70">
                 <div className="flex items-start gap-3">
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 mt-0.5">
                     <HiOutlineShieldCheck className="h-5 w-5" />
@@ -1141,8 +1338,10 @@ function EmployerWalletPage() {
                   </Button>
                 </div>
               </div>
-            </div>
-          )}
+            </>
+          ) : null}
+        </div>
+      )}
         </section>
 
       </div>
@@ -1696,8 +1895,12 @@ function EmployerWalletPage() {
 
                   <div className="p-3.5 rounded-xl bg-muted/30 border border-border/60 space-y-1">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Settlement Account</span>
-                    <p className="text-xs font-mono font-bold text-foreground">Virtual A/C: {selectedInvoice.nodalAccount || "FALEHOSP99418290"}</p>
-                    <p className="text-[11px] text-muted-foreground">IFSC: ICIC0000041 • ICICI Bank</p>
+                    <p className="text-xs font-mono font-bold text-foreground">
+                      {currentBank ? `${currentBank.bankName} (•••• ${currentBank.accountNumber.slice(-4)})` : (selectedInvoice.nodalAccount ? `Virtual A/C: ${selectedInvoice.nodalAccount}` : "Escrow Wallet Linked")}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {currentBank ? `IFSC: ${currentBank.ifsc}` : "Automated Escrow Reconciliation"}
+                    </p>
                     <p className="text-[11px] text-muted-foreground">Period: {selectedInvoice.period}</p>
                   </div>
                 </div>

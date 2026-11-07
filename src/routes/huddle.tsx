@@ -40,6 +40,8 @@ import {
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill, RiStethoscopeLine, RiChatVoiceLine, RiHospitalLine } from "react-icons/ri";
 import { toast } from "sonner";
+import { VoiceNotePlayer } from "@/components/huddle/VoiceNotePlayer";
+import { VoiceNoteRecorder } from "@/components/huddle/VoiceNoteRecorder";
 import { AppShell, initials } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -311,6 +313,7 @@ function HuddlePage() {
   const [postText, setPostText] = useState("");
   const [postAnon, setPostAnon] = useState(false);
   const [postImage, setPostImage] = useState<string | null>(null);
+  const [postAudio, setPostAudio] = useState<{ audioUrl: string; duration: number } | null>(null);
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({});
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 
@@ -677,6 +680,8 @@ function HuddlePage() {
           helpfulCount: p.upvotes || 0,
           userHelpful: Boolean(p.hasUpvoted),
           image: (p as any).image || (p as any).imageUrl,
+          audioUrl: (p as any).audioUrl || (p as any).audio,
+          audioDuration: (p as any).audioDuration,
           replies: (postComments[p.id] || []).map((c) => ({
             id: c.id,
             authorName: c.authorName || "Verified Clinician",
@@ -744,14 +749,15 @@ function HuddlePage() {
       });
       return;
     }
-    if (!postText.trim() || safety.st === "block" || safety.st === "hire") {
-      toast.error(safety.why);
+    if ((!postText.trim() && !postAudio) || safety.st === "block" || safety.st === "hire") {
+      toast.error(safety.why || "Please enter text or record a voice note.");
       return;
     }
 
     const isAnon = Boolean(postAnon && !isHospital);
     const hasImage = Boolean(postImage);
     const isUnderReview = postType === "Case" || hasImage;
+    const effectiveText = postText.trim() || (postAudio ? "Clinical voice discussion" : "");
 
     // Optimistically update store
     const created = addHuddlePost({
@@ -761,19 +767,23 @@ function HuddlePage() {
       authorRole: isAnon ? "Verified Clinician" : userRole,
       authorLevel: isHospital ? "hospital" : userLevel,
       anon: isAnon,
-      text: postText.trim(),
+      text: effectiveText,
       image: postImage || undefined,
+      audioUrl: postAudio?.audioUrl,
+      audioDuration: postAudio?.duration,
       isHospital,
     });
 
     if (isApiEnabled) {
       createHuddlePost({
-        title: postText.slice(0, 80),
-        body: postText.trim(),
+        title: (postText.trim() || (postAudio ? "Voice Note" : "")).slice(0, 80),
+        body: effectiveText,
         type: postType,
         field: postField,
         anon: isAnon,
         image: postImage || undefined,
+        audioUrl: postAudio?.audioUrl,
+        audioDuration: postAudio?.duration,
       })
         .then((newPost) => {
           if (newPost && newPost.id) {
@@ -785,6 +795,8 @@ function HuddlePage() {
               isAnonymous: isAnon,
               image: postImage || undefined,
               imageUrl: postImage || undefined,
+              audioUrl: postAudio?.audioUrl || (newPost as any).audioUrl,
+              audioDuration: postAudio?.duration || (newPost as any).audioDuration,
               status: isUnderReview ? "review" : "live",
             };
             if (!isUnderReview) {
@@ -799,6 +811,7 @@ function HuddlePage() {
 
     setPostText("");
     setPostImage(null);
+    setPostAudio(null);
     setPostAnon(false);
 
     if (created.status === "review") {
@@ -1744,6 +1757,17 @@ function HuddlePage() {
                           </div>
                         )}
 
+                        {/* Voice Note Audio Preview (When Recorded) */}
+                        {postAudio && (
+                          <div className="rounded-2xl p-2 bg-primary/5 border border-primary/20">
+                            <VoiceNoteRecorder
+                              existingAudio={postAudio}
+                              onRecorded={setPostAudio}
+                              onDiscard={() => setPostAudio(null)}
+                            />
+                          </div>
+                        )}
+
                         {/* Safety Guardrail Indicator (Real-Time Regex) */}
                         {postText.trim() && (
                           <div
@@ -1861,6 +1885,13 @@ function HuddlePage() {
                               />
                             </label>
 
+                            {/* Voice Note Recorder Button */}
+                            {!postAudio && (
+                              <VoiceNoteRecorder
+                                onRecorded={setPostAudio}
+                                onDiscard={() => setPostAudio(null)}
+                              />
+                            )}
 
                           </div>
 
@@ -1873,7 +1904,7 @@ function HuddlePage() {
                             )}
                             <Button
                               type="submit"
-                              disabled={!postText.trim() || safety.st === "block" || safety.st === "hire"}
+                              disabled={(!postText.trim() && !postAudio) || safety.st === "block" || safety.st === "hire"}
                               className="h-9 bg-primary hover:bg-primary-hover text-white font-black text-xs px-5 rounded-xl shadow-xs cursor-pointer w-full sm:w-auto justify-center"
                             >
                               <HiOutlinePaperAirplane className="h-4 w-4 mr-1.5 shrink-0" />
@@ -2001,6 +2032,17 @@ function HuddlePage() {
                                 onError={(e) => {
                                   (e.currentTarget as HTMLElement).style.display = "none";
                                 }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Voice Note Audio Player if present */}
+                          {post.audioUrl && (
+                            <div className="mt-3">
+                              <VoiceNotePlayer
+                                audioUrl={post.audioUrl}
+                                duration={post.audioDuration}
+                                authorRole={post.authorRole}
                               />
                             </div>
                           )}

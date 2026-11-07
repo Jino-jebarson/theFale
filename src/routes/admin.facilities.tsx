@@ -72,11 +72,20 @@ function formatFacilityDocType(type?: string) {
     case "FACILITY_REGISTRATION":
       return "Clinical Establishment Act (CEA) License";
     case "NABH_ACCREDITATION":
+    case "NABH_CERTIFICATE":
       return "NABH / NABL Accreditation Certificate";
     case "GST_CERTIFICATE":
       return "GSTIN Statutory Tax Registration";
     case "REPRESENTATIVE_AUTHORIZATION":
       return "Authorized Signatory Sanction Letter";
+    case "FIRE_SAFETY":
+      return "Fire Safety NOC Clearance";
+    case "POLLUTION_CONTROL":
+      return "State Pollution Control Clearance";
+    case "BMW_AUTHORIZATION":
+      return "Bio-Medical Waste Authorization";
+    case "HOSPITAL_PHOTO":
+      return "Hospital Infrastructure Photo";
     case "PHOTO":
       return "Hospital Emblem & Logo Asset";
     default:
@@ -265,6 +274,7 @@ function FacilityKYCAdmin() {
           status,
           submittedDate: dto.createdAt ? new Date(dto.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Recent",
           notes: dto.kycNotes,
+          documents: dto.documents || [],
           verifiedAt: dto.verifiedAt ? new Date(dto.verifiedAt).toLocaleString('en-IN') : undefined,
           createdAt: dto.createdAt ? new Date(dto.createdAt).toLocaleString('en-IN') : undefined,
           updatedAt: dto.updatedAt ? new Date(dto.updatedAt).toLocaleString('en-IN') : undefined,
@@ -359,67 +369,20 @@ function FacilityKYCAdmin() {
     setRejectReason("");
   };
 
-    const getFacilityDocuments = (fac: FacilityKYCItem) => {
-    const list: any[] = [];
-    
-    // 1. Clinical Establishment Act License
-    list.push({
-      id: `cea-${fac.id}`,
-      documentType: "CLINICAL_ESTABLISHMENT_LICENSE",
-      originalFileName: fac.licenseNumber ? `CEA_License_${fac.licenseNumber}.pdf` : "Clinical_Establishment_Act_License.pdf",
-      fileSizeBytes: 245760,
-      mimeType: "application/pdf",
-      verified: fac.status === "verified",
-    });
-
-    // 2. NABH / NABL Accreditation Certificate
-    if (fac.nabhNumber || fac.accreditation?.toLowerCase().includes("nabh")) {
-      list.push({
-        id: `nabh-${fac.id}`,
-        documentType: "NABH_ACCREDITATION",
-        originalFileName: fac.nabhNumber ? `NABH_Accreditation_${fac.nabhNumber}.pdf` : "NABH_Accreditation_Certificate.pdf",
-        fileSizeBytes: 312320,
-        mimeType: "application/pdf",
-        verified: fac.status === "verified",
-      });
+  const getFacilityDocuments = (fac: FacilityKYCItem) => {
+    if (fac.documents && fac.documents.length > 0) {
+      return fac.documents.map((d: any) => ({
+        id: d.id,
+        documentType: d.documentType,
+        originalFileName: d.originalFileName || "document.pdf",
+        fileSizeBytes: d.fileSizeBytes || (d.fileUrl?.length ? Math.round(d.fileUrl.length * 0.75) : 256000),
+        mimeType: d.mimeType || (d.fileUrl?.startsWith("data:image/") || d.originalFileName?.match(/\.(jpg|jpeg|png|webp)$/i) ? "image/png" : "application/pdf"),
+        fileUrl: d.fileUrl,
+        verified: d.verified ?? (fac.status === "verified"),
+      }));
     }
 
-    // 3. GST Certificate
-    if (fac.gst) {
-      list.push({
-        id: `gst-${fac.id}`,
-        documentType: "GST_CERTIFICATE",
-        originalFileName: `GSTIN_${fac.gst}.pdf`,
-        fileSizeBytes: 189440,
-        mimeType: "application/pdf",
-        verified: fac.status === "verified",
-      });
-    }
-
-    // 4. Authorized Representative Sanction Letter
-    list.push({
-      id: `auth-${fac.id}`,
-      documentType: "REPRESENTATIVE_AUTHORIZATION",
-      originalFileName: `Representative_Authorization_${(fac.contactPerson || "Admin").replace(/\s+/g, "_")}.pdf`,
-      fileSizeBytes: 204800,
-      mimeType: "application/pdf",
-      verified: fac.status === "verified",
-    });
-
-    // 5. Hospital Logo (if uploaded)
-    if (fac.logoUrl) {
-      list.push({
-        id: `logo-${fac.id}`,
-        documentType: "PHOTO",
-        originalFileName: `${fac.name.replace(/\s+/g, "_")}_Official_Logo.png`,
-        fileSizeBytes: 125000,
-        mimeType: "image/png",
-        fileUrl: fac.logoUrl,
-        verified: fac.status === "verified",
-      });
-    }
-
-    return list;
+    return [];
   };
 
   const pendingCount = facilities.filter((f) => f.status === "pending").length;
@@ -1068,7 +1031,12 @@ function FacilityKYCAdmin() {
 
                   {/* List of uploaded dynamic documents */}
                   <div className="space-y-2.5">
-                    {facilityDocs.map((doc, idx) => {
+                    {facilityDocs.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-muted-foreground border border-dashed rounded-xl">
+                        No verification documents uploaded.
+                      </div>
+                    ) : (
+                      facilityDocs.map((doc, idx) => {
                       const isImage = doc.mimeType?.startsWith("image/") || doc.originalFileName.match(/\.(jpg|jpeg|png|webp)$/i);
                       return (
                         <div
@@ -1148,7 +1116,7 @@ function FacilityKYCAdmin() {
                           </div>
                         </div>
                       );
-                    })}
+                    }))}
                   </div>
                 </div>
 

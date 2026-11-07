@@ -14,7 +14,7 @@ import { OrgMark } from "@/components/fale/JobCard";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SelectField } from "@/components/fale/fields";
-import { professions } from "@/lib/data";
+import { professions, indianCities } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
@@ -165,6 +165,7 @@ function Post() {
   const [title, setTitle] = useState("Staff Nurse — ICU");
   const [profession, setProfession] = useState("Nurse");
   const [dept, setDept] = useState("Critical care");
+  const [workLocation, setWorkLocation] = useState(hospitalCity);
   const [empType, setEmpType] = useState("Full-time");
   const [minSalary, setMinSalary] = useState("35000");
   const [maxSalary, setMaxSalary] = useState("50000");
@@ -174,6 +175,11 @@ function Post() {
   const [description, setDescription] = useState(presets[0].desc);
   const [requireCouncilReg, setRequireCouncilReg] = useState(true);
   const [isUrgent, setIsUrgent] = useState(false);
+
+  const cityOptions = useMemo(() => {
+    const base = [hospitalCity, ...indianCities];
+    return Array.from(new Set(base.filter(Boolean)));
+  }, [hospitalCity]);
 
   // Apply preset
   const handleApplyPreset = (p: (typeof presets)[0]) => {
@@ -212,6 +218,7 @@ function Post() {
     const compensation = minN && maxN
       ? `₹${minN.toLocaleString("en-IN")} – ₹${maxN.toLocaleString("en-IN")} / mo`
       : "₹40,000 – ₹55,000 / mo";
+    const selectedCity = workLocation || hospitalCity;
 
     setState((s) => ({
       postedJobs: [
@@ -219,6 +226,7 @@ function Post() {
           id: newId,
           title,
           dept: dept || "General Inpatient",
+          city: selectedCity,
           openings: Number(openings) || 1,
           status: postingStatus,
         },
@@ -232,7 +240,7 @@ function Post() {
             org: hospitalName,
             type: "job" as const,
             dept: dept || "General",
-            city: hospitalCity,
+            city: selectedCity,
             compensation,
             expOrHours: experience,
             status: "pending" as const,
@@ -253,7 +261,8 @@ function Post() {
           department: dept || "General",
           employmentType: empType || "Full-time",
           isInternship: empType === "Internship",
-          city: hospitalCity || "Bengaluru",
+          city: selectedCity || "Bengaluru",
+          workLocation: selectedCity || "Bengaluru",
           openings: Number(openings) || 1,
           salaryMinPaise: (Number(minSalary) || 0) * 100,
           salaryMaxPaise: (Number(maxSalary) || 0) * 100,
@@ -301,7 +310,7 @@ function Post() {
               to="/employer/post-shift"
               className="px-3.5 py-1.5 text-xs font-semibold rounded-lg text-muted-foreground hover:text-foreground transition-all flex items-center gap-1.5"
             >
-              <HiOutlineBolt className="h-3.5 w-3.5 text-emerald-500" />
+              <HiOutlineBolt className="h-3.5 w-3.5 text-primary" />
               <span>On-Demand Shift</span>
             </Link>
           </div>
@@ -356,8 +365,8 @@ function Post() {
                 />
               </div>
 
-              {/* Profession & Department */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Profession, Department & Work Location */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <SelectField
                   label="Profession"
                   required
@@ -375,6 +384,16 @@ function Post() {
                   value={dept}
                   onChange={setDept}
                   placeholder="Select department"
+                  searchable
+                />
+
+                <SelectField
+                  label="Work location"
+                  required
+                  options={cityOptions}
+                  value={workLocation}
+                  onChange={setWorkLocation}
+                  placeholder="Select city / location"
                   searchable
                 />
               </div>
@@ -654,7 +673,7 @@ function Post() {
                     <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
                       <span className="flex items-center gap-1 truncate">
                         <HiOutlineMapPin className="h-3 w-3 shrink-0 text-primary" />
-                        <span>{hospitalCity}</span>
+                        <span>{workLocation || hospitalCity}</span>
                       </span>
                       <span>•</span>
                       <span className="truncate">{dept}</span>

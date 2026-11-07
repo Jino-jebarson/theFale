@@ -46,6 +46,7 @@ export interface ShiftClaimDto {
   startAt?: string;
   endAt?: string;
   hours?: number;
+  actualHours?: number;
   status: string;
   claimedAt?: string;
   checkedInAt?: string;
@@ -162,13 +163,19 @@ export async function checkInShift(claimId: string): Promise<ShiftClaimDto> {
   });
 }
 
+export interface CompleteShiftPayload {
+  panNumber?: string;
+  tdsConsent?: boolean;
+  actualHours?: number;
+}
+
 export async function completeShift(
   claimId: string,
-  tdsData?: { panNumber?: string; tdsConsent?: boolean }
+  payload?: CompleteShiftPayload
 ): Promise<ShiftClaimDto> {
   return apiFetch<ShiftClaimDto>(`/shifts/claims/${claimId}/complete`, {
     method: "POST",
-    body: tdsData ? JSON.stringify(tdsData) : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
   });
 }
 

@@ -68,10 +68,12 @@ import {
 import { setState, useApp } from "@/lib/store";
 import { isApiEnabled } from "@/lib/api";
 import { onboardCandidate } from "@/lib/adapters/candidateAdapter";
-import { onboardFacility } from "@/lib/adapters/facilityAdapter";
+import { onboardFacility, uploadFacilityDocument } from "@/lib/adapters/facilityAdapter";
 import {
   councilByProfession,
   councilOptions,
+  getCouncilsForRole,
+  getOnlineRegisterName,
   departmentsByProfession,
   designationPlaceholders,
   indianCities,
@@ -90,6 +92,8 @@ import { cn } from "@/lib/utils";
 interface OnboardingSearch {
   role?: string;
   portal?: string;
+  mode?: string;
+  edit?: boolean | string;
 }
 
 export const Route = createFileRoute("/onboarding")({
@@ -97,6 +101,8 @@ export const Route = createFileRoute("/onboarding")({
     const res: OnboardingSearch = {};
     if (typeof search["role"] === "string" && search["role"]) res.role = search["role"];
     if (typeof search["portal"] === "string" && search["portal"]) res.portal = search["portal"];
+    if (typeof search["mode"] === "string" && search["mode"]) res.mode = search["mode"];
+    if (search["edit"] != null) res.edit = String(search["edit"]);
     return res;
   },
   head: () => ({
@@ -396,6 +402,12 @@ function Onboarding() {
   const isCandidateParam = roleParam === "candidate" || roleParam === "pro";
 
   useEffect(() => {
+    const isEditMode = search?.mode === "edit" || search?.edit === "true" || search?.edit === true;
+    if (isEditMode) {
+      // User is editing existing profile from profile page - do not redirect to /home!
+      return;
+    }
+
     if (s.signedIn && s.onboarded) {
       if (s.portal === "facility") navigate({ to: "/employer" });
       else if (s.portal === "admin") navigate({ to: "/admin" });
@@ -480,6 +492,19 @@ function Onboarding() {
     };
   });
   const [docs, setDocs] = useState<Record<string, string>>(s.docs);
+  const [docDataUrls, setDocDataUrls] = useState<Record<string, string>>({});
+
+  const setDocDataUrlEntry = (label: string, dataUrl?: string) => {
+    setDocDataUrls((prev) => {
+      const updated = { ...prev };
+      if (dataUrl) {
+        updated[label] = dataUrl;
+      } else {
+        delete updated[label];
+      }
+      return updated;
+    });
+  };
   const set = (k: string) => (v: unknown) => setP((x) => ({ ...x, [k]: v as string }));
   const str = (k: string) => (p[k] as string) ?? "";
   const arr = (k: string) => (p[k] as string[]) ?? [];
@@ -524,7 +549,7 @@ function Onboarding() {
       return;
     }
     const currentCouncil = str("council") || councilByProfession[str("role") || "Doctor"] || councilOptions[0] || "";
-    const onlineRegName = currentCouncil ? onlineCouncilRegisters[currentCouncil] : undefined;
+    const onlineRegName = currentCouncil ? (onlineCouncilRegisters[currentCouncil] || getOnlineRegisterName(currentCouncil)) : undefined;
 
     setVerifyingReg(true);
     setTimeout(() => {
@@ -659,9 +684,12 @@ function Onboarding() {
     };
 
     if (isApiEnabled) {
-      const studentResume = docs["Resume / CV"] || docs["CV / Resume"] || docs["Resume"] || undefined;
-      const studentIdDoc = docs["Identity proof"] || undefined;
+      const studentResumeName = docs["Resume / CV"] || docs["CV / Resume"] || docs["Resume"] || undefined;
+      const studentResumeUrl = docDataUrls["Resume / CV"] || docDataUrls["CV / Resume"] || docDataUrls["Resume"] || studentResumeName;
+      const studentIdDocName = docs["Identity proof"] || undefined;
+      const studentIdDocUrl = docDataUrls["Identity proof"] || studentIdDocName;
       const proofDocName = docs["Proof of study"];
+      const proofDocUrl = docDataUrls["Proof of study"] || proofDocName;
 
       onboardCandidate({
         fullName: str("name").trim(),
@@ -678,14 +706,14 @@ function Onboarding() {
         studyYear: str("studyYear"),
         universityRegNo: str("univReg") || undefined,
         expectedGraduationYear: parseInt(str("grad")) || new Date().getFullYear() + 2,
-        bonafideCertificateUrl: proof === "bonafide" ? (proofDocName || "bonafide.pdf") : undefined,
+        bonafideCertificateUrl: proof === "bonafide" ? (proofDocUrl || "bonafide.pdf") : undefined,
         bonafideCertificateFileName: proof === "bonafide" ? (proofDocName || "bonafide.pdf") : undefined,
-        studentIdCardUrl: proof === "college_id" ? (proofDocName || "student_id.pdf") : undefined,
+        studentIdCardUrl: proof === "college_id" ? (proofDocUrl || "student_id.pdf") : undefined,
         studentIdCardFileName: proof === "college_id" ? (proofDocName || "student_id.pdf") : undefined,
-        identityProofUrl: studentIdDoc,
-        identityProofFileName: studentIdDoc,
-        resumeUrl: studentResume,
-        resumeFileName: studentResume,
+        identityProofUrl: studentIdDocUrl,
+        identityProofFileName: studentIdDocName,
+        resumeUrl: studentResumeUrl,
+        resumeFileName: studentResumeName,
         languages: arr("languages"),
         profilePhotoUrl: photoPreview || undefined,
         profilePhotoFileName: photoPreview ? "ProfilePhoto.jpg" : undefined,
@@ -893,13 +921,13 @@ function Onboarding() {
         languages: arr("languages"),
         profilePhotoUrl: finalPhoto || undefined,
         profilePhotoFileName: finalPhoto ? "ProfilePhoto.jpg" : undefined,
-        resumeUrl: docs["Resume / CV"] || docs["CV / Resume"] || docs["Resume"] || undefined,
+        resumeUrl: docDataUrls["Resume / CV"] || docDataUrls["CV / Resume"] || docDataUrls["Resume"] || docs["Resume / CV"] || docs["CV / Resume"] || docs["Resume"] || undefined,
         resumeFileName: docs["Resume / CV"] || docs["CV / Resume"] || docs["Resume"] || undefined,
-        registrationCertificateUrl: docs["Professional registration"] || docs["State Council Registration"] || docs["Registration certificate"] || docs["NMC Certificate"] || undefined,
+        registrationCertificateUrl: docDataUrls["Professional registration"] || docDataUrls["State Council Registration"] || docDataUrls["Registration certificate"] || docDataUrls["NMC Certificate"] || docs["Professional registration"] || docs["State Council Registration"] || docs["Registration certificate"] || docs["NMC Certificate"] || undefined,
         registrationCertificateFileName: docs["Professional registration"] || docs["State Council Registration"] || docs["Registration certificate"] || docs["NMC Certificate"] || undefined,
-        qualificationCertificateUrl: docs["Highest qualification certificate"] || docs["Degree certificate"] || undefined,
+        qualificationCertificateUrl: docDataUrls["Highest qualification certificate"] || docDataUrls["Degree certificate"] || docs["Highest qualification certificate"] || docs["Degree certificate"] || undefined,
         qualificationCertificateFileName: docs["Highest qualification certificate"] || docs["Degree certificate"] || undefined,
-        identityProofUrl: docs["Identity proof"] || undefined,
+        identityProofUrl: docDataUrls["Identity proof"] || docs["Identity proof"] || undefined,
         identityProofFileName: docs["Identity proof"] || undefined,
       }).catch((err) => {
         console.error("API onboarding error:", err);
@@ -947,6 +975,34 @@ function Onboarding() {
         const contactPhone = cleanDigits.length === 10 ? `+91${cleanDigits}` : "+919999933333";
         const contactEmail = str("email") || (s.contact.includes("@") ? s.contact : `admin@${str("org").toLowerCase().replace(/[^a-z0-9]/g, "") || "hospital"}.com`);
 
+        // Build document list directly in onboarding payload (exact candidate pattern)
+        const facilityDocMapping: Record<string, string> = {
+          "Facility registration / licence": "FACILITY_REGISTRATION",
+          "GST certificate (if applicable)": "GST_CERTIFICATE",
+          "GST certificate": "GST_CERTIFICATE",
+          "Representative authorization": "REPRESENTATIVE_AUTHORIZATION",
+          "NABH / NABL certificate": "NABH_CERTIFICATE",
+          "NABH / NABL certificate (optional)": "NABH_CERTIFICATE",
+          "Fire safety clearance": "FIRE_SAFETY",
+          "Pollution control board clearance": "POLLUTION_CONTROL",
+          "Bio-medical waste authorization": "BMW_AUTHORIZATION",
+          "Hospital photo": "HOSPITAL_PHOTO",
+        };
+
+        const docsToUpload: { documentType: string; originalFileName: string; fileUrl: string }[] = [];
+        for (const [docLabel, fileName] of Object.entries(finalDocs)) {
+          if (!fileName) continue;
+          const dataUrl = docDataUrls[docLabel];
+          if (dataUrl && dataUrl.startsWith("data:")) {
+            const docType = facilityDocMapping[docLabel] || docLabel.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+            docsToUpload.push({
+              documentType: docType,
+              originalFileName: fileName,
+              fileUrl: dataUrl,
+            });
+          }
+        }
+
         await onboardFacility({
           hospitalName: str("org").trim() || "Healthcare Facility",
           facilityType: str("orgType") || "Multispecialty Hospital",
@@ -971,6 +1027,15 @@ function Onboarding() {
           hiringNeeds: arr("hiring"),
           logoUrl: finalPrimary || undefined,
           facilityPhotos: finalPhotos.length > 0 ? finalPhotos : undefined,
+          facilityRegistrationUrl: docDataUrls["Facility registration / licence"],
+          facilityRegistrationFileName: docs["Facility registration / licence"],
+          gstCertificateUrl: docDataUrls["GST certificate (if applicable)"] || docDataUrls["GST certificate"],
+          gstCertificateFileName: docs["GST certificate (if applicable)"] || docs["GST certificate"],
+          representativeAuthorizationUrl: docDataUrls["Representative authorization"],
+          representativeAuthorizationFileName: docs["Representative authorization"],
+          nabhCertificateUrl: docDataUrls["NABH / NABL certificate"] || docDataUrls["NABH / NABL certificate (optional)"],
+          nabhCertificateFileName: docs["NABH / NABL certificate"] || docs["NABH / NABL certificate (optional)"],
+          documents: docsToUpload.length > 0 ? docsToUpload : undefined,
         });
       } catch (err: any) {
         console.error("Facility API onboarding error:", err);
@@ -990,7 +1055,9 @@ function Onboarding() {
     navigate({ to: "/employer" });
   };
 
-  const handleApplyResumeData = (data: ParsedResumeData, fileName: string) => {
+  const SAMPLE_PDF_BASE64 = "data:application/pdf;base64,JVBERi0xLjQKJcOkw7zDtsOfCjEgMCBvYmoKPDwvVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlIC9QYWdlcwovS2lkcyBbMyAwIFJdCi9Db3VudCAxPj4KZW5kb2JqCjMgMCBvYmoKPDwvVHlwZSAvUGFnZQovUGFyZW50IDIgMCBSCi9NZWRpYUJveCBbMCAwIDYxMiA3OTJdCi9SZXNvdXJjZXMgPDw+Pj4+CmVuZG9iago0IDAgb2JqCjw8L0xlbmd0aCAwPj4Kc3RyZWFtCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDUKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4gCjAwMDAwMDAwNjggMDAwMDAgbiAKMDAwMDAwMDEyMSAwMDAwMCBuIAowMDAwMDAwMjEzIDAwMDAwIG4gCnRyYWlsZXIKPDwvU2l6ZSA1Ci9Sb290IDEgMCBSPj4Kc3RhcnR4cmVmCjI2MQolJUVPRg==";
+
+  const handleApplyResumeData = (data: ParsedResumeData, fileName: string, fileDataUrl?: string) => {
     setP((prev) => {
       const updated: P = { ...prev };
       if (data.name) updated["name"] = data.name;
@@ -1024,6 +1091,12 @@ function Onboarding() {
       ...prev,
       "Resume / CV": fileName,
     }));
+    if (fileDataUrl) {
+      setDocDataUrls((prev) => ({
+        ...prev,
+        "Resume / CV": fileDataUrl,
+      }));
+    }
 
     if (data.employer || data.designation) {
       setExps([
@@ -1043,8 +1116,11 @@ function Onboarding() {
   };
 
   const fillDemo = () => {
-    const allDocs = Object.fromEntries(neededDocs(f ? "facility" : "candidate", str("role") || "Nurse").map((d) => [d.label, `${(d.label.split(" ")[0] ?? "document").toLowerCase()}-sample.pdf`]));
+    const needed = neededDocs(f ? "facility" : "candidate", str("role") || "Nurse");
+    const allDocs = Object.fromEntries(needed.map((d) => [d.label, `${(d.label.split(" ")[0] ?? "document").toLowerCase()}-sample.pdf`]));
+    const allUrls = Object.fromEntries(needed.map((d) => [d.label, SAMPLE_PDF_BASE64]));
     setDocs(allDocs);
+    setDocDataUrls(allUrls);
     toast.success("Sample documents attached");
   };
 
@@ -1052,7 +1128,7 @@ function Onboarding() {
   const setAddress = (v: AddressValue) => setP((x) => ({ ...x, ...v } as P));
   const addressBlock = (
     <div className="space-y-4">
-      <AddressField label={f ? "Registered address" : "Current address"} value={address} onChange={setAddress} />
+      <AddressField label={f ? "Registered address" : "Professional address"} value={address} onChange={setAddress} />
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label="City" required {...input("city")} placeholder="Enter city" />
         <SelectField label="State" required options={indianStates} value={str("state")} onChange={set("state")} />
@@ -1269,8 +1345,9 @@ function Onboarding() {
             subtitle="Clinical registration council details for government verification"
           >
             {(() => {
-              const selectedCouncil = str("council") || councilByProfession[str("role") || "Doctor"] || councilOptions[0] || "";
-              const onlineRegisterName = selectedCouncil ? onlineCouncilRegisters[selectedCouncil] : undefined;
+              const roleCouncils = getCouncilsForRole(str("role"));
+              const selectedCouncil = str("council") || councilByProfession[str("role") || "Doctor"] || roleCouncils[0] || "";
+              const onlineRegisterName = selectedCouncil ? (onlineCouncilRegisters[selectedCouncil] || getOnlineRegisterName(selectedCouncil)) : undefined;
 
               return (
                 <div className="space-y-4">
@@ -1278,7 +1355,7 @@ function Onboarding() {
                     <SelectField
                       label="Registration council"
                       required
-                      options={councilOptions}
+                      options={roleCouncils}
                       value={selectedCouncil}
                       onChange={(val) => {
                         set("council")(val);
@@ -1731,14 +1808,20 @@ function Onboarding() {
                     hint={d.hint}
                     required={true}
                     file={docs[d.label]}
-                    onFile={(n) =>
+                    onFile={(n, dataUrl) => {
                       setDocs((x) => {
                         const c = { ...x };
                         if (n) c[d.label] = n;
                         else delete c[d.label];
                         return c;
-                      })
-                    }
+                      });
+                      setDocDataUrls((x) => {
+                        const c = { ...x };
+                        if (dataUrl) c[d.label] = dataUrl;
+                        else delete c[d.label];
+                        return c;
+                      });
+                    }}
                   />
                   <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
                     <span className="text-slate-500">
@@ -1771,14 +1854,15 @@ function Onboarding() {
                 isDigiLocker={!f && d.label === "Identity proof"}
                 onDigiLocker={() => setShowDigiLockerModal(true)}
                 isVerified={d.label === "Identity proof" && !!docs[d.label]?.includes("DigiLocker")}
-                onFile={(n) =>
+                onFile={(n, dataUrl) => {
                   setDocs((x) => {
                     const c = { ...x };
                     if (n) c[d.label] = n;
                     else delete c[d.label];
                     return c;
-                  })
-                }
+                  });
+                  setDocDataUrlEntry(d.label, dataUrl);
+                }}
               />
             );
           })}
@@ -2655,11 +2739,20 @@ function Onboarding() {
               label="Upload a photo or PDF"
               hint="Up to 5 MB"
               file={docs["Proof of study"]}
-              onFile={(fileName: string | undefined) => {
+              onFile={(fileName: string | undefined, dataUrl?: string) => {
                 setDocs((prev) => {
                   const copy = { ...prev };
                   if (fileName) {
                     copy["Proof of study"] = fileName;
+                  } else {
+                    delete copy["Proof of study"];
+                  }
+                  return copy;
+                });
+                setDocDataUrls((prev) => {
+                  const copy = { ...prev };
+                  if (dataUrl) {
+                    copy["Proof of study"] = dataUrl;
                   } else {
                     delete copy["Proof of study"];
                   }
@@ -2675,6 +2768,7 @@ function Onboarding() {
                   onClick={() => {
                     const sampleName = str("proof") === "bonafide" ? "bonafide-certificate.pdf" : "college-id-card.jpg";
                     setDocs((prev) => ({ ...prev, "Proof of study": sampleName }));
+                    setDocDataUrls((prev) => ({ ...prev, "Proof of study": SAMPLE_PDF_BASE64 }));
                     toast.success(`Attached ${sampleName} for demo`);
                   }}
                   className="text-xs font-semibold text-primary hover:underline cursor-pointer inline-flex items-center gap-1"

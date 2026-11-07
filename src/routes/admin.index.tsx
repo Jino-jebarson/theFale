@@ -734,10 +734,10 @@ function AdminDashboard() {
           </div>
           <div className="mt-2.5 flex items-center justify-between gap-2">
             <span className="text-3xl font-black font-mono tracking-tight text-foreground">
-              {metrics?.slaTurnaroundHours ?? 2.8} hrs
+              {metrics?.slaTurnaroundHours !== undefined ? metrics.slaTurnaroundHours : 0} hrs
             </span>
             <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
-              {metrics?.slaOnTimePercentage ?? 98.6}% on-time
+              {metrics?.slaOnTimePercentage !== undefined ? metrics.slaOnTimePercentage : 100}% on-time
             </span>
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground leading-normal">Target verification under 24 hrs</p>

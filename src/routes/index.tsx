@@ -631,17 +631,96 @@ function SignInPage() {
                     maxLength={1}
                     value={v}
                     disabled={isSubmitting}
-                    className={v ? "filled" : ""}
+                    className={`${v ? "filled" : ""} ${isSubmitting ? "opacity-60 pointer-events-none" : ""}`}
                     onChange={(e) => handleOtpChange(i, e.target.value)}
                     onKeyDown={(e) => handleOtpKeyDown(i, e)}
                   />
                 ))}
               </div>
+
+              {isSubmitting && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "10px",
+                    width: "100%",
+                    padding: "10px 14px",
+                    marginTop: "6px",
+                    borderRadius: "12px",
+                    background: "rgba(255, 90, 0, 0.08)",
+                    border: "1px solid rgba(255, 90, 0, 0.25)",
+                    color: "var(--primary, #ff5a00)",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                  }}
+                >
+                  <svg
+                    style={{
+                      width: "16px",
+                      height: "16px",
+                      animation: "spin 0.8s linear infinite",
+                      flexShrink: 0,
+                    }}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeDasharray="31.4 31.4"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span>Verifying OTP, please wait…</span>
+                </div>
+              )}
+
               {otpErr && (
                 <div className="err" style={{ textAlign: "center", marginTop: 4 }}>
                   {otpErr}
                 </div>
               )}
+
+              <button
+                type="button"
+                className="s-btn primary"
+                style={{ width: "100%", marginTop: "6px" }}
+                disabled={isSubmitting || otpValues.some((v) => !v)}
+                onClick={() => submitOtp(otpValues.join(""))}
+              >
+                {isSubmitting ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                    <svg
+                      style={{
+                        width: "16px",
+                        height: "16px",
+                        animation: "spin 0.8s linear infinite",
+                      }}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                    >
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="3"
+                        strokeDasharray="31.4 31.4"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <span>Verifying code…</span>
+                  </span>
+                ) : (
+                  <span>Verify OTP</span>
+                )}
+              </button>
+
               <p className="note">
                 Didn't get it?{" "}
                 <button

@@ -276,8 +276,40 @@ export async function savePayoutMethod(data: CandidatePayoutMethod): Promise<Can
 }
 
 /**
+ * Get configured candidate payout destination.
+ */
+export async function getPayoutMethod(): Promise<CandidatePayoutMethod | null> {
+  return apiFetch<CandidatePayoutMethod | null>("/candidates/me/payout-methods");
+}
+
+/**
  * Export standardized verified CV.
  */
 export async function exportCandidateCv(): Promise<string> {
   return apiFetch<string>("/candidates/me/export-cv");
 }
+
+export interface CandidateViewStats {
+  totalViews: number;
+  viewsToday: number;
+  hospitalsViewedToday: number;
+  weeklyGrowthPercent: number;
+  hasIncreased: boolean;
+}
+
+/**
+ * Get dynamic institutional view analytics for candidate profile.
+ */
+export async function getCandidateViewStats(): Promise<CandidateViewStats> {
+  return apiFetch<CandidateViewStats>("/candidates/me/view-stats");
+}
+
+/**
+ * Record an institutional view when a facility or recruiter views a candidate profile.
+ */
+export async function recordCandidateProfileView(candidateId: string, facilityName?: string): Promise<void> {
+  const query = facilityName ? `?facilityName=${encodeURIComponent(facilityName)}` : "";
+  await apiFetch(`/candidates/${candidateId}/view${query}`, { method: "POST" });
+}
+
+

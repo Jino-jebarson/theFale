@@ -57,6 +57,7 @@ function Verify() {
   // Fallback OTP State
   const [code, setCode] = useState("");
   const [timer, setTimer] = useState(30);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (search.id && isApiEnabled) {
@@ -83,6 +84,8 @@ function Verify() {
   }, [timer]);
 
   const submit = async (value = code) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     if (isApiEnabled) {
       try {
         const contact = s.contact || "+919876543210";
@@ -109,12 +112,15 @@ function Verify() {
         }
       } catch (err: any) {
         toast.error(err?.message || "Invalid verification code.");
+      } finally {
+        setIsSubmitting(false);
       }
       return;
     }
 
     if (value !== "123456") {
       toast.error("That code doesn't match. Try 123456 in this preview.");
+      setIsSubmitting(false);
       return;
     }
     setState({ signedIn: true, candidateLevel: undefined, onboarded: false });
@@ -122,6 +128,7 @@ function Verify() {
       to: "/onboarding",
       search: { role: s.portal === "facility" ? "employer" : "candidate" },
     });
+    setIsSubmitting(false);
   };
 
   // If viewing a public QR credential badge
@@ -222,8 +229,14 @@ function Verify() {
           Edit
         </Link>
       </p>
-      <div className="mt-7">
-        <InputOTP maxLength={6} value={code} onChange={setCode} onComplete={(value) => submit(value)}>
+      <div className={`mt-7 ${isSubmitting ? "opacity-60 pointer-events-none" : ""}`}>
+        <InputOTP
+          maxLength={6}
+          value={code}
+          disabled={isSubmitting}
+          onChange={setCode}
+          onComplete={(value) => submit(value)}
+        >
           <InputOTPGroup className="gap-2">
             {Array.from({ length: 6 }).map((_, i) => (
               <InputOTPSlot
@@ -235,13 +248,33 @@ function Verify() {
           </InputOTPGroup>
         </InputOTP>
       </div>
+
+      {isSubmitting && (
+        <div className="mt-3 flex items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/10 py-2.5 px-4 text-xs font-semibold text-primary animate-in fade-in duration-200">
+          <div className="h-4 w-4 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+          <span>Verifying OTP, please wait…</span>
+        </div>
+      )}
+
       {!isApiEnabled && (
         <p className="mt-3 text-xs text-muted-foreground">
           Preview code: <b className="text-primary">123456</b>
         </p>
       )}
-      <Button size="lg" className="mt-6 w-full" onClick={() => submit()} disabled={code.length < 6}>
-        Verify & continue
+      <Button
+        size="lg"
+        className="mt-6 w-full"
+        onClick={() => submit()}
+        disabled={code.length < 6 || isSubmitting}
+      >
+        {isSubmitting ? (
+          <span className="inline-flex items-center gap-2">
+            <div className="h-4 w-4 rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground animate-spin" />
+            <span>Verifying code…</span>
+          </span>
+        ) : (
+          <span>Verify & continue</span>
+        )}
       </Button>
       <p className="mt-5 text-center text-sm text-muted-foreground">
         Didn't get it?{" "}

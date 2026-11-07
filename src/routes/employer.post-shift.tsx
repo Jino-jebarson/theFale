@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   HiOutlineClock,
@@ -38,7 +38,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useApp, setState } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { isApiEnabled } from "@/lib/api";
+import { isApiEnabled, paiseToRupees } from "@/lib/api";
+import { getFacilityWallet, getHospitalBankAccount } from "@/lib/adapters/facilityAdapter";
 import { postShift } from "@/lib/adapters/shiftAdapter";
 
 export const Route = createFileRoute("/employer/post-shift")({
@@ -151,6 +152,28 @@ function PostShiftScreen() {
   const navigate = useNavigate();
   const hospitalName = String(store.profile["org"] || (isApiEnabled ? (store.profile["hospitalName"] || "Healthcare Facility") : "Apollo Hospitals"));
 
+  const [availableEscrow, setAvailableEscrow] = useState<number>(0);
+  const [hasLinkedBank, setHasLinkedBank] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isApiEnabled) {
+      Promise.all([
+        getFacilityWallet().catch(() => null),
+        getHospitalBankAccount().catch(() => null),
+      ]).then(([wallet, bank]) => {
+        if (wallet) {
+          setAvailableEscrow(paiseToRupees(wallet.availableBalancePaise));
+        }
+        if (bank && (bank.accountNumber || (bank as any).accountNumberMasked || (bank as any).accountNumberLast4)) {
+          setHasLinkedBank(true);
+        }
+      });
+    } else {
+      setAvailableEscrow(store.escrowBalance ?? 0);
+      setHasLinkedBank(Boolean(store.hospitalBankAccount && store.hospitalBankAccount.accountNumber && store.hospitalBankAccount.accountNumber.length > 3));
+    }
+  }, [store.escrowBalance, store.hospitalBankAccount]);
+
   // Form State
   const [roleTitle, setRoleTitle] = useState("ICU Staff Nurse");
   const [dept, setDept] = useState("Critical care");
@@ -182,6 +205,8 @@ function PostShiftScreen() {
 
   // Success Modal State
   const [publishedShiftModalOpen, setPublishedShiftModalOpen] = useState(false);
+  const [bankRequiredModalOpen, setBankRequiredModalOpen] = useState(false);
+  const [insufficientEscrowModalOpen, setInsufficientEscrowModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Computed timing & hours
@@ -281,6 +306,16 @@ function PostShiftScreen() {
         description: "You can review and publish this shift anytime from your dashboard.",
       });
       navigate({ to: "/employer" });
+      return;
+    }
+
+    if (!hasLinkedBank) {
+      setBankRequiredModalOpen(true);
+      return;
+    }
+
+    if (availableEscrow < totalEscrowAmount) {
+      setInsufficientEscrowModalOpen(true);
       return;
     }
 
@@ -445,7 +480,7 @@ function PostShiftScreen() {
               <span>Permanent Job</span>
             </Link>
             <span className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-card text-foreground shadow-xs border border-border/60 flex items-center gap-1.5 cursor-default">
-              <HiOutlineBolt className="h-3.5 w-3.5 text-emerald-500" />
+              <HiOutlineBolt className="h-3.5 w-3.5 text-primary" />
               <span>On-Demand Shift</span>
             </span>
           </div>
@@ -1102,21 +1137,58 @@ function PostShiftScreen() {
             <div className="rounded-2xl border border-border/80 bg-card p-5 shadow-2xs space-y-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-foreground flex items-center gap-1.5">
-                  <HiOutlineLockClosed className="h-4 w-4 text-emerald-600" />
+                  <HiOutlineLockClosed className="h-4 w-4 text-primary" />
                   <span>Escrow Allocation</span>
                 </span>
-                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-sm">
+                <span className="font-mono font-bold text-primary text-sm">
                   ₹{totalEscrowAmount.toLocaleString("en-IN")}
                 </span>
               </div>
 
               <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                <div className="h-full bg-emerald-500 rounded-full w-full" />
+                <div className="h-full bg-primary rounded-full w-full" />
               </div>
 
               <div className="text-[11px] text-muted-foreground leading-relaxed flex items-center justify-between">
                 <span>Nearby verified {dept} specialists:</span>
                 <span className="font-bold text-foreground">~{estimatedTalentCount} available</span>
+              </div>
+
+              {/* Escrow Balance & Bank Account Status */}
+              <div className="pt-2.5 border-t border-border/60 space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Available Escrow:</span>
+                  <span className={cn("font-mono font-bold", availableEscrow >= totalEscrowAmount ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>
+                    ₹{availableEscrow.toLocaleString("en-IN")}
+                  </span>
+                </div>
+                {!hasLinkedBank ? (
+                  <div className="rounded-lg p-2 bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 flex items-center justify-between gap-1.5">
+                    <span>Bank account not linked</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate({ to: "/employer/wallet" })}
+                      className="font-bold underline hover:text-amber-900 cursor-pointer text-[10px]"
+                    >
+                      Link Bank &rarr;
+                    </button>
+                  </div>
+                ) : availableEscrow < totalEscrowAmount ? (
+                  <div className="rounded-lg p-2 bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 flex items-center justify-between gap-1.5">
+                    <span>Insufficient escrow balance</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate({ to: "/employer/wallet" })}
+                      className="font-bold underline hover:text-amber-900 cursor-pointer text-[10px]"
+                    >
+                      Top Up &rarr;
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                    <span>✓ Settlement bank verified · Escrow funds ready</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1200,6 +1272,117 @@ function PostShiftScreen() {
               className="rounded-xl font-semibold text-xs h-10 cursor-pointer"
             >
               Return to Employer Dashboard
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Hospital Settlement Bank Required Modal */}
+      <Dialog open={bankRequiredModalOpen} onOpenChange={setBankRequiredModalOpen}>
+        <DialogContent className="sm:max-w-md p-6 text-center space-y-4 rounded-2xl">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 shadow-sm animate-in zoom-in-75 duration-300">
+            <RiHospitalLine className="h-8 w-8 stroke-[1.5]" />
+          </div>
+
+          <DialogHeader className="text-center space-y-1">
+            <DialogTitle className="text-xl font-black text-foreground">
+              Hospital Settlement Bank Required
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed max-w-sm mx-auto">
+              Please link your hospital settlement bank account in Wallet &amp; Escrow before broadcasting shifts (required for escrow custody and refunds).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-xl border border-border bg-muted/40 p-3.5 text-left text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Bank Status:</span>
+              <span className="font-bold text-amber-600 dark:text-amber-400">Not Linked</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Purpose:</span>
+              <span className="font-semibold text-foreground">Escrow Custody &amp; Dispute Refunds</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/60">
+              RBI nodal compliance requires verified bank details to safeguard clinician shift earnings.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 pt-2">
+            <Button
+              size="default"
+              onClick={() => {
+                setBankRequiredModalOpen(false);
+                navigate({ to: "/employer/wallet" });
+              }}
+              className="rounded-xl font-bold text-xs h-10 gap-1.5 shadow-xs cursor-pointer bg-primary hover:bg-primary-hover text-primary-foreground"
+            >
+              <span>Go to Wallet &amp; Link Bank</span>
+              <HiOutlineArrowTopRightOnSquare className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="default"
+              onClick={() => setBankRequiredModalOpen(false)}
+              className="rounded-xl font-semibold text-xs h-10 cursor-pointer"
+            >
+              Cancel
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Insufficient Escrow Balance Modal */}
+      <Dialog open={insufficientEscrowModalOpen} onOpenChange={setInsufficientEscrowModalOpen}>
+        <DialogContent className="sm:max-w-md p-6 text-center space-y-4 rounded-2xl">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 shadow-sm animate-in zoom-in-75 duration-300">
+            <HiOutlineLockClosed className="h-8 w-8 stroke-[2]" />
+          </div>
+
+          <DialogHeader className="text-center space-y-1">
+            <DialogTitle className="text-xl font-black text-foreground">
+              Insufficient Escrow Balance
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed max-w-sm mx-auto">
+              This shift requires escrow custody to guarantee 24-hour post-shift clinician remuneration. Please top up your wallet.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-xl border border-border bg-muted/40 p-3.5 text-left text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Required Escrow:</span>
+              <span className="font-bold text-foreground font-mono">₹{totalEscrowAmount.toLocaleString("en-IN")}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Available Balance:</span>
+              <span className="font-semibold text-muted-foreground font-mono">₹{availableEscrow.toLocaleString("en-IN")}</span>
+            </div>
+            <div className="flex items-center justify-between pt-1 border-t border-border/60">
+              <span className="text-muted-foreground font-medium">Shortfall:</span>
+              <span className="font-black text-amber-600 dark:text-amber-400 font-mono">
+                ₹{Math.max(0, totalEscrowAmount - availableEscrow).toLocaleString("en-IN")}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 pt-2">
+            <Button
+              size="default"
+              onClick={() => {
+                setInsufficientEscrowModalOpen(false);
+                navigate({ to: "/employer/wallet" });
+              }}
+              className="rounded-xl font-bold text-xs h-10 gap-1.5 shadow-xs cursor-pointer bg-primary hover:bg-primary-hover text-primary-foreground"
+            >
+              <span>Top Up Escrow in Wallet</span>
+              <HiOutlineArrowTopRightOnSquare className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="default"
+              onClick={() => setInsufficientEscrowModalOpen(false)}
+              className="rounded-xl font-semibold text-xs h-10 cursor-pointer"
+            >
+              Adjust Shift Parameters
             </Button>
           </div>
         </DialogContent>

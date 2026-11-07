@@ -14,10 +14,11 @@ import {
   HiOutlineCurrencyRupee,
   HiOutlineBriefcase,
   HiOutlineHeart,
+  HiOutlineBookmark,
 } from "react-icons/hi2";
 import { AppShell } from "@/components/fale/AppShell";
 import { JobCard } from "@/components/fale/JobCard";
-import { SearchEmptyGraphic } from "@/components/fale/SearchEmptyGraphic";
+import { EmptyEarningsGraphic } from "@/components/fale/EmptyEarningsGraphic";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -26,14 +27,17 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { jobs, type Job } from "@/lib/data";
-import { useApp } from "@/lib/store";
+import { useApp, setState } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { getJobs } from "@/lib/adapters/jobAdapter";
+import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
+import { calculateClinicalMatch } from "@/lib/clinicalMatchingEngine";
 
 export const Route = createFileRoute("/jobs/")({
-  validateSearch: (s: Record<string, unknown>): { q?: string | undefined } => ({
+  validateSearch: (s: Record<string, unknown>): { q?: string | undefined; scope?: "recommended" | "saved" | "other" | "all" | undefined } => ({
     q: typeof s["q"] === "string" && s["q"] ? s["q"] : undefined,
+    scope: typeof s["scope"] === "string" && ["recommended", "saved", "other", "all"].includes(s["scope"]) ? (s["scope"] as any) : undefined,
   }),
   head: () => ({
     meta: [
@@ -129,12 +133,20 @@ function Jobs() {
     (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
 
-  const { q: initialQ } = Route.useSearch();
+  const { q: initialQ, scope: initialScope } = Route.useSearch();
   const navigate = Route.useNavigate();
   const [q, setQ] = useState(initialQ ?? "");
+  const [matchScope, setMatchScope] = useState<"recommended" | "saved" | "other" | "all">(
+    initialScope ?? "recommended"
+  );
   useEffect(() => {
     setQ(initialQ ?? "");
   }, [initialQ]);
+  useEffect(() => {
+    if (initialScope) {
+      setMatchScope(initialScope);
+    }
+  }, [initialScope]);
 
   const [city, setCity] = useState("");
   const [deptF, setDeptF] = useState<string[]>([]);
@@ -155,10 +167,43 @@ function Jobs() {
   useEffect(() => {
     if (!isApiEnabled) return;
     setLoading(true);
-    getJobs()
-      .then((data) => {
-        setApiJobs(data || []);
+    Promise.all([
+      getJobs().catch(() => []),
+      getCandidateProfile().catch(() => null),
+    ])
+      .then(([jobsData, profileData]) => {
+        setApiJobs(jobsData || []);
         setError(null);
+        if (profileData) {
+          const openVal = profileData.openToWork != null ? Boolean(profileData.openToWork) : true;
+          setState((prev) => ({
+            candidateLevel: profileData.isStudent ? "student" : (profileData.candidateLevel?.toLowerCase() as any),
+            profile: {
+              ...prev.profile,
+              openToWork: openVal,
+              name: profileData.name || prev.profile["name"],
+              email: profileData.email || prev.profile["email"],
+              mobile: profileData.phone || prev.profile["mobile"],
+              city: profileData.city || prev.profile["city"],
+              state: profileData.state || prev.profile["state"],
+              role: profileData.profession || (profileData.isStudent ? profileData.course : "Doctor"),
+              specialty: profileData.specialty || "General medicine",
+              qual: profileData.qualification || "MBBS",
+              college: profileData.college || prev.profile["college"],
+              institution: profileData.college || prev.profile["institution"],
+              council: profileData.council || prev.profile["council"],
+              regNo: profileData.regNumber || prev.profile["regNo"],
+              regYear: profileData.regYear || prev.profile["regYear"],
+              exp: profileData.experienceYears || (profileData.isStudent ? "Student" : "Fresher"),
+              level: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
+              cadreLevel: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
+              kycStatus: profileData.kycStatus || prev.profile["kycStatus"],
+              notice: profileData.noticePeriod || "Immediate",
+              availability: profileData.availability || "Immediate",
+              avatar: profileData.documents?.find((d) => d.documentType === "PHOTO")?.fileUrl || prev.profile["avatar"],
+            },
+          }));
+        }
       })
       .catch((err) => {
         console.error(err);
@@ -169,15 +214,65 @@ function Jobs() {
 
   const baseJobs = useMemo(() => {
     const source = isApiEnabled ? apiJobs : jobs;
-    return source.filter((j) => {
-      const isIntern = j.kind === "internship" || j.type === "Internship";
-      if (isStudent && !isIntern) return false;
-      return true;
-    });
-  }, [isStudent, isApiEnabled, apiJobs]);
+
+    const candidateInput = {
+      role: String(s.profile["role"] || ""),
+      profession: String(s.profile["profession"] || s.profile["role"] || ""),
+      specialty: String(s.profile["specialty"] || ""),
+      subSpecialties: Array.isArray(s.profile["subSpecialties"]) ? s.profile["subSpecialties"] : [],
+      qualification: String(s.profile["qual"] || s.profile["qualification"] || ""),
+      skills: Array.isArray(s.profile["skills"]) ? s.profile["skills"] : [],
+      city: String(s.profile["city"] || ""),
+      state: String(s.profile["state"] || ""),
+      preferredCities: Array.isArray(s.profile["preferredCities"]) ? s.profile["preferredCities"] : [],
+      relocate: Boolean(s.profile["relocate"] || s.profile["openToRelocate"]),
+      kycStatus: String(s.profile["kycStatus"] || ""),
+      isStudent: Boolean(isStudent),
+      experienceYears: s.profile["exp"] || s.profile["experienceYears"],
+    };
+
+    return source
+      .filter((j) => {
+        const isIntern = j.kind === "internship" || j.type === "Internship";
+        if (isStudent && !isIntern) return false;
+        return true;
+      })
+      .map((j) => {
+        const matchResult = calculateClinicalMatch(candidateInput, {
+          title: j.title,
+          dept: j.dept,
+          city: j.city,
+          qualification: j.qualification,
+          tags: j.tags,
+          exp: j.exp,
+          urgent: j.urgent,
+          kind: j.kind,
+          type: j.type,
+        });
+
+        return {
+          ...j,
+          match: matchResult.score,
+          matchResult,
+        };
+      });
+  }, [isStudent, isApiEnabled, apiJobs, s.profile]);
+
+  const recommendedCount = useMemo(() => baseJobs.filter((j) => (j.match ?? 0) >= 70).length, [baseJobs]);
+  const savedCount = useMemo(() => baseJobs.filter((j) => s.saved.includes(j.id)).length, [baseJobs, s.saved]);
+  const otherCount = useMemo(() => baseJobs.filter((j) => (j.match ?? 0) < 70).length, [baseJobs]);
+  const allCount = baseJobs.length;
 
   const list = useMemo(() => {
     const r = baseJobs.filter((j) => {
+      if (matchScope === "saved") {
+        if (!s.saved.includes(j.id)) return false;
+      } else if (matchScope === "recommended") {
+        if ((j.match ?? 0) < 70) return false;
+      } else if (matchScope === "other") {
+        if ((j.match ?? 0) >= 70) return false;
+      }
+
       if (q && !`${j.title} ${j.org} ${j.dept || ""} ${j.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase())) return false;
       if (city && !j.city.toLowerCase().includes(city.toLowerCase())) return false;
       if (cityF.length && !cityF.includes(j.city)) return false;
@@ -242,7 +337,7 @@ function Jobs() {
       if (sort === "recent") return age(a.posted) - age(b.posted);
       return b.match - a.match;
     });
-  }, [baseJobs, q, city, cityF, deptF, types, shiftF, salaryF, expF, orgF, qualF, perkF, sort]);
+  }, [baseJobs, q, city, cityF, deptF, types, shiftF, salaryF, expF, orgF, qualF, perkF, sort, matchScope, s.saved]);
 
   const toggle = (arr: string[], set: (v: string[]) => void, v: string) =>
     set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
@@ -1029,6 +1124,95 @@ function Jobs() {
             </div>
           </div>
 
+          {/* Match & Saved Roles Scope Pills */}
+          <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+            <button
+              type="button"
+              onClick={() => setMatchScope("recommended")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer border",
+                matchScope === "recommended"
+                  ? "bg-primary text-white border-primary shadow-xs"
+                  : "bg-card text-muted-foreground border-border/80 hover:border-primary/40 hover:text-foreground"
+              )}
+            >
+              <HiOutlineSparkles className="h-3.5 w-3.5" />
+              <span>Recommended Roles</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.2 text-[10px] font-black",
+                  matchScope === "recommended" ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                )}
+              >
+                {recommendedCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMatchScope("saved")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer border",
+                matchScope === "saved"
+                  ? "bg-primary text-white border-primary shadow-xs"
+                  : "bg-card text-muted-foreground border-border/80 hover:border-primary/40 hover:text-foreground"
+              )}
+            >
+              <HiOutlineBookmark className="h-3.5 w-3.5" />
+              <span>Saved Roles</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.2 text-[10px] font-black",
+                  matchScope === "saved" ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                )}
+              >
+                {savedCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMatchScope("other")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer border",
+                matchScope === "other"
+                  ? "bg-primary text-white border-primary shadow-xs"
+                  : "bg-card text-muted-foreground border-border/80 hover:border-primary/40 hover:text-foreground"
+              )}
+            >
+              <span>Other Openings</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.2 text-[10px] font-black",
+                  matchScope === "other" ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                )}
+              >
+                {otherCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMatchScope("all")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer border",
+                matchScope === "all"
+                  ? "bg-primary text-white border-primary shadow-xs"
+                  : "bg-card text-muted-foreground border-border/80 hover:border-primary/40 hover:text-foreground"
+              )}
+            >
+              <span>All Roles</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.2 text-[10px] font-black",
+                  matchScope === "all" ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                )}
+              >
+                {allCount}
+              </span>
+            </button>
+          </div>
+
           {/* Active Filter Dismissible Badges (Naukri/LinkedIn style) */}
           {activeFilterCount > 0 && (
             <div className="flex flex-wrap items-center gap-2 py-1">
@@ -1185,15 +1369,31 @@ function Jobs() {
 
             {!loading && !error && !list.length && (
               <div className="surface p-12 text-center rounded-3xl border border-border/80">
-                <SearchEmptyGraphic className="w-56 h-44 sm:w-64 sm:h-52 mx-auto mb-2" />
-                <p className="mt-3 text-sm font-bold text-foreground">No matching healthcare jobs found</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Try adjusting your search query, city or removing some filters.
+                <EmptyEarningsGraphic className="w-36 h-36 sm:w-44 sm:h-44 mx-auto mb-2" />
+                <p className="mt-3 text-sm font-bold text-foreground">
+                  {matchScope === "saved" ? "No saved roles yet" : "No matching healthcare jobs found"}
                 </p>
-                <Button variant="outline" size="sm" onClick={clearAll} className="mt-4 rounded-xl font-bold">
-                  <HiOutlineArrowPath className="h-3.5 w-3.5 mr-1.5" />
-                  Reset all filters
-                </Button>
+                <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
+                  {matchScope === "saved"
+                    ? "Tap the bookmark icon on any role to save and compare it here before applying."
+                    : "Try adjusting your search query, city or removing some filters."}
+                </p>
+                {matchScope === "saved" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setMatchScope("recommended")}
+                    className="mt-4 rounded-xl font-bold gap-1.5"
+                  >
+                    <HiOutlineSparkles className="h-3.5 w-3.5 text-primary" />
+                    Browse Recommended Roles
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={clearAll} className="mt-4 rounded-xl font-bold">
+                    <HiOutlineArrowPath className="h-3.5 w-3.5 mr-1.5" />
+                    Reset all filters
+                  </Button>
+                )}
               </div>
             )}
           </div>

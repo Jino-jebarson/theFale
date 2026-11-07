@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   HiOutlineSquares2X2,
@@ -27,6 +27,8 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useApp, setState, Portal } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { isApiEnabled } from "@/lib/api";
+import { getAdminDashboardMetrics, type AdminDashboardMetricsDto } from "@/lib/adapters/adminAdapter";
 import { logout } from "@/lib/adapters/authAdapter";
 import {
   DropdownMenu,
@@ -57,13 +59,47 @@ export function AdminLayout({
   const path = useRouterState({ select: (r) => r.location.pathname });
   const navigate = useNavigate();
 
-  const pendingCandidateKYC = s.candidateKYC.filter((c) => c.status === "pending").length;
-  const pendingFacilityKYC = s.facilityKYC.filter((f) => f.status === "pending").length;
-  const pendingJobApprovals = s.jobApprovals.filter((j) => j.status === "pending").length;
-  const pendingShortlisting = s.adminApplications.filter((a) => a.status === "pending_admin").length;
-  const pendingHuddleModeration = s.huddlePosts.filter(
-    (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
-  ).length;
+  const [metrics, setMetrics] = useState<AdminDashboardMetricsDto | null>(null);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    getAdminDashboardMetrics()
+      .then((data) => {
+        if (data) setMetrics(data);
+      })
+      .catch((err) => {
+        console.warn("Failed to load admin metrics:", err);
+      });
+  }, [path]);
+
+  const pendingCandidateKYC = isApiEnabled && metrics
+    ? (metrics.pendingCandidateKycCount ?? 0)
+    : s.candidateKYC.filter((c) => c.status === "pending").length;
+
+  const pendingFacilityKYC = isApiEnabled && metrics
+    ? (metrics.pendingFacilityKycCount ?? 0)
+    : s.facilityKYC.filter((f) => f.status === "pending").length;
+
+  const pendingJobApprovals = isApiEnabled && metrics
+    ? (metrics.pendingPostingsCount ?? 0)
+    : s.jobApprovals.filter((j) => j.status === "pending").length;
+
+  const pendingShortlisting = isApiEnabled && metrics
+    ? (metrics.pendingApplicationsCount ?? 0)
+    : s.adminApplications.filter((a) => a.status === "pending_admin").length;
+
+  const pendingHuddleModeration = isApiEnabled && metrics
+    ? (metrics.flaggedHuddlePostsCount ?? 0)
+    : s.huddlePosts.filter(
+        (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
+      ).length;
+
+  const totalPending =
+    pendingCandidateKYC +
+    pendingFacilityKYC +
+    pendingJobApprovals +
+    pendingShortlisting +
+    pendingHuddleModeration;
 
   const adminNav = [
     {
@@ -72,7 +108,7 @@ export function AdminLayout({
       shortLabel: "Overview",
       icon: HiOutlineSquares2X2,
       active: HiSquares2X2,
-      badge: 0,
+      badge: totalPending,
     },
     {
       to: "/admin/candidates",
@@ -172,7 +208,7 @@ export function AdminLayout({
                       )}
                     />
                     {n.badge > 0 && (
-                      <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-white shadow-xs">
+                      <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-black text-white shadow-xs">
                         {n.badge}
                       </span>
                     )}

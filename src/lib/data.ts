@@ -1274,6 +1274,10 @@ export interface Applicant {
   bio: string;
   education: string;
   certifications: string[];
+  isShiftClaim?: boolean;
+  actualHours?: number;
+  scheduledHours?: number;
+  hourlyRate?: number;
   experienceList: { hospital: string; role: string; duration: string; details: string }[];
   resumeUrl?: string;
   resumeFileName?: string;
@@ -1469,48 +1473,204 @@ export const professions = [
 export const nonRegulatedProfessions = ["Phlebotomist", "Medical Coder"];
 export const regulatedProfessions = professions.filter((p) => !nonRegulatedProfessions.includes(p));
 
-export const councilOptions = [
-  "Karnataka Medical Council / NMC",
+export const doctorCouncils = [
+  "National Medical Commission (NMC)",
+  "Andhra Pradesh Medical Council",
+  "Arunachal Pradesh Medical Council",
+  "Assam Medical Council",
+  "Bihar Medical Council",
+  "Chhattisgarh Medical Council",
+  "Delhi Medical Council",
+  "Goa Medical Council",
+  "Gujarat Medical Council",
+  "Haryana Medical Council",
+  "Himachal Pradesh Medical Council",
+  "Jammu & Kashmir Medical Council",
+  "Jharkhand Medical Council",
+  "Karnataka Medical Council",
+  "Travancore-Cochin / Kerala Medical Council",
+  "Madhya Pradesh Medical Council",
+  "Maharashtra Medical Council",
+  "Manipur Medical Council",
+  "Meghalaya Medical Council",
+  "Mizoram Medical Council",
+  "Nagaland Medical Council",
+  "Odisha Medical Council",
+  "Punjab Medical Council",
+  "Rajasthan Medical Council",
+  "Sikkim Medical Council",
+  "Tamil Nadu Medical Council",
+  "Telangana State Medical Council",
+  "Tripura State Medical Council",
+  "Uttar Pradesh Medical Council",
+  "Uttarakhand Medical Council",
+  "West Bengal Medical Council",
+  "Other State Medical Council",
+];
+
+export const nurseCouncils = [
+  "Indian Nursing Council (INC / NUID)",
+  "Andhra Pradesh Nurses & Midwives Council",
+  "Assam Nurses, Midwives & Health Visitors Council",
+  "Bihar Nursing Registration Council",
+  "Chhattisgarh Nurses Registration Council",
+  "Delhi Nursing Council",
+  "Goa Nursing Council",
+  "Gujarat Nursing Council",
+  "Haryana Nurses & Nurse-Midwives Council",
+  "Himachal Pradesh Nurses Registration Council",
+  "Jharkhand State Nursing Council",
   "Karnataka State Nursing Council",
+  "Kerala Nurses and Midwives Council",
+  "Madhya Pradesh Nurses Registration Council",
+  "Maharashtra Nursing Council",
+  "Manipur Nursing Council",
+  "Meghalaya Nursing Council",
+  "Mizoram Nursing Council",
+  "Odisha Nurses & Midwives Council",
+  "Punjab Nurses Registration Council",
+  "Rajasthan Nursing Council",
+  "Tamil Nadu Nurses and Midwives Council",
+  "Telangana State Nurses & Midwives Council",
+  "Tripura Nursing Council",
+  "Uttar Pradesh Nurses & Midwives Council",
+  "Uttarakhand Nurses & Midwives Council",
+  "West Bengal Nursing Council",
+  "Other State Nursing Council",
+];
+
+export const pharmacistCouncils = [
+  "Pharmacy Council of India (PCI)",
+  "Andhra Pradesh Pharmacy Council",
+  "Assam Pharmacy Council",
+  "Bihar State Pharmacy Council",
+  "Delhi Pharmacy Council",
+  "Gujarat State Pharmacy Council",
+  "Haryana State Pharmacy Council",
   "Karnataka State Pharmacy Council",
+  "Kerala State Pharmacy Council",
+  "Madhya Pradesh State Pharmacy Council",
+  "Maharashtra State Pharmacy Council",
+  "Odisha State Pharmacy Council",
+  "Punjab State Pharmacy Council",
+  "Rajasthan Pharmacy Council",
+  "Tamil Nadu Pharmacy Council",
+  "Telangana State Pharmacy Council",
+  "Uttar Pradesh Pharmacy Council",
+  "West Bengal State Pharmacy Council",
+  "Other State Pharmacy Council",
+];
+
+export const alliedCouncils = [
+  "National Commission for Allied and Healthcare Professions (NCAHP)",
+  "Andhra Pradesh Allied and Healthcare Council",
+  "Delhi Council for Physiotherapy & Occupational Therapy",
   "Karnataka State Allied & Healthcare Council",
-  "Dental Council (State)",
-  "Rehabilitation Council of India",
-  "Indian Dietetic Association (RD)",
-  "Other state council",
+  "Kerala State Allied and Healthcare Council",
+  "Maharashtra State Allied & Healthcare Council",
+  "Tamil Nadu State Allied and Healthcare Council",
+  "Telangana State Allied and Healthcare Council",
+  "Rehabilitation Council of India (RCI)",
+  "Other State Allied Healthcare Council",
   "Not applicable for my role",
 ];
 
+export const dentalCouncils = [
+  "Dental Council of India (DCI)",
+  "Andhra Pradesh State Dental Council",
+  "Delhi Dental Council",
+  "Gujarat Dental Council",
+  "Karnataka State Dental Council",
+  "Kerala Dental Council",
+  "Maharashtra State Dental Council",
+  "Punjab Dental Council",
+  "Rajasthan State Dental Council",
+  "Tamil Nadu Dental Council",
+  "Telangana State Dental Council",
+  "Uttar Pradesh Dental Council",
+  "West Bengal Dental Council",
+  "Other State Dental Council",
+];
+
+export function getCouncilsForRole(role?: string): string[] {
+  const r = (role || "").toLowerCase();
+  if (r.includes("doctor") || r.includes("physician") || r.includes("surgeon")) {
+    return doctorCouncils;
+  }
+  if (r.includes("nurse")) {
+    return nurseCouncils;
+  }
+  if (r.includes("pharmac")) {
+    return pharmacistCouncils;
+  }
+  if (r.includes("dental") || r.includes("dentist")) {
+    return dentalCouncils;
+  }
+  if (r.includes("diet") || r.includes("nutrition")) {
+    return ["Indian Dietetic Association (RD)", "Other professional body / council", "Not applicable for my role"];
+  }
+  if (r.includes("speech") || r.includes("audio")) {
+    return ["Rehabilitation Council of India (RCI)", "National Commission for Allied and Healthcare Professions (NCAHP)", "Other state council"];
+  }
+  return alliedCouncils;
+}
+
+export function getOnlineRegisterName(council: string): string {
+  if (!council || council === "Not applicable for my role") return "";
+  if (council.includes("NMC") || council.includes("Medical")) return "NMC / State Indian Medical Register";
+  if (council.includes("INC") || council.includes("Nursing") || council.includes("Midwives")) return "Indian Nursing Council (INC / NUID Registry)";
+  if (council.includes("Pharmacy") || council.includes("PCI")) return "State Pharmacy Council Registry (PCI)";
+  if (council.includes("Dental") || council.includes("DCI")) return "Dental Council of India Register";
+  if (council.includes("Allied") || council.includes("NCAHP")) return "National Allied & Healthcare Commission Register";
+  if (council.includes("Rehabilitation") || council.includes("RCI")) return "Rehabilitation Council of India Register";
+  return "State Statutory Council Registry";
+}
+
+export const councilOptions = [
+  ...doctorCouncils,
+  ...nurseCouncils,
+  ...pharmacistCouncils,
+  ...alliedCouncils,
+];
+
 export const onlineCouncilRegisters: Record<string, string> = {
-  "Karnataka Medical Council / NMC": "NMC Indian Medical Register",
+  "National Medical Commission (NMC)": "NMC Indian Medical Register",
+  "Karnataka Medical Council": "NMC Indian Medical Register",
+  "Tamil Nadu Medical Council": "NMC Indian Medical Register",
+  "Maharashtra Medical Council": "NMC Indian Medical Register",
+  "Delhi Medical Council": "NMC Indian Medical Register",
+  "Indian Nursing Council (INC / NUID)": "Nursing council register (NUID)",
   "Karnataka State Nursing Council": "Nursing council register (NUID)",
-  "Karnataka State Pharmacy Council": "State Pharmacy Council register",
-  "Dental Council (State)": "State Dental Council register",
+  "Tamil Nadu Nurses and Midwives Council": "Nursing council register (NUID)",
+  "Kerala Nurses and Midwives Council": "Nursing council register (NUID)",
+  "Maharashtra Nursing Council": "Nursing council register (NUID)",
+  "Pharmacy Council of India (PCI)": "State Pharmacy Council register",
+  "Dental Council of India (DCI)": "State Dental Council register",
+  "National Commission for Allied and Healthcare Professions (NCAHP)": "National Allied & Healthcare Register",
 };
 
 export const councilByProfession: Record<string, string> = {
-  Doctor: "Karnataka Medical Council / NMC",
-  Nurse: "Karnataka State Nursing Council",
-  Physiotherapist: "Karnataka State Allied & Healthcare Council",
-  "Lab Technician": "Karnataka State Allied & Healthcare Council",
-  Radiographer: "Karnataka State Allied & Healthcare Council",
-  Pharmacist: "Karnataka State Pharmacy Council",
-  "Dialysis Technician": "Karnataka State Allied & Healthcare Council",
-  "OT Technician": "Karnataka State Allied & Healthcare Council",
-  "Anaesthesia Technician": "Karnataka State Allied & Healthcare Council",
-  Paramedic: "Karnataka State Allied & Healthcare Council",
-  "Cardiac Care Technician": "Karnataka State Allied & Healthcare Council",
-  "Respiratory Therapist": "Karnataka State Allied & Healthcare Council",
-  "Occupational Therapist": "Karnataka State Allied & Healthcare Council",
-  "Speech Therapist": "Rehabilitation Council of India",
-  Optometrist: "Karnataka State Allied & Healthcare Council",
+  Doctor: "National Medical Commission (NMC)",
+  Nurse: "Indian Nursing Council (INC / NUID)",
+  Physiotherapist: "National Commission for Allied and Healthcare Professions (NCAHP)",
+  "Lab Technician": "National Commission for Allied and Healthcare Professions (NCAHP)",
+  Radiographer: "National Commission for Allied and Healthcare Professions (NCAHP)",
+  Pharmacist: "Pharmacy Council of India (PCI)",
+  "Dialysis Technician": "National Commission for Allied and Healthcare Professions (NCAHP)",
+  "OT Technician": "National Commission for Allied and Healthcare Professions (NCAHP)",
+  "Anaesthesia Technician": "National Commission for Allied and Healthcare Professions (NCAHP)",
+  Paramedic: "National Commission for Allied and Healthcare Professions (NCAHP)",
+  "Cardiac Care Technician": "National Commission for Allied and Healthcare Professions (NCAHP)",
+  "Respiratory Therapist": "National Commission for Allied and Healthcare Professions (NCAHP)",
+  "Occupational Therapist": "National Commission for Allied and Healthcare Professions (NCAHP)",
+  "Speech Therapist": "Rehabilitation Council of India (RCI)",
+  Optometrist: "National Commission for Allied and Healthcare Professions (NCAHP)",
   Dietitian: "Indian Dietetic Association (RD)",
   Phlebotomist: "Not applicable for my role",
-  Audiologist: "Rehabilitation Council of India",
-  "Dental Hygienist": "Dental Council (State)",
+  Audiologist: "Rehabilitation Council of India (RCI)",
+  "Dental Hygienist": "Dental Council of India (DCI)",
   "Medical Coder": "Not applicable for my role",
 };
-
 export const qualificationsByProfession: Record<string, string[]> = {
   Doctor: ["MBBS", "MD", "MS", "DNB", "DM / MCh", "Diploma (DCH, DGO, DA…)"],
   Nurse: ["ANM", "GNM", "B.Sc Nursing", "Post Basic B.Sc Nursing", "M.Sc Nursing", "Nurse Practitioner (NPCC)"],
@@ -1535,53 +1695,176 @@ export const qualificationsByProfession: Record<string, string[]> = {
 };
 
 export const indianStates = [
-  "Andhra Pradesh", "Delhi", "Gujarat", "Karnataka", "Kerala", "Maharashtra", "Punjab", "Rajasthan",
-  "Tamil Nadu", "Telangana", "Uttar Pradesh", "West Bengal", "Other",
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chhattisgarh",
+  "Delhi",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jammu & Kashmir",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Ladakh",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Puducherry",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+  "Other",
 ];
-
 export const indianCities = [
-  "Chennai",
-  "Bengaluru",
-  "Hyderabad",
-  "Mumbai",
-  "Delhi NCR",
-  "Kolkata",
-  "Pune",
+  "Agra",
   "Ahmedabad",
-  "Kochi",
-  "Coimbatore",
-  "Madurai",
-  "Trichy",
-  "Salem",
-  "Vellore",
-  "Tirunelveli",
-  "Thiruvananthapuram",
-  "Kozhikode",
-  "Visakhapatnam",
-  "Vijayawada",
-  "Guntur",
-  "Mysuru",
-  "Mangaluru",
-  "Hubli",
-  "Chandigarh",
-  "Jaipur",
-  "Lucknow",
-  "Kanpur",
-  "Patna",
-  "Bhubaneswar",
-  "Cuttack",
-  "Indore",
+  "Ahmednagar",
+  "Aizawl",
+  "Ajmer",
+  "Akola",
+  "Alappuzha",
+  "Aligarh",
+  "Allahabad (Prayagraj)",
+  "Alwar",
+  "Ambala",
+  "Amravati",
+  "Amritsar",
+  "Anand",
+  "Anantapur",
+  "Asansol",
+  "Aurangabad (Chhatrapati Sambhajinagar)",
+  "Bareilly",
+  "Belagavi (Belgaum)",
+  "Ballari (Bellary)",
+  "Bengaluru",
+  "Bhagalpur",
+  "Bhavnagar",
+  "Bhilai",
   "Bhopal",
-  "Nagpur",
-  "Nashik",
-  "Surat",
-  "Vadodara",
-  "Rajkot",
-  "Guwahati",
+  "Bhubaneswar",
+  "Bikaner",
+  "Bilaspur",
+  "Bokaro",
+  "Chandigarh",
+  "Chennai",
+  "Coimbatore",
+  "Cuttack",
+  "Darbhanga",
+  "Davanagere",
   "Dehradun",
-  "Ranchi",
+  "Delhi NCR",
+  "Dhanbad",
+  "Dibrugarh",
+  "Dindigul",
+  "Durgapur",
+  "Erode",
+  "Faridabad",
+  "Gandhinagar",
+  "Gaya",
+  "Ghaziabad",
+  "Gorakhpur",
+  "Gulbarga (Kalaburagi)",
+  "Guntur",
+  "Gurugram (Gurgaon)",
+  "Guwahati",
+  "Gwalior",
+  "Haldwani",
+  "Haridwar",
+  "Hubli-Dharwad",
+  "Hyderabad",
+  "Imphal",
+  "Indore",
+  "Jabalpur",
+  "Jaipur",
+  "Jalandhar",
+  "Jalgaon",
+  "Jammu",
+  "Jamnagar",
+  "Jamshedpur",
+  "Jhansi",
+  "Jodhpur",
+  "Kakinada",
+  "Kannur",
+  "Kanpur",
+  "Karnal",
+  "Karur",
+  "Kochi",
+  "Kolhapur",
+  "Kolkata",
+  "Kollam",
+  "Kota",
+  "Kottayam",
+  "Kozhikode",
+  "Kurnool",
+  "Latur",
+  "Lucknow",
+  "Ludhiana",
+  "Madurai",
+  "Malappuram",
+  "Mangaluru",
+  "Mathura",
+  "Meerut",
+  "Moradabad",
+  "Mumbai",
+  "Muzaffarpur",
+  "Mysuru",
+  "Nagercoil",
+  "Nagpur",
+  "Nanded",
+  "Nashik",
+  "Navi Mumbai",
+  "Nellore",
+  "Noida",
+  "Palakkad",
+  "Panaji",
+  "Patiala",
+  "Patna",
+  "Puducherry",
+  "Pune",
   "Raipur",
-  "Pan India (Open to anywhere)",
+  "Rajahmundry",
+  "Rajkot",
+  "Ranchi",
+  "Rohtak",
+  "Rourkela",
+  "Salem",
+  "Shillong",
+  "Shimla",
+  "Siliguri",
+  "Solapur",
+  "Srinagar",
+  "Surat",
+  "Thane",
+  "Thanjavur",
+  "Thiruvananthapuram",
+  "Thrissur",
+  "Tiruchirappalli (Trichy)",
+  "Tirunelveli",
+  "Tirupati",
+  "Tirupur",
+  "Udaipur",
+  "Udupi",
+  "Ujjain",
+  "Vadodara",
+  "Varanasi",
+  "Vellore",
+  "Vijayawada",
+  "Visakhapatnam",
+  "Warangal",
 ];
 
 export function neededDocs(portal: "candidate" | "facility", role?: string, level?: string): { label: string; hint: string }[] {
@@ -2042,6 +2325,8 @@ export interface HuddlePost {
   status: "live" | "review" | "hidden";
   at: string;
   image?: string;
+  audioUrl?: string;
+  audioDuration?: number;
   isHospital?: boolean;
   hospitalName?: string;
   pinned?: boolean;

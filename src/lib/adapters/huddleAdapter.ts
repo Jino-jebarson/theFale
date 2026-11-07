@@ -15,7 +15,11 @@ export interface HuddlePostDto {
   anon?: boolean;
   isAnonymous?: boolean;
   image?: string;
+  audioUrl?: string;
+  audioDuration?: number;
   imageUrl?: string;
+  audioUrl?: string;
+  audioDuration?: number;
   title: string;
   body: string;
   type: string; // Case, Discussion, Ethics, Student, Career
@@ -129,6 +133,8 @@ export async function createHuddlePost(payload: {
   field: string;
   anon?: boolean;
   image?: string;
+  audioUrl?: string;
+  audioDuration?: number;
 }): Promise<HuddlePostDto> {
   const isReview = payload.type === "Case" || Boolean(payload.image);
   const res = await apiFetch<HuddlePostDto>("/huddle/posts", {
@@ -139,6 +145,8 @@ export async function createHuddlePost(payload: {
       type: payload.type,
       field: payload.field,
       imageUrl: payload.image,
+      audioUrl: payload.audioUrl,
+      audioDuration: payload.audioDuration,
       isAnonymous: Boolean(payload.anon),
     }),
   });
@@ -148,6 +156,8 @@ export async function createHuddlePost(payload: {
     isAnonymous: payload.anon,
     image: payload.image,
     imageUrl: payload.image,
+      audioUrl: payload.audioUrl,
+      audioDuration: payload.audioDuration,
     status: isReview ? "review" : (res.status || "live"),
   };
 }
@@ -168,6 +178,8 @@ export async function updateHuddlePost(postId: string, payload: {
       type: payload.type,
       field: payload.field,
       imageUrl: payload.image,
+      audioUrl: payload.audioUrl,
+      audioDuration: payload.audioDuration,
       isAnonymous: payload.anon,
     }),
   });

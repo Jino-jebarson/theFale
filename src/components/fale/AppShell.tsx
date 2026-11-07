@@ -10,6 +10,7 @@ import {
   HiOutlineDocumentCheck, HiDocumentCheck, HiOutlineShieldCheck, HiOutlineUser,
   HiOutlineBanknotes, HiBanknotes,
   HiOutlineChatBubbleLeftRight, HiChatBubbleLeftRight,
+  HiOutlineBookmark,
 } from "react-icons/hi2";
 import { RiStethoscopeLine, RiVerifiedBadgeFill } from "react-icons/ri";
 import { Logo } from "./Logo";
@@ -35,6 +36,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { isApiEnabled } from "@/lib/api";
 import { logout } from "@/lib/adapters/authAdapter";
+import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
+import { getFacilityApplicants } from "@/lib/adapters/facilityAdapter";
 
 const candidateNav = [
   { to: "/home", label: "Home", icon: HiOutlineHome, active: HiHome, badge: 0 },
@@ -48,8 +51,8 @@ const candidateNav = [
 
 const facilityNav = [
   { to: "/employer", label: "Dashboard", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: 0 },
-  { to: "/employer/post", label: "Post a job", icon: HiOutlinePlusCircle, active: HiPlusCircle, badge: 0 },
-  { to: "/employer/post-shift", label: "Post a shift", icon: HiOutlineClock, active: HiClock, badge: 0 },
+  { to: "/employer/postings", label: "Active Roles", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
+  { to: "/employer/post", label: "Post Opening", icon: HiOutlinePlusCircle, active: HiPlusCircle, badge: 0 },
   { to: "/employer/applicants", label: "Shortlisted", icon: HiOutlineUserGroup, active: HiUserGroup, badge: 0 },
   { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
   { to: "/employer/wallet", label: "Wallet & Escrow", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
@@ -79,6 +82,7 @@ function AccountMenuContent({
   onNavigate: (path: string) => void;
   onSignOut: () => void;
 }) {
+  const s = useApp();
   return (
     <div className="w-full space-y-2">
       {/* Profile Card Header */}
@@ -115,10 +119,10 @@ function AccountMenuContent({
               : portal === "facility"
                 ? String(profile["org"] || "Your Organization")
                 : profile["level"] === "student"
-                ? `Student - ${profile["course"] || profile["role"] || "Healthcare"}`
-                : profile["level"] === "fresher"
-                ? `Fresher - ${profile["role"] || "Healthcare"}`
-                : String(profile["role"] || "Verified Clinician")}
+                  ? `Student - ${profile["course"] || profile["role"] || "Healthcare"}`
+                  : profile["level"] === "fresher"
+                    ? `Fresher - ${profile["role"] || "Healthcare"}`
+                    : String(profile["role"] || "Verified Clinician")}
           </p>
         </div>
       </div>
@@ -142,25 +146,48 @@ function AccountMenuContent({
         )}
 
         {portal === "candidate" && (
-          <button
-            type="button"
-            onClick={() => onNavigate("/profile")}
-            className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
-          >
-            <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
-              <HiOutlineUser className="h-4 w-4" />
-            </span>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-foreground">
-                {profile["level"] === "student" ? "Profile" : "Profile & Verified CV"}
-              </p>
-              <p className="text-[10px] text-muted-foreground">
-                {profile["level"] === "student"
-                  ? "College affiliation & verification"
-                  : "Council registrations & DigiLocker KYC"}
-              </p>
-            </div>
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => onNavigate("/profile")}
+              className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
+            >
+              <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
+                <HiOutlineUser className="h-4 w-4" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-foreground">
+                  {profile["level"] === "student" ? "Profile" : "Profile & Verified CV"}
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  {profile["level"] === "student"
+                    ? "College affiliation & verification"
+                    : "Council registrations & DigiLocker KYC"}
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onNavigate("/applications?tab=saved")}
+              className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
+            >
+              <span className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+                <HiOutlineBookmark className="h-4 w-4" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-foreground">Saved Roles</p>
+                  {s.saved.length > 0 && (
+                    <span className="rounded-full bg-primary/15 text-primary text-[10px] font-black px-1.5 py-0.2">
+                      {s.saved.length}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground">Bookmarked healthcare opportunities</p>
+              </div>
+            </button>
+          </>
         )}
 
         {portal === "admin" && (
@@ -286,7 +313,52 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isFacilityPath = path.startsWith("/employer");
   const activePortal = isAdminPath ? "admin" : isFacilityPath ? "facility" : s.portal;
 
-  const nav = activePortal === "admin" ? adminNav : activePortal === "facility" ? facilityNav : candidateNav;
+  const [facilityShortlistedCount, setFacilityShortlistedCount] = useState<number>(() => {
+    return (s.adminApplications || []).filter((a) => a.status === "shortlisted").length;
+  });
+
+  useEffect(() => {
+    if (!isApiEnabled || (activePortal !== "facility" && !isFacilityPath)) return;
+    let isMounted = true;
+
+    const fetchFacilityApplicants = () => {
+      getFacilityApplicants()
+        .then((data) => {
+          if (isMounted && Array.isArray(data)) {
+            setFacilityShortlistedCount(data.length);
+          }
+        })
+        .catch(() => { });
+    };
+
+    fetchFacilityApplicants();
+
+    const handleUpdate = () => {
+      fetchFacilityApplicants();
+    };
+
+    window.addEventListener("fale:applications-updated", handleUpdate);
+    return () => {
+      isMounted = false;
+      window.removeEventListener("fale:applications-updated", handleUpdate);
+    };
+  }, [activePortal, isFacilityPath, path]);
+
+  const facilityShortlistedBadge = isApiEnabled
+    ? facilityShortlistedCount
+    : (s.adminApplications || []).filter((a) => a.status === "shortlisted").length;
+
+  const dynamicFacilityNav = [
+    { to: "/employer", label: "Dashboard", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: 0 },
+    { to: "/employer/postings", label: "Active Roles", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
+    { to: "/employer/post", label: "Post Opening", icon: HiOutlinePlusCircle, active: HiPlusCircle, badge: 0 },
+    { to: "/employer/applicants", label: "Shortlisted", icon: HiOutlineUserGroup, active: HiUserGroup, badge: facilityShortlistedBadge },
+    { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
+    { to: "/employer/wallet", label: "Wallet & Escrow", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
+    { to: "/huddle", label: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: 0 },
+  ] as const;
+
+  const nav = activePortal === "admin" ? adminNav : activePortal === "facility" ? dynamicFacilityNav : candidateNav;
 
   const name = activePortal === "admin"
     ? "Admin Console"
@@ -304,6 +376,43 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [headerVisible, setHeaderVisible] = useState(true);
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isApiEnabled || activePortal !== "candidate" || s.profile["role"]) return;
+    getCandidateProfile()
+      .then((profileData) => {
+        if (!profileData) return;
+        const openVal = profileData.openToWork != null ? Boolean(profileData.openToWork) : true;
+        setState((prev) => ({
+          candidateLevel: profileData.isStudent ? "student" : (profileData.candidateLevel?.toLowerCase() as any),
+          profile: {
+            ...prev.profile,
+            openToWork: openVal,
+            name: profileData.name || prev.profile["name"],
+            email: profileData.email || prev.profile["email"],
+            mobile: profileData.phone || prev.profile["mobile"],
+            city: profileData.city || prev.profile["city"],
+            state: profileData.state || prev.profile["state"],
+            role: profileData.profession || (profileData.isStudent ? profileData.course : "Doctor"),
+            specialty: profileData.specialty || "General medicine",
+            qual: profileData.qualification || "MBBS",
+            college: profileData.college || prev.profile["college"],
+            institution: profileData.college || prev.profile["institution"],
+            council: profileData.council || prev.profile["council"],
+            regNo: profileData.regNumber || prev.profile["regNo"],
+            regYear: profileData.regYear || prev.profile["regYear"],
+            exp: profileData.experienceYears || (profileData.isStudent ? "Student" : "Fresher"),
+            level: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
+            cadreLevel: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
+            kycStatus: profileData.kycStatus || prev.profile["kycStatus"],
+            notice: profileData.noticePeriod || "Immediate",
+            availability: profileData.availability || "Immediate",
+            avatar: profileData.documents?.find((d) => d.documentType === "PHOTO")?.fileUrl || prev.profile["avatar"],
+          },
+        }));
+      })
+      .catch(console.error);
+  }, [activePortal, s.profile]);
 
   const closeMenus = () => {
     setDesktopMenuOpen(false);
@@ -409,7 +518,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <nav className="ml-auto hidden h-16 items-center md:flex">
             {nav.map((n) => {
-              const on = path === n.to || (n.to !== "/employer" && n.to !== "/admin" && path.startsWith(n.to + "/"));
+              const isPostOpening = n.to === "/employer/post" && (path === "/employer/post" || path === "/employer/post-shift");
+              const on = isPostOpening || path === n.to || (n.to !== "/employer" && n.to !== "/admin" && path.startsWith(n.to + "/"));
               const Icon = on ? n.active : n.icon;
               return (
                 <Link
@@ -517,7 +627,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="px-4 sm:px-6 lg:px-8 py-5 sm:py-8 animate-in fade-in duration-300 w-full min-w-0">{children}</main>
       <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card/98 backdrop-blur md:hidden">
         {nav.map((n) => {
-          const on = path === n.to || (n.to !== "/employer" && n.to !== "/admin" && path.startsWith(n.to + "/"));
+          const isPostOpening = n.to === "/employer/post" && (path === "/employer/post" || path === "/employer/post-shift");
+          const on = isPostOpening || path === n.to || (n.to !== "/employer" && n.to !== "/admin" && path.startsWith(n.to + "/"));
           const Icon = on ? n.active : n.icon;
           return (
             <Link
@@ -579,10 +690,18 @@ export function PageHead({ title, sub, action }: { title: string; sub?: string; 
 
 export function StatusBadge({ status }: { status: string }) {
   const tone =
-    status === "Withdrawn" ? "bg-rose-50 text-rose-700 border border-rose-200/60 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/50"
-      : ["Hired", "Verified", "Approved", "Paid", "Confirmed"].includes(status) ? "bg-success-soft text-success"
-      : ["Interview", "Shortlisted", "Open", "Offer"].includes(status) ? "bg-primary-soft text-primary"
-          : ["Under review", "New", "Applied", "Pending", "Draft"].includes(status) ? "bg-warning-soft text-warning"
-            : "bg-muted text-muted-foreground";
+    ["Withdrawn", "Rejected", "Not Selected", "Declined"].includes(status)
+      ? "bg-rose-50 text-rose-700 border border-rose-200/60 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/50"
+      : status === "Position Filled" || status === "Slot Filled"
+        ? "bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"
+        : ["Hired", "Verified", "Approved", "Paid", "Confirmed"].includes(status)
+          ? "bg-success-soft text-success"
+          : ["Interview", "Shortlisted", "Open", "Offer"].includes(status)
+            ? "bg-primary-soft text-primary"
+            : ["Claimed", "Timesheet Submitted"].includes(status)
+              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20"
+              : ["Under review", "New", "Applied", "Pending", "Draft"].includes(status)
+                ? "bg-warning-soft text-warning"
+                : "bg-muted text-muted-foreground";
   return <span className={cn("inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold", tone)}>{status}</span>;
 }

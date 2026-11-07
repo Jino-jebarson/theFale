@@ -24,6 +24,7 @@ import {
   HiOutlineDocumentCheck,
   HiOutlineAcademicCap,
   HiOutlineXMark,
+  HiOutlinePlus,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { Logo } from "@/components/fale/Logo";
@@ -50,7 +51,7 @@ import { generatePayoutAdvicePdf, printPayoutAdvicePdf } from "@/lib/payoutSlipP
 import { cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees } from "@/lib/api";
 import { getMyClaims, type ShiftClaimDto } from "@/lib/adapters/shiftAdapter";
-import { getCandidateProfile, savePayoutMethod as apiSavePayoutMethod } from "@/lib/adapters/candidateAdapter";
+import { getCandidateProfile, savePayoutMethod as apiSavePayoutMethod, getPayoutMethod } from "@/lib/adapters/candidateAdapter";
 
 export interface UiPayoutTransaction extends CandidatePayoutTransaction {
   grossAmount?: number;
@@ -124,23 +125,27 @@ function CandidateEarningsPage() {
     Promise.all([
       getMyClaims().catch(() => []),
       getCandidateProfile().catch(() => null),
+      getPayoutMethod().catch(() => null),
     ])
-      .then(([claims, profile]) => {
+      .then(([claims, profile, pmApi]) => {
+        const pm = pmApi || profile?.payoutMethod;
         if (profile) {
           setState((prev) => ({
             candidateLevel: profile.isStudent ? "student" : (profile.candidateLevel?.toLowerCase() as any),
-            candidatePayoutMethod: profile.payoutMethod
+            candidatePayoutMethod: pm && (pm.upiId || pm.accountNumber || (pm as any).accountNumberLast4)
               ? {
-                  type: (profile.payoutMethod.methodType?.toLowerCase() as any) || "upi",
-                  upiId: profile.payoutMethod.upiId,
-                  accountNumber: profile.payoutMethod.accountNumber || profile.payoutMethod.accountNumberLast4,
-                  accountNumberLast4: profile.payoutMethod.accountNumberLast4,
-                  bankName: profile.payoutMethod.bankName,
-                  ifsc: profile.payoutMethod.ifsc,
-                  accountHolderName: profile.payoutMethod.accountHolderName || profile.name,
-                  status: (profile.payoutMethod.status as any) || "Verified",
-                  verifiedAt: profile.payoutMethod.verifiedAt ? "Cashfree VPA Validated" : "Cashfree Instant VPA Validated",
+                  type: ((pm.methodType || (pm as any).type || "upi").toLowerCase() as any),
+                  upiId: pm.upiId,
+                  accountNumber: pm.accountNumber || (pm as any).accountNumberLast4,
+                  accountNumberLast4: (pm as any).accountNumberLast4,
+                  bankName: pm.bankName,
+                  ifsc: pm.ifsc,
+                  accountHolderName: pm.accountHolderName || profile.name,
+                  status: (pm.status as any) || "Verified",
+                  verifiedAt: pm.verifiedAt ? "Cashfree VPA Validated" : "Cashfree Instant VPA Validated",
                 }
+              : isApiEnabled
+              ? undefined
               : prev.candidatePayoutMethod,
             profile: {
               ...prev.profile,
@@ -152,17 +157,15 @@ function CandidateEarningsPage() {
             },
           }));
 
-          if (profile.payoutMethod) {
-            setPayoutType((profile.payoutMethod.methodType?.toLowerCase() as any) || "upi");
-            if (profile.payoutMethod.upiId) setFormUpiId(profile.payoutMethod.upiId);
-            if (profile.payoutMethod.accountHolderName) setFormHolderName(profile.payoutMethod.accountHolderName);
-            if (profile.payoutMethod.bankName) setFormBankName(profile.payoutMethod.bankName);
-            if (profile.payoutMethod.accountNumber) setFormAccNumber(profile.payoutMethod.accountNumber);
-            if (profile.payoutMethod.ifsc) setFormIfsc(profile.payoutMethod.ifsc);
+          if (pm && (pm.upiId || pm.accountNumber)) {
+            setPayoutType(((pm.methodType || (pm as any).type || "upi").toLowerCase() as any));
+            if (pm.upiId) setFormUpiId(pm.upiId);
+            if (pm.accountHolderName) setFormHolderName(pm.accountHolderName);
+            if (pm.bankName) setFormBankName(pm.bankName);
+            if (pm.accountNumber) setFormAccNumber(pm.accountNumber);
+            if (pm.ifsc) setFormIfsc(pm.ifsc);
           }
         }
-
-        const pm = profile?.payoutMethod;
         const defaultMethodDesc = pm
           ? pm.methodType === "upi"
             ? `Cashfree Instant UPI · ${pm.upiId}`
@@ -182,6 +185,9 @@ function CandidateEarningsPage() {
           const isDisbursed = c.payoutStatus === "DISBURSED";
           const isPendingDisbursement = c.payoutStatus === "PENDING_DISBURSEMENT" || c.status === "COMPLETED";
 
+          const effectiveHours = c.actualHours || c.hours || 8;
+          const effectiveRate = gross ? Math.round(gross / effectiveHours) : (amt ? Math.round(amt / effectiveHours) : 500);
+
           return {
             id: c.id,
             shiftId: c.shiftId,
@@ -193,8 +199,8 @@ function CandidateEarningsPage() {
               : c.claimedAt
                 ? new Date(c.claimedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
                 : "Recent",
-            hours: c.hours || 8,
-            rate: amt ? Math.round(amt / (c.hours || 8)) : 0,
+            hours: effectiveHours,
+            rate: effectiveRate,
             amount: amt,
             grossAmount: gross || (amt + fee + tds),
             platformFee: fee,
@@ -224,13 +230,8 @@ function CandidateEarningsPage() {
   }, []);
 
   const candidateName = String(store.profile["name"] || (isApiEnabled ? "Clinician" : "Jino Jebarson R"));
-  const candidatePayoutMethod: CandidatePayoutMethod = store.candidatePayoutMethod || {
-    type: "upi",
-    upiId: isApiEnabled ? "clinician@oksbi" : "jinovj250@oksbi",
-    accountHolderName: candidateName,
-    status: "Verified",
-    verifiedAt: "Cashfree Instant VPA Validated",
-  };
+  const candidatePayoutMethod: CandidatePayoutMethod | null = store.candidatePayoutMethod || null;
+  const hasLinkedPayout = Boolean(candidatePayoutMethod && (candidatePayoutMethod.upiId || candidatePayoutMethod.accountNumber));
 
   const studentPayouts: CandidatePayoutTransaction[] = useMemo(
     () => [
@@ -246,8 +247,9 @@ function CandidateEarningsPage() {
         amount: 18000,
         payoutDate: "Releasing 01 Nov 2026 · 10:00 AM",
         status: "In Escrow (24h SLA)",
-        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
-          }`,
+        payoutMethodUsed: candidatePayoutMethod
+          ? `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName}`
+          : "Cashfree Escrow Disbursement",
         slipRef: "FALE-STU-8812",
       },
       {
@@ -262,8 +264,9 @@ function CandidateEarningsPage() {
         amount: 18000,
         payoutDate: "01 Oct 2026 · 10:30 AM",
         status: "Disbursed",
-        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
-          }`,
+        payoutMethodUsed: candidatePayoutMethod
+          ? `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName}`
+          : "Cashfree Escrow Disbursement",
         utr: "CFUPI2026100199412",
         slipRef: "FALE-STU-7901",
       },
@@ -279,8 +282,9 @@ function CandidateEarningsPage() {
         amount: 5000,
         payoutDate: "15 Aug 2026 · 02:15 PM",
         status: "Disbursed",
-        payoutMethodUsed: `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName
-          }`,
+        payoutMethodUsed: candidatePayoutMethod
+          ? `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName}`
+          : "Cashfree Escrow Disbursement",
         utr: "CFUPI2026081512044",
         slipRef: "FALE-STU-6520",
       },
@@ -295,13 +299,13 @@ function CandidateEarningsPage() {
     : (store.candidatePayouts as any) || [];
 
   // Payout Form Modal State
-  const [payoutType, setPayoutType] = useState<"upi" | "bank">(candidatePayoutMethod.type);
-  const [formUpiId, setFormUpiId] = useState(candidatePayoutMethod.upiId || (isApiEnabled ? "" : "jinovj250@oksbi"));
-  const [formHolderName, setFormHolderName] = useState(candidatePayoutMethod.accountHolderName || candidateName);
-  const [formBankName, setFormBankName] = useState(candidatePayoutMethod.bankName || (isApiEnabled ? "" : "HDFC Bank Ltd"));
-  const [formAccNumber, setFormAccNumber] = useState(candidatePayoutMethod.accountNumber || (isApiEnabled ? "" : "50100412891234"));
-  const [formConfirmAcc, setFormConfirmAcc] = useState(candidatePayoutMethod.accountNumber || (isApiEnabled ? "" : "50100412891234"));
-  const [formIfsc, setFormIfsc] = useState(candidatePayoutMethod.ifsc || (isApiEnabled ? "" : "HDFC0000060"));
+  const [payoutType, setPayoutType] = useState<"upi" | "bank">(candidatePayoutMethod?.type || "upi");
+  const [formUpiId, setFormUpiId] = useState(candidatePayoutMethod?.upiId || "");
+  const [formHolderName, setFormHolderName] = useState(candidatePayoutMethod?.accountHolderName || candidateName);
+  const [formBankName, setFormBankName] = useState(candidatePayoutMethod?.bankName || "HDFC Bank Ltd");
+  const [formAccNumber, setFormAccNumber] = useState(candidatePayoutMethod?.accountNumber || "");
+  const [formConfirmAcc, setFormConfirmAcc] = useState(candidatePayoutMethod?.accountNumber || "");
+  const [formIfsc, setFormIfsc] = useState(candidatePayoutMethod?.ifsc || "");
   const [isVerifying, setIsVerifying] = useState(false);
 
   // Financial Telemetry
@@ -495,8 +499,17 @@ function CandidateEarningsPage() {
                   onClick={() => setPayoutModalOpen(true)}
                   className="h-10 bg-primary hover:bg-primary-hover text-white text-xs font-bold px-3 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto"
                 >
-                  <HiOutlinePencilSquare className="h-4 w-4" />
-                  <span>Update Account</span>
+                  {hasLinkedPayout ? (
+                    <>
+                      <HiOutlinePencilSquare className="h-4 w-4" />
+                      <span>Update Account</span>
+                    </>
+                  ) : (
+                    <>
+                      <HiOutlinePlus className="h-4 w-4" />
+                      <span>Add Payout Method</span>
+                    </>
+                  )}
                 </Button>
               </>
             )}
@@ -615,72 +628,138 @@ function CandidateEarningsPage() {
               </div>
             </section>
 
-            {/* Active Payout Destination Strip (Matching Huddle) */}
-            <section className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-5">
-                <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
-                  <span className="grid h-10 w-10 sm:h-11 sm:w-11 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0 mt-0.5">
-                    <HiOutlineCheckBadge className="h-5 w-5 sm:h-6 sm:w-6" />
-                  </span>
-                  <div className="space-y-1.5 min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-sm sm:text-base font-extrabold text-foreground tracking-tight leading-snug">
-                        Active Cashfree 24-Hour Payout Destination
-                      </h3>
-                      <span className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold shrink-0">
-                        {candidatePayoutMethod.verifiedAt || "Cashfree VPA Validated"}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground font-medium">
-                      {candidatePayoutMethod.type === "upi" ? "Instant 24x7 UPI Direct Remittance" : "Direct Commercial Bank Mandate"}
-                    </p>
-                    <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
-                      Shift earnings are disbursed automatically into this verified destination within 24 hours of timesheet signoff.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Destination Detail Box */}
-                <div className="bg-muted/40 p-3.5 sm:p-4 rounded-2xl border border-border/70 w-full lg:w-auto min-w-0 sm:min-w-[340px] space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider block">
-                        {candidatePayoutMethod.type === "upi" ? "Verified UPI ID" : `${candidatePayoutMethod.bankName}`}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleCopy(candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId! : candidatePayoutMethod.accountNumber!, "payout", "Payout destination")}
-                        className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0 transition-colors p-0.5"
-                        title="Copy details"
-                      >
-                        {copiedKey === "payout" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
-                      </button>
-                    </div>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPayoutModalOpen(true)}
-                      className="rounded-xl text-xs font-bold h-8 px-3 shrink-0 cursor-pointer border-primary/40 text-primary hover:bg-primary hover:text-white transition-all shadow-xs flex items-center gap-1.5"
-                    >
-                      <HiOutlinePencilSquare className="h-3.5 w-3.5" />
-                      <span>Change</span>
-                    </Button>
-                  </div>
-
-                  <div className="space-y-0.5">
-                    <div className="font-mono font-bold text-foreground text-sm sm:text-base break-all">
-                      {candidatePayoutMethod.type === "upi"
-                        ? (candidatePayoutMethod.upiId || "Not Configured")
-                        : (candidatePayoutMethod.accountNumber ? `•••• •••• ${candidatePayoutMethod.accountNumber.slice(-4)} (${candidatePayoutMethod.ifsc || ""})` : "Not Configured")}
-                    </div>
-                    <span className="text-xs text-muted-foreground block">
-                      Matched Name: <span className="font-medium text-foreground">{candidatePayoutMethod.accountHolderName || candidateName}</span>
+            {/* Active Payout Destination Strip */}
+            {!hasLinkedPayout ? (
+              <section className="rounded-2xl sm:rounded-3xl border border-dashed border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-2xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+                    <span className="grid h-10 w-10 sm:h-11 sm:w-11 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0 mt-0.5">
+                      <HiOutlineBuildingLibrary className="h-5 w-5 sm:h-6 sm:w-6" />
                     </span>
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm sm:text-base font-extrabold text-foreground tracking-tight">
+                          Candidate 24-Hour Payout Destination
+                        </h3>
+                        <span className="text-[10px] text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-bold">
+                          Not Linked
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Link your personal UPI ID or bank account to enable automated shift payouts within 24 hours of timesheet signoff.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => setPayoutModalOpen(true)}
+                    className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary-hover text-white shrink-0 shadow-xs cursor-pointer gap-1.5"
+                  >
+                    <HiOutlinePlus className="h-4 w-4" />
+                    <span>Add Payout Method</span>
+                  </Button>
+                </div>
+              </section>
+            ) : candidatePayoutMethod ? (
+              <section className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-5">
+                  <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
+                    <span className="grid h-10 w-10 sm:h-11 sm:w-11 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0 mt-0.5">
+                      <HiOutlineCheckBadge className="h-5 w-5 sm:h-6 sm:w-6" />
+                    </span>
+                    <div className="space-y-1.5 min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm sm:text-base font-extrabold text-foreground tracking-tight leading-snug">
+                          Active Cashfree 24-Hour Payout Destination
+                        </h3>
+                        <span className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold shrink-0">
+                          {candidatePayoutMethod.verifiedAt || "Cashfree VPA Validated"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground font-medium">
+                        {candidatePayoutMethod.type === "upi" ? "Instant 24x7 UPI Direct Remittance" : "Direct Commercial Bank Mandate"}
+                      </p>
+                      <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
+                        Shift earnings are disbursed automatically into this verified destination within 24 hours of timesheet signoff.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Destination Detail Box */}
+                  <div className="bg-muted/40 p-3.5 sm:p-4 rounded-2xl border border-border/70 w-full lg:w-auto min-w-0 sm:min-w-[340px] space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider block">
+                          {candidatePayoutMethod.type === "upi" ? "Verified UPI ID" : `${candidatePayoutMethod.bankName || "Commercial Bank"}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId! : candidatePayoutMethod.accountNumber!, "payout", "Payout destination")}
+                          className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0 transition-colors p-0.5"
+                          title="Copy details"
+                        >
+                          {copiedKey === "payout" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPayoutModalOpen(true)}
+                        className="rounded-xl text-xs font-bold h-8 px-3 shrink-0 cursor-pointer border-primary/40 text-primary hover:bg-primary hover:text-white transition-all shadow-xs flex items-center gap-1.5"
+                      >
+                        <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                        <span>Change</span>
+                      </Button>
+                    </div>
+
+                    <div className="space-y-0.5">
+                      <div className="font-mono font-bold text-foreground text-sm sm:text-base break-all">
+                        {candidatePayoutMethod.type === "upi"
+                          ? (candidatePayoutMethod.upiId || "Not Configured")
+                          : (candidatePayoutMethod.accountNumber ? `•••• •••• ${candidatePayoutMethod.accountNumber.slice(-4)} (${candidatePayoutMethod.ifsc || ""})` : "Not Configured")}
+                      </div>
+                      <span className="text-xs text-muted-foreground block">
+                        Matched Name: <span className="font-medium text-foreground">{candidatePayoutMethod.accountHolderName || candidateName}</span>
+                      </span>
+                    </div>
                   </div>
                 </div>
+              </section>
+            ) : null}
+
+            {/* Actionable Payout Alert Banner if funds exist in escrow but no payout method is linked */}
+            {!hasLinkedPayout && (inEscrowAmount > 0 || payouts.length > 0) && (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5">
+                    <HiOutlineBolt className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h4 className="font-bold text-foreground text-sm">
+                      {inEscrowAmount > 0
+                        ? `₹${inEscrowAmount.toLocaleString("en-IN")} Pending in 24-Hour Escrow`
+                        : "Ready for automated shift payouts"}
+                    </h4>
+                    <p className="text-muted-foreground mt-0.5 leading-relaxed">
+                      Link your personal UPI ID or bank account so your shift earnings disburse automatically within 24 hours of duty signoff.
+                    </p>
+                  </div>
+                </div>
+
+                <Button
+                  size="sm"
+                  onClick={() => setPayoutModalOpen(true)}
+                  className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary-hover text-white shrink-0 shadow-xs cursor-pointer gap-1.5"
+                >
+                  <HiOutlinePlus className="h-4 w-4" />
+                  <span>Add Payout Method</span>
+                </Button>
               </div>
-            </section>
+            )}
+
             {/* Ledger & Statements (Matching Huddle) */}
             <section className="rounded-3xl border border-border/80 bg-card shadow-xs overflow-hidden">
               {/* Header Controls */}
@@ -1624,7 +1703,14 @@ function CandidateEarningsPage() {
                     <div className="space-y-0.5 text-[11px] text-muted-foreground">
                       <p><span className="text-foreground font-medium">Department:</span> {selectedSlipTx.dept}</p>
                       <p><span className="text-foreground font-medium">Duty Slot:</span> {selectedSlipTx.shiftDate}</p>
-                      <p><span className="text-foreground font-medium">Duty Hours:</span> {selectedSlipTx.hours} Hours (@ ₹{selectedSlipTx.rate}/hr)</p>
+                      <p>
+                        <span className="text-foreground font-medium">Duty Hours:</span> {selectedSlipTx.hours} Hours (@ ₹{selectedSlipTx.rate}/hr)
+                      </p>
+                      {selectedSlipTx.rawClaim?.actualHours && selectedSlipTx.rawClaim?.hours && selectedSlipTx.rawClaim.actualHours !== selectedSlipTx.rawClaim.hours && (
+                        <p className="text-amber-600 dark:text-amber-400 font-semibold text-[10px] pt-0.5">
+                          Verified Duty: {selectedSlipTx.rawClaim.actualHours} hrs (Scheduled: {selectedSlipTx.rawClaim.hours} hrs · {selectedSlipTx.rawClaim.hours - selectedSlipTx.rawClaim.actualHours} hrs unused escrow refunded to hospital)
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

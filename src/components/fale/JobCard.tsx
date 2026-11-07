@@ -131,9 +131,27 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
               <span>Internship</span>
             </span>
           )}
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            {job.match}% Match
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold",
+              (job.match ?? 0) >= 70
+                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                : (job.match ?? 0) >= 40
+                ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                : "bg-muted border-border text-muted-foreground"
+            )}
+          >
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                (job.match ?? 0) >= 70
+                  ? "bg-emerald-500 animate-pulse"
+                  : (job.match ?? 0) >= 40
+                  ? "bg-amber-500"
+                  : "bg-muted-foreground"
+              )}
+            />
+            {(job.match ?? 0) >= 90 ? `Exact Match (${job.match}%)` : `${job.match}% Match`}
           </span>
 
           <button

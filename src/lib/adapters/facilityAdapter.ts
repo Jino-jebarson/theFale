@@ -30,8 +30,20 @@ export interface FacilityProfileDto {
   hiringNeeds?: string[];
   logoUrl?: string;
   facilityPhotos?: string[];
+  documents?: FacilityDocumentDto[];
   kycStatus: string;
   verifiedAt?: string;
+}
+
+export interface FacilityDocumentDto {
+  id: string;
+  documentType: string;
+  originalFileName: string;
+  fileUrl: string;
+  fileSizeBytes?: number;
+  mimeType?: string;
+  verified?: boolean;
+  createdAt?: string;
 }
 
 export interface FacilityWalletDto {
@@ -109,6 +121,7 @@ export interface PostJobPayload {
   employmentType: string;
   isInternship: boolean;
   city: string;
+  workLocation?: string;
   openings: number;
   salaryMinPaise: number;
   salaryMaxPaise: number;
@@ -141,6 +154,21 @@ export interface FacilityOnboardPayload {
   hiringNeeds?: string[];
   logoUrl?: string;
   facilityPhotos?: string[];
+  facilityRegistrationUrl?: string;
+  facilityRegistrationFileName?: string;
+  gstCertificateUrl?: string;
+  gstCertificateFileName?: string;
+  representativeAuthorizationUrl?: string;
+  representativeAuthorizationFileName?: string;
+  nabhCertificateUrl?: string;
+  nabhCertificateFileName?: string;
+  fireSafetyClearanceUrl?: string;
+  fireSafetyClearanceFileName?: string;
+  pollutionControlClearanceUrl?: string;
+  pollutionControlClearanceFileName?: string;
+  biomedicalWasteClearanceUrl?: string;
+  biomedicalWasteClearanceFileName?: string;
+  documents?: { documentType: string; originalFileName: string; fileUrl: string }[];
 }
 
 export async function onboardFacility(payload: FacilityOnboardPayload): Promise<FacilityProfileDto> {
@@ -188,7 +216,8 @@ export async function updateApplicantStatus(
   status: string,
   notes?: string,
   interviewScheduledAt?: string,
-  interviewLocationOrLink?: string
+  interviewLocationOrLink?: string,
+  actualHours?: number
 ): Promise<any> {
   return apiFetch(`/employer/applications/${applicationId}/status`, {
     method: "PUT",
@@ -197,6 +226,7 @@ export async function updateApplicantStatus(
       notes,
       interviewScheduledAt,
       interviewLocationOrLink,
+      actualHours,
     }),
   });
 }
@@ -282,5 +312,26 @@ export async function updateHospitalBankAccount(data: {
       branch: data.branch || "Main Corporate Branch",
       accountType: data.accountType || "Current",
     }),
+  });
+}
+
+export async function uploadFacilityDocument(data: {
+  documentType: string;
+  originalFileName: string;
+  fileUrl: string;
+}): Promise<FacilityDocumentDto> {
+  return apiFetch<FacilityDocumentDto>("/facility/documents", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getFacilityDocuments(): Promise<FacilityDocumentDto[]> {
+  return apiFetch<FacilityDocumentDto[]>("/facility/documents");
+}
+
+export async function deleteFacilityDocument(id: string): Promise<void> {
+  return apiFetch<void>(`/facility/documents/${id}`, {
+    method: "DELETE",
   });
 }

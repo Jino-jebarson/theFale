@@ -3,6 +3,7 @@
 
 import { apiFetch, paiseToRupees } from "@/lib/api";
 import type { Job } from "@/lib/data";
+import { setState } from "@/lib/store";
 
 export interface JobPostingDto {
   id: string;
@@ -16,6 +17,7 @@ export interface JobPostingDto {
   isInternship?: boolean;
   internship?: boolean;
   city: string;
+  workLocation?: string;
   openings?: number;
   salaryMinPaise?: number;
   salaryMaxPaise?: number;
@@ -87,7 +89,7 @@ export function mapJobPostingToUi(dto: JobPostingDto): Job {
     id: dto.id,
     title: dto.title,
     org: dto.facilityName || "Hospital Partner",
-    city: dto.city || dto.facilityCity || "Bengaluru",
+    city: dto.workLocation || dto.city || dto.facilityCity || "Bengaluru",
     salary: salaryStr,
     stipend: isIntern ? salaryStr : undefined,
     exp: dto.experienceRequired || (isIntern ? "Student / Intern" : "0–2 yrs"),
@@ -112,6 +114,12 @@ export function mapJobPostingToUi(dto: JobPostingDto): Job {
 export async function getJobs(city?: string): Promise<Job[]> {
   const query = city ? `?city=${encodeURIComponent(city)}` : "";
   const dtos = await apiFetch<JobPostingDto[]>(`/jobs${query}`);
+  const savedIds = dtos.filter((d) => d.isSaved).map((d) => d.id);
+  if (savedIds.length > 0) {
+    setState((prev) => ({
+      saved: Array.from(new Set([...prev.saved, ...savedIds])),
+    }));
+  }
   return dtos.map(mapJobPostingToUi);
 }
 
@@ -120,6 +128,14 @@ export async function getJobs(city?: string): Promise<Job[]> {
  */
 export async function getJobById(id: string): Promise<Job> {
   const dto = await apiFetch<JobPostingDto>(`/jobs/${id}`);
+  if (dto.isSaved) {
+    setState((prev) => {
+      if (!prev.saved.includes(dto.id)) {
+        return { saved: [...prev.saved, dto.id] };
+      }
+      return prev;
+    });
+  }
   return mapJobPostingToUi(dto);
 }
 

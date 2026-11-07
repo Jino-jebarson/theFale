@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   HiOutlineShieldCheck,
   HiOutlineMapPin,
@@ -41,13 +41,16 @@ import { applicants, type Applicant } from "@/lib/data";
 import { useApp, setState } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled, rupeesToPaise } from "@/lib/api";
+import { recordCandidateProfileView } from "@/lib/adapters/candidateAdapter";
 import {
   searchTalentCandidates,
   unlockCandidateContact,
   getFacilityWallet,
   buyCandidateCredits,
+  getHospitalBankAccount,
   type CandidateResdexDto,
   type FacilityWalletDto,
+  type HospitalBankAccountDto,
 } from "@/lib/adapters/facilityAdapter";
 
 export const Route = createFileRoute("/employer/candidates")({
@@ -167,7 +170,9 @@ function CoinIcon({ className = "h-4 w-4" }: { className?: string }) {
 function FindCandidates() {
   const store = useApp();
 
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const [apiBank, setApiBank] = useState<HospitalBankAccountDto | null>(null);
   const [selectedRole, setSelectedRole] = useState("All");
   const [selectedCity, setSelectedCity] = useState("All");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
@@ -192,10 +197,12 @@ function FindCandidates() {
     Promise.all([
       searchTalentCandidates(search.trim() || undefined, specialtyParam, cityParam).catch(() => []),
       getFacilityWallet().catch(() => null),
+      getHospitalBankAccount().catch(() => null),
     ])
-      .then(([candidates, wallet]) => {
+      .then(([candidates, wallet, bank]) => {
         setApiCandidates(candidates);
         setApiWallet(wallet);
+        setApiBank(bank);
       })
       .finally(() => {
         setLoading(false);
@@ -208,7 +215,11 @@ function FindCandidates() {
 
   const credits = isApiEnabled
     ? apiWallet?.candidateCredits ?? 0
-    : store.candidateCredits ?? 3;
+    : store.candidateCredits ?? 0;
+
+  const hasLinkedBank = isApiEnabled
+    ? Boolean(apiBank && (apiBank.accountNumber || (apiBank as any).accountNumberMasked || (apiBank as any).accountNumberLast4))
+    : Boolean(store.hospitalBankAccount && store.hospitalBankAccount.accountNumber && store.hospitalBankAccount.accountNumber.length > 3);
 
   const unlockedIds = isApiEnabled
     ? apiCandidates.filter((c) => Boolean(c.isUnlocked || (c as any).isContactUnlocked)).map((c) => (c as any).candidateId || c.id)
@@ -295,8 +306,26 @@ function FindCandidates() {
     });
   }, [isApiEnabled, apiCandidates, selectedRole, selectedCity, verifiedOnly, search]);
 
+  const handleOpenBuyCredits = () => {
+    if (!hasLinkedBank) {
+      toast.error("Hospital Bank Account Required", {
+        description: "Please link your hospital settlement bank account in Wallet & Escrow before purchasing sourcing credits.",
+      });
+      navigate({ to: "/employer/wallet" });
+      return;
+    }
+    setBuyCreditsOpen(true);
+  };
+
   const handleUnlockClick = (app: any) => {
     if (credits < 1) {
+      if (!hasLinkedBank) {
+        toast.error("Hospital Bank Account Required", {
+          description: "Please link your hospital settlement bank account in Wallet & Escrow before purchasing candidate credits.",
+        });
+        navigate({ to: "/employer/wallet" });
+        return;
+      }
       toast.error("No credits available", {
         description: "Choose a credit package to unlock candidate contact details.",
       });
@@ -316,12 +345,13 @@ function FindCandidates() {
 
     if (isApiEnabled) {
       try {
-        const unlocked = await unlockCandidateContact(candidateToUnlock.id);
+        const unlocked = await unlockCandidateContact(candidateToUnlock.id); recordCandidateProfileView(candidateToUnlock.id, (store as any)?.facilityProfile?.hospitalName || "Partner Hospital").catch(() => {});
         setCandidateToUnlock(null);
         toast.success(`Contact details unlocked for ${candidateToUnlock.name}`, {
           description: `Phone: ${unlocked.phone || unlocked.unlockedPhone} · Email: ${unlocked.email || unlocked.unlockedEmail}`,
         });
         fetchCandidates();
+        window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
       } catch (err: any) {
         toast.error("Unlock failed", {
           description: err?.message || "Could not unlock contact. Check credit balance.",
@@ -332,7 +362,7 @@ function FindCandidates() {
 
     // Deduct 1 credit and save unlocked candidate id
     setState((s) => ({
-      candidateCredits: Math.max(0, (s.candidateCredits ?? 3) - 1),
+      candidateCredits: Math.max(0, (s.candidateCredits ?? 0) - 1),
       unlockedCandidates: Array.from(new Set([...(s.unlockedCandidates ?? []), candidateToUnlock.id])),
     }));
 
@@ -340,10 +370,19 @@ function FindCandidates() {
       description: `Phone: ${candidateToUnlock.phone} · Email: ${candidateToUnlock.email}`,
     });
 
+    window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
     setCandidateToUnlock(null);
   };
 
   const handleBuyCredits = async () => {
+    if (!hasLinkedBank) {
+      toast.error("Hospital Bank Account Required", {
+        description: "Please link your hospital settlement bank account in Wallet & Escrow before purchasing candidate credits.",
+      });
+      setBuyCreditsOpen(false);
+      navigate({ to: "/employer/wallet" });
+      return;
+    }
     if (!selectedPackage) return;
     setIsProcessingPayment(true);
 
@@ -357,6 +396,7 @@ function FindCandidates() {
         setApiWallet(updatedWallet);
         setIsProcessingPayment(false);
         setBuyCreditsOpen(false);
+        window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
         toast.success(`${selectedPackage.credits} Credits added successfully`, {
           description: `Your balance is now ${updatedWallet.candidateCredits} credits.`,
         });
@@ -375,6 +415,7 @@ function FindCandidates() {
         candidateCredits: (s.candidateCredits ?? 0) + selectedPackage.credits,
       }));
       setBuyCreditsOpen(false);
+      window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
       toast.success(`${selectedPackage.credits} Credits added successfully`, {
         description: `Your balance is now ${(credits ?? 0) + selectedPackage.credits} credits.`,
       });
@@ -406,11 +447,12 @@ function FindCandidates() {
             </div>
 
             <Button
-              onClick={() => setBuyCreditsOpen(true)}
+              onClick={handleOpenBuyCredits}
               className="h-10 gap-1.5 rounded-xl px-4 text-xs font-semibold shadow-xs whitespace-nowrap cursor-pointer"
             >
               <HiOutlineSparkles className="h-4 w-4" />
               <span>Buy credits</span>
+              
             </Button>
           </div>
         </div>
@@ -593,7 +635,7 @@ function FindCandidates() {
                     <div className="flex flex-col items-end gap-1.5 shrink-0">
                       <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200/70 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
                         <HiOutlineSparkles className="h-3 w-3" />
-                        {a.match}% Match
+                        {(a.match ?? 0) >= 90 ? `Exact Match (${a.match}%)` : `${a.match}% Match`}
                       </span>
                       {isUnlocked ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary">
@@ -679,7 +721,7 @@ function FindCandidates() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setViewResumeApplicant(a)}
+                      onClick={() => { setViewResumeApplicant(a); if (a.id) recordCandidateProfileView(a.id, (store as any)?.facilityProfile?.hospitalName || "Partner Hospital").catch(() => {}); }}
                       className="rounded-xl text-xs font-semibold gap-1.5 border-primary/30 bg-primary-soft text-primary hover:bg-primary-soft/80 shadow-2xs cursor-pointer"
                     >
                       <HiOutlineDocumentText className="h-4 w-4 text-primary" /> View resume
@@ -787,7 +829,9 @@ function FindCandidates() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground font-medium">Match Score:</span>
-                  <span className="font-bold text-emerald-600 dark:text-emerald-400">{candidateToUnlock.match}% Match</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                    {(candidateToUnlock.match ?? 0) >= 90 ? `Exact Match (${candidateToUnlock.match}%)` : `${candidateToUnlock.match}% Match`}
+                  </span>
                 </div>
                 <div className="border-t border-border/80 pt-2.5 space-y-2">
                   <div className="flex items-center justify-between">
@@ -1022,10 +1066,6 @@ function FindCandidates() {
                         </span>
                       </DialogDescription>
                     </div>
-
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary-soft text-primary px-3 py-1 text-xs font-semibold shrink-0">
-                      <HiOutlineShieldCheck className="h-4 w-4" /> Preview Only
-                    </span>
                   </div>
                 </DialogHeader>
 
@@ -1046,20 +1086,11 @@ function FindCandidates() {
               {/* Resume Body */}
               <div className="p-5 sm:p-6 space-y-4">
                 {viewResumeApplicant.resumeUrl ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-                      <span className="font-semibold text-foreground flex items-center gap-1.5">
-                        <HiOutlineDocumentText className="h-4 w-4 text-primary" />
-                        {viewResumeApplicant.resumeFileName || "Candidate_Resume.pdf"}
-                      </span>
-                      <span className="text-muted-foreground">Original Document Uploaded During Onboarding</span>
-                    </div>
-                    <iframe
-                      src={`${viewResumeApplicant.resumeUrl}#toolbar=0&navpanes=0&scrollbar=1`}
-                      title="Candidate Resume Preview"
-                      className="h-[560px] w-full rounded-2xl border border-border shadow-xs bg-white"
-                    />
-                  </div>
+                  <iframe
+                    src={`${viewResumeApplicant.resumeUrl}#toolbar=0&navpanes=0&scrollbar=1`}
+                    title="Candidate Resume Preview"
+                    className="h-[560px] w-full rounded-2xl border border-border shadow-xs bg-white"
+                  />
                 ) : (
                   <div className="space-y-4 text-sm">
                     <div>

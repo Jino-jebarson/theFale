@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import {
   HiArrowLeft,
@@ -21,8 +21,23 @@ import { Button } from "@/components/ui/button";
 import { jobs } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { isApiEnabled } from "@/lib/api";
-import { applyForJob, getJobById } from "@/lib/adapters/jobAdapter";
+import { applyForJob, getJobById, saveJob, unsaveJob } from "@/lib/adapters/jobAdapter";
 import { withdrawApplication } from "@/lib/adapters/applicationAdapter";
+import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
+import { calculateClinicalMatch } from "@/lib/clinicalMatchingEngine";
+import { cn } from "@/lib/utils";
+
+function formatApplicationStatus(status?: string) {
+  if (!status) return "Application Submitted";
+  const s = status.toLowerCase();
+  if (s.includes("interview")) return "Interview Scheduled";
+  if (s.includes("shortlist")) return "Shortlisted by Hospital";
+  if (s.includes("offer")) return "Offer Extended";
+  if (s.includes("hire") || s.includes("accept")) return "Selected & Hired";
+  if (s.includes("review")) return "Under Clinical Review";
+  if (s.includes("screen") || s.includes("applied") || s.includes("pending")) return "Application Submitted";
+  return status;
+}
 
 export const Route = createFileRoute("/jobs/$id")({
   loader: async ({ params }) => {
@@ -58,8 +73,75 @@ function JobDetail() {
   const s = useApp();
   const [withdrawing, setWithdrawing] = useState(false);
 
+  useEffect(() => {
+    if (!isApiEnabled || s.profile["role"]) return;
+    getCandidateProfile()
+      .then((profileData) => {
+        if (!profileData) return;
+        const openVal = profileData.openToWork != null ? Boolean(profileData.openToWork) : true;
+        setState((prev) => ({
+          candidateLevel: profileData.isStudent ? "student" : (profileData.candidateLevel?.toLowerCase() as any),
+          profile: {
+            ...prev.profile,
+            openToWork: openVal,
+            name: profileData.name || prev.profile["name"],
+            email: profileData.email || prev.profile["email"],
+            mobile: profileData.phone || prev.profile["mobile"],
+            city: profileData.city || prev.profile["city"],
+            state: profileData.state || prev.profile["state"],
+            role: profileData.profession || (profileData.isStudent ? profileData.course : "Doctor"),
+            specialty: profileData.specialty || "General medicine",
+            qual: profileData.qualification || "MBBS",
+            college: profileData.college || prev.profile["college"],
+            institution: profileData.college || prev.profile["institution"],
+            council: profileData.council || prev.profile["council"],
+            regNo: profileData.regNumber || prev.profile["regNo"],
+            regYear: profileData.regYear || prev.profile["regYear"],
+            exp: profileData.experienceYears || (profileData.isStudent ? "Student" : "Fresher"),
+            level: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
+            cadreLevel: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
+            kycStatus: profileData.kycStatus || prev.profile["kycStatus"],
+            notice: profileData.noticePeriod || "Immediate",
+            availability: profileData.availability || "Immediate",
+            avatar: profileData.documents?.find((d) => d.documentType === "PHOTO")?.fileUrl || prev.profile["avatar"],
+          },
+        }));
+      })
+      .catch(console.error);
+  }, [s.profile]);
+
   const candidateLevel = s.candidateLevel || (s.profile["level"] as any) || (s.profile["cadreLevel"] as any) || (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
+
+  const matchResult = calculateClinicalMatch(
+    {
+      role: String(s.profile["role"] || ""),
+      profession: String(s.profile["profession"] || s.profile["role"] || ""),
+      specialty: String(s.profile["specialty"] || ""),
+      subSpecialties: Array.isArray(s.profile["subSpecialties"]) ? s.profile["subSpecialties"] : [],
+      qualification: String(s.profile["qual"] || s.profile["qualification"] || ""),
+      skills: Array.isArray(s.profile["skills"]) ? s.profile["skills"] : [],
+      city: String(s.profile["city"] || ""),
+      state: String(s.profile["state"] || ""),
+      preferredCities: Array.isArray(s.profile["preferredCities"]) ? s.profile["preferredCities"] : [],
+      relocate: Boolean(s.profile["relocate"] || s.profile["openToRelocate"]),
+      kycStatus: String(s.profile["kycStatus"] || ""),
+      isStudent: Boolean(isStudent),
+      experienceYears: s.profile["exp"] || s.profile["experienceYears"],
+    },
+    {
+      title: job.title,
+      dept: job.dept,
+      city: job.city,
+      qualification: job.qualification,
+      tags: job.tags,
+      exp: job.exp,
+      urgent: job.urgent,
+      kind: job.kind,
+      type: job.type,
+    }
+  );
+  const matchScore = matchResult.score;
 
   const app = s.applied.find((a) => a.jobId === job.id);
   const isApplied = Boolean(app && app.status !== "Withdrawn");
@@ -79,7 +161,7 @@ function JobDetail() {
     const regNumber = String(s.profile["regNo"] || "KMC/DOC/89421");
 
     setState((x) => ({
-      applied: [{ jobId: job.id, status: "Under Admin Screening", date: now }, ...x.applied.filter((a) => a.jobId !== job.id)],
+      applied: [{ jobId: job.id, status: "Applied", date: now }, ...x.applied.filter((a) => a.jobId !== job.id)],
       adminApplications: [
         {
           id: crypto.randomUUID(),
@@ -102,8 +184,8 @@ function JobDetail() {
         ...x.adminApplications,
       ],
     }));
-    toast.success("Application Submitted for Admin Screening!", {
-      description: `Your profile has arrived at FALE Admin. Once shortlisted, it will be forwarded to ${job.org}.`,
+    toast.success("Application Submitted Successfully!", {
+      description: `Your profile and verified credentials have been submitted for ${job.title} at ${job.org}.`,
     });
   };
 
@@ -140,7 +222,18 @@ function JobDetail() {
                   {job.org} <HiOutlineShieldCheck className="h-4 w-4 text-primary" /> Verified employer
                 </p>
               </div>
-              <span className="rounded-full bg-success-soft px-3 py-1 text-xs font-bold text-success">{job.match}% match</span>
+              <span
+                className={cn(
+                  "rounded-full px-3 py-1 text-xs font-bold border",
+                  matchScore >= 70
+                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                    : matchScore >= 40
+                    ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                    : "bg-muted border-border text-muted-foreground"
+                )}
+              >
+                {matchScore >= 90 ? `Exact Match (${matchScore}%)` : `${matchScore}% Match`}
+              </span>
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-4">
               {[[HiOutlineCurrencyRupee, isStudent ? "Stipend / month" : "Salary / month", job.salary], [HiOutlineBriefcase, "Experience", job.exp], [HiOutlineMapPin, "Location", job.city], [HiOutlineClock, "Shift", job.shift]].map(([I, l, v]) => {
@@ -157,9 +250,9 @@ function JobDetail() {
             <div className="mt-5 flex flex-wrap items-center gap-3">
               {isApplied && app ? (
                 <>
-                  <div className="inline-flex items-center gap-2 rounded-xl bg-primary-soft px-4 py-2.5 text-sm font-bold text-primary">
-                    <HiCheckCircle className="h-5 w-5" />
-                    <span>Applied ({app.status})</span>
+                  <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-2.5 text-sm font-bold text-emerald-700 dark:text-emerald-300">
+                    <HiCheckCircle className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    <span>{formatApplicationStatus(app.status)}</span>
                   </div>
                   <Button
                     variant="outline"
@@ -186,7 +279,23 @@ function JobDetail() {
               <Button
                 variant="outline"
                 size="lg"
-                onClick={() => setState((x) => ({ saved: saved ? x.saved.filter((i) => i !== job.id) : [...x.saved, job.id] }))}
+                onClick={() => {
+                  if (isApiEnabled) {
+                    if (saved) {
+                      unsaveJob(job.id).catch(console.error);
+                    } else {
+                      saveJob(job.id).catch(console.error);
+                    }
+                  }
+                  setState((x) => ({
+                    saved: saved ? x.saved.filter((i) => i !== job.id) : [...x.saved, job.id],
+                  }));
+                  if (!saved) {
+                    toast.success("Role saved to your wishlist");
+                  } else {
+                    toast.info("Role removed from your wishlist");
+                  }
+                }}
               >
                 {saved ? <HiBookmark className="text-primary" /> : <HiOutlineBookmark />} {saved ? "Saved" : "Save"}
               </Button>

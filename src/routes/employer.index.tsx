@@ -28,11 +28,13 @@ import {
   HiOutlineChartPie,
   HiOutlineShieldCheck,
   HiOutlineQuestionMarkCircle,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill, RiShieldCheckFill } from "react-icons/ri";
 import { toast } from "sonner";
 import { AppShell, StatusBadge, initials } from "@/components/fale/AppShell";
 import { OrgMark } from "@/components/fale/JobCard";
+import { EmptyEarningsGraphic } from "@/components/fale/EmptyEarningsGraphic";
 import { Button } from "@/components/ui/button";
 import { applicants, shifts, jobs } from "@/lib/data";
 import { useApp } from "@/lib/store";
@@ -1129,87 +1131,165 @@ function EmployerDashboard() {
             {/* TAB 1: Clinical Postings */}
             {activeTab === "postings" && (
               <div className="space-y-3.5">
-                {filteredJobs.map((job) => (
-                  <div
-                    key={job.id}
-                    className="rounded-2xl border border-border/70 bg-card p-4.5 sm:p-5 shadow-xs hover:border-primary/40 transition-all space-y-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary">
-                          <HiOutlineBuildingOffice2 className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-muted-foreground truncate">{job.dept}</p>
-                          <h4 className="text-sm sm:text-base font-bold text-foreground truncate">{job.title}</h4>
-                        </div>
-                      </div>
-                      <StatusBadge status={job.status} />
-                    </div>
+                {filteredJobs.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-border/80 bg-card/80 backdrop-blur-xs p-6 sm:p-10 text-center animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden shadow-xs">
+                    {/* Saffron ambient brand glow */}
+                    <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#FF5A1F]/10 dark:bg-[#FF5A1F]/15 rounded-full blur-3xl pointer-events-none" />
+                    <div className="absolute -bottom-16 right-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
-                    <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-foreground">{job.openings} Openings</span>
-                        <span>•</span>
-                        <span>{city}</span>
+                    <div className="relative z-10 max-w-lg mx-auto flex flex-col items-center">
+                      <EmptyEarningsGraphic className="w-36 h-36 sm:w-44 sm:h-44 mb-3" />
+
+                      <h3 className="text-lg sm:text-xl font-bold text-foreground tracking-tight">
+                        {searchQuery ? "No matching postings found" : "No clinical postings published yet"}
+                      </h3>
+
+                      <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-md mx-auto">
+                        {searchQuery
+                          ? `We couldn't find any openings matching "${searchQuery}". Try adjusting your keywords or clearing the search.`
+                          : "Create and publish permanent roles, clinical fellowships, or consultant vacancies to attract verified medical practitioners."}
+                      </p>
+
+                      <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3">
+                        {searchQuery ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setSearchQuery("")}
+                            className="rounded-xl font-bold text-xs h-9 px-4 gap-2 cursor-pointer"
+                          >
+                            <HiOutlineArrowPath className="h-4 w-4" />
+                            <span>Clear Search</span>
+                          </Button>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          asChild
+                          className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary/90 text-white gap-2 shadow-none cursor-pointer"
+                        >
+                          <Link to="/employer/post">
+                            <HiPlus className="h-4 w-4" />
+                            <span>Post Clinical Vacancy</span>
+                          </Link>
+                        </Button>
                       </div>
-                      <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs text-primary font-bold hover:bg-primary-soft">
-                        <Link to="/employer/applicants">View Shortlist →</Link>
-                      </Button>
                     </div>
                   </div>
-                ))}
+                ) : (
+                  filteredJobs.map((job) => (
+                    <div
+                      key={job.id}
+                      className="rounded-2xl border border-border/70 bg-card p-4.5 sm:p-5 shadow-xs hover:border-primary/40 transition-all space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary">
+                            <HiOutlineBuildingOffice2 className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-muted-foreground truncate">{job.dept}</p>
+                            <h4 className="text-sm sm:text-base font-bold text-foreground truncate">{job.title}</h4>
+                          </div>
+                        </div>
+                        <StatusBadge status={job.status} />
+                      </div>
+
+                      <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-foreground">{job.openings} Openings</span>
+                          <span>•</span>
+                          <span>{city}</span>
+                        </div>
+                        <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs text-primary font-bold hover:bg-primary-soft">
+                          <Link to="/employer/applicants">View Shortlist →</Link>
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
 
             {/* TAB 2: Locum Shifts */}
             {activeTab === "shifts" && (
               <div className="space-y-3">
-                {activeShifts.map((sh) => (
-                  <div
-                    key={sh.id}
-                    className="rounded-2xl border border-border/70 bg-card p-4 shadow-xs hover:border-primary/40 transition-all space-y-2.5"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold",
-                          sh.status === "PENDING_APPROVAL"
-                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
-                            : sh.status === "OPEN"
-                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20"
-                            : sh.status === "FILLED"
-                            ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
-                            : "bg-muted text-muted-foreground"
-                        )}>
-                          <span className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            sh.status === "PENDING_APPROVAL" ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
-                          )} />
-                          {sh.status === "PENDING_APPROVAL"
-                            ? "Awaiting Admin Verification"
-                            : sh.status === "OPEN"
-                            ? "Live Broadcast"
-                            : sh.status === "FILLED"
-                            ? "Clinician Assigned"
-                            : sh.status}
-                        </span>
-                        <h4 className="mt-1 text-sm font-bold text-foreground">{sh.title}</h4>
-                        <p className="text-xs text-muted-foreground">{sh.dept} • {sh.date} • {sh.slotsClaimed}/{sh.slots} Slots Booked</p>
-                      </div>
-                      <span className="text-sm font-black font-mono text-primary">₹{sh.rate}/hr</span>
-                    </div>
+                {activeShifts.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-border/80 bg-card/80 backdrop-blur-xs p-6 sm:p-10 text-center animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden shadow-xs">
+                    <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#FF5A1F]/10 dark:bg-[#FF5A1F]/15 rounded-full blur-3xl pointer-events-none" />
+                    <div className="absolute -bottom-16 right-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
-                    <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs">
-                      <span className="text-emerald-600 font-medium text-[11px] flex items-center gap-1">
-                        <HiOutlineShieldCheck className="h-3.5 w-3.5" /> 24h Escrow Protected
-                      </span>
-                      <Button asChild variant="outline" size="sm" className="h-7 text-xs rounded-lg font-bold">
-                        <Link to="/employer/post-shift">Manage Shift</Link>
-                      </Button>
+                    <div className="relative z-10 max-w-lg mx-auto flex flex-col items-center">
+                      <EmptyEarningsGraphic className="w-36 h-36 sm:w-44 sm:h-44 mb-3" />
+
+                      <h3 className="text-lg sm:text-xl font-bold text-foreground tracking-tight">
+                        No active locum duty shifts
+                      </h3>
+
+                      <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-md mx-auto">
+                        Broadcast urgent on-call doctor or nursing shifts with 24h escrow protection directly to registered clinicians.
+                      </p>
+
+                      <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3">
+                        <Button
+                          size="sm"
+                          asChild
+                          className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary/90 text-white gap-2 shadow-none cursor-pointer"
+                        >
+                          <Link to="/employer/post-shift">
+                            <HiOutlineBolt className="h-4 w-4" />
+                            <span>Broadcast Instant Shift</span>
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                ))}
+                ) : (
+                  activeShifts.map((sh) => (
+                    <div
+                      key={sh.id}
+                      className="rounded-2xl border border-border/70 bg-card p-4 shadow-xs hover:border-primary/40 transition-all space-y-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold",
+                            sh.status === "PENDING_APPROVAL"
+                              ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
+                              : sh.status === "OPEN"
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20"
+                              : sh.status === "FILLED"
+                              ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
+                              : "bg-muted text-muted-foreground"
+                          )}>
+                            <span className={cn(
+                              "h-1.5 w-1.5 rounded-full",
+                              sh.status === "PENDING_APPROVAL" ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
+                            )} />
+                            {sh.status === "PENDING_APPROVAL"
+                              ? "Awaiting Admin Verification"
+                              : sh.status === "OPEN"
+                              ? "Live Broadcast"
+                              : sh.status === "FILLED"
+                              ? "Clinician Assigned"
+                              : sh.status}
+                          </span>
+                          <h4 className="mt-1 text-sm font-bold text-foreground">{sh.title}</h4>
+                          <p className="text-xs text-muted-foreground">{sh.dept} • {sh.date} • {sh.slotsClaimed}/{sh.slots} Slots Booked</p>
+                        </div>
+                        <span className="text-sm font-black font-mono text-primary">₹{sh.rate}/hr</span>
+                      </div>
+
+                      <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs">
+                        <span className="text-emerald-600 font-medium text-[11px] flex items-center gap-1">
+                          <HiOutlineShieldCheck className="h-3.5 w-3.5" /> 24h Escrow Protected
+                        </span>
+                        <Button asChild variant="outline" size="sm" className="h-7 text-xs rounded-lg font-bold">
+                          <Link to="/employer/post-shift">Manage Shift</Link>
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
 
@@ -1217,8 +1297,33 @@ function EmployerDashboard() {
             {activeTab === "applicants" && (
               <div className="space-y-3">
                 {effectiveApplicants.length === 0 ? (
-                  <div className="p-8 rounded-2xl border border-dashed border-border text-center text-sm text-muted-foreground">
-                    No shortlisted applicants yet. When compliance admin shortlists candidates for your postings, they will appear here.
+                  <div className="rounded-3xl border border-dashed border-border/80 bg-card/80 backdrop-blur-xs p-6 sm:p-10 text-center animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden shadow-xs">
+                    <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#FF5A1F]/10 dark:bg-[#FF5A1F]/15 rounded-full blur-3xl pointer-events-none" />
+                    <div className="absolute -bottom-16 right-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+                    <div className="relative z-10 max-w-lg mx-auto flex flex-col items-center">
+                      <EmptyEarningsGraphic className="w-36 h-36 sm:w-44 sm:h-44 mb-3" />
+
+                      <h3 className="text-lg sm:text-xl font-bold text-foreground tracking-tight">
+                        No shortlisted candidates yet
+                      </h3>
+
+                      <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-md mx-auto">
+                        When candidates apply to your postings or compliance admins assign shortlisted clinicians, they will appear here.
+                      </p>
+
+                      <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3">
+                        <Button
+                          size="sm"
+                          asChild
+                          className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary/90 text-white gap-2 shadow-none cursor-pointer"
+                        >
+                          <Link to="/employer/candidates">
+                            <span>Browse Verified Clinicians</span>
+                          </Link>
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   effectiveApplicants.map((a) => (

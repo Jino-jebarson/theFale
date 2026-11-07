@@ -51,6 +51,9 @@ import {
 import { useApp, setState, AdminApplication } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees } from "@/lib/api";
+import { calculateClinicalMatch } from "@/lib/clinicalMatchingEngine";
+import { jobs, type Job } from "@/lib/data";
+import { getJobs } from "@/lib/adapters/jobAdapter";
 import {
   getAdminApplications,
   screenApplication,
@@ -126,11 +129,14 @@ function ApplicationsAdmin() {
     if (!isApiEnabled) return;
     try {
       setLoading(true);
-      const [appsRes, shiftClaimsRes, payoutsRes] = await Promise.all([
+      const [appsRes, shiftClaimsRes, payoutsRes, jobsRes] = await Promise.all([
         getAdminApplications("all").catch(() => []),
         getPendingShiftClaims().catch(() => []),
         getPendingPayouts().catch(() => []),
+        getJobs().catch(() => []),
       ]);
+
+      const allKnownJobs: Job[] = [...((jobsRes as Job[]) || []), ...jobs];
 
       const mappedApps: AdminApplication[] = appsRes.map((dto: any) => {
         let status: "pending_admin" | "shortlisted" | "rejected" = "pending_admin";
@@ -156,23 +162,61 @@ function ApplicationsAdmin() {
         const cleanPhone = dto.candidatePhone || dto.phone || "+91 6380102651";
         const cleanEmail = dto.candidateEmail || dto.email || "candidate@fale.in";
 
+        const roleCandidate = dto.candidateRole || dto.department || "Doctor";
+        const specCandidate =
+          dto.candidateSpecialty ||
+          (roleCandidate.toLowerCase().includes("doctor") ? "General medicine" : roleCandidate);
+        const titleJob = dto.jobTitle || "Healthcare Opening";
+        const deptJob = dto.department || "Clinical Department";
+        const cityCandidate = dto.candidateCity || dto.city || "Chennai";
+        const cityJob = dto.city || "Bengaluru";
+        const qualCandidate = dto.candidateQualification || "MBBS";
+        const expCandidate = dto.candidateExperience || "2–4 yrs clinical experience";
+        const isVerified = Boolean(dto.councilVerified);
+
+        const targetJob = allKnownJobs.find(
+          (j) => j.id === dto.jobId || j.title.toLowerCase() === (dto.jobTitle || "").toLowerCase()
+        );
+
+        const clinicalMatch = calculateClinicalMatch(
+          {
+            role: roleCandidate,
+            profession: roleCandidate,
+            specialty: specCandidate,
+            qualification: qualCandidate,
+            city: cityCandidate,
+            state: dto.candidateState || "Tamil Nadu",
+            relocate: false,
+            kycStatus: isVerified ? "VERIFIED" : "PENDING",
+            experienceYears: expCandidate,
+          },
+          {
+            title: titleJob,
+            dept: deptJob,
+            city: cityJob,
+            qualification: targetJob?.qualification || "State Council Registration Required",
+            tags: targetJob?.tags || [deptJob, "NABH Accredited", "State Council Registration Required"],
+            exp: targetJob?.exp || "2-5 yrs",
+          }
+        );
+
         return {
           id: dto.id,
           candidateId: dto.candidateId,
           candidateName: dto.candidateName || "Candidate",
-          candidateRole: dto.candidateRole || dto.department || "Clinical Professional",
-          candidateCity: dto.candidateCity || dto.city || "Chennai",
+          candidateRole: roleCandidate,
+          candidateCity: cityCandidate,
           candidateState: dto.candidateState || "Tamil Nadu",
-          candidateQualification: dto.candidateQualification || "MBBS / Clinical Healthcare Degree",
+          candidateQualification: qualCandidate,
           candidateCouncil: dto.candidateCouncil || "State Medical / Nursing Council",
           candidateBio: dto.candidateBio || "Healthcare professional screened through FALE clinical qualification pipeline.",
           candidateNoticePeriod: dto.candidateNoticePeriod || "Immediate / 15 Days",
           jobId: dto.jobId,
-          jobTitle: dto.jobTitle || "Healthcare Opening",
+          jobTitle: titleJob,
           hospitalName: dto.facilityName || "Partner Hospital",
-          department: dto.department || "Clinical Department",
-          matchScore: dto.matchScore ?? 80,
-          councilVerified: dto.councilVerified ?? true,
+          department: deptJob,
+          matchScore: clinicalMatch.score || dto.matchScore || 85,
+          councilVerified: isVerified,
           regNumber: dto.regNumber || "Verified Council Member",
           exp: dto.candidateExperience || "2+ yrs clinical exp",
           status,
@@ -199,6 +243,23 @@ function ApplicationsAdmin() {
         const netRupees = sc.netAmountPaise ? paiseToRupees(sc.netAmountPaise) : 0;
         const grossRupees = sc.grossAmountPaise ? paiseToRupees(sc.grossAmountPaise) : 0;
 
+        const clinicalMatch = calculateClinicalMatch(
+          {
+            role: sc.candidateRole || "Staff Nurse",
+            profession: sc.candidateRole || "Staff Nurse",
+            specialty: sc.department || "Critical care",
+            qualification: "State Council Registered Practitioner",
+            city: sc.candidateCity || "Chennai",
+            state: "Tamil Nadu",
+            kycStatus: "VERIFIED",
+          },
+          {
+            title: sc.shiftTitle || "Clinical Shift",
+            dept: sc.department || "Critical care",
+            city: sc.candidateCity || "Chennai",
+          }
+        );
+
         return {
           id: sc.id,
           candidateId: sc.candidateId,
@@ -214,7 +275,7 @@ function ApplicationsAdmin() {
           jobTitle: `[Locum Shift] ${sc.shiftTitle || "Clinical Shift"}`,
           hospitalName: sc.facilityName || "Partner Hospital",
           department: sc.department || "Emergency & Trauma",
-          matchScore: sc.matchScore ?? 85,
+          matchScore: sc.matchScore ?? clinicalMatch.score,
           councilVerified: true,
           regNumber: "Council Verified Practitioner",
           exp: `${sc.hours || 8} hrs duty`,
@@ -284,6 +345,9 @@ function ApplicationsAdmin() {
         }
         setSheetOpen(false);
         fetchApps();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("fale:applications-updated"));
+        }
       } catch (err: any) {
         toast.error("Shortlist failed", { description: err?.message });
       }
@@ -294,6 +358,9 @@ function ApplicationsAdmin() {
         a.id === id ? { ...a, status: "shortlisted" as const } : a
       ),
     }));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("fale:applications-updated"));
+    }
     toast.success("Candidate Shortlisted & Dispatched!", {
       description: `${candidateName} has been vetted by Admin and forwarded to ${hospitalName}'s hiring board.`,
     });
@@ -360,10 +427,43 @@ function ApplicationsAdmin() {
   const openDocumentPreview = async (doc: any) => {
     try {
       setPreviewLoading(true);
-      if (doc.fileUrl && doc.fileUrl.startsWith("data:image/")) {
+
+      // 1. Image documents (PNG, JPG, WEBP)
+      if (
+        doc.fileUrl &&
+        (doc.fileUrl.startsWith("data:image/") ||
+          doc.mimeType?.startsWith("image/") ||
+          /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(doc.originalFileName || ""))
+      ) {
         setPreviewDoc({ name: doc.originalFileName, url: doc.fileUrl, isImage: true });
         return;
       }
+
+      // 2. Base64 PDF data URL (like candidate uploaded Resume / CV)
+      if (doc.fileUrl && doc.fileUrl.startsWith("data:application/pdf")) {
+        const parts = doc.fileUrl.split(",");
+        const binary = atob(parts[1]);
+        const len = binary.length;
+        const u8 = new Uint8Array(len);
+        for (let i = 0; i < len; i++) u8[i] = binary.charCodeAt(i);
+        const blob = new Blob([u8], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        setPreviewDoc({ name: doc.originalFileName, url, isImage: false });
+        return;
+      }
+
+      // 3. Remote HTTP / HTTPS / Blob URL
+      if (
+        doc.fileUrl &&
+        (doc.fileUrl.startsWith("http://") ||
+          doc.fileUrl.startsWith("https://") ||
+          doc.fileUrl.startsWith("blob:"))
+      ) {
+        setPreviewDoc({ name: doc.originalFileName, url: doc.fileUrl, isImage: false });
+        return;
+      }
+
+      // 4. Fallback: generate clinical credential verification PDF if no binary stream is present
       const blob = await generateClinicalDocumentBlob(
         { originalFileName: doc.originalFileName || "Candidate_Document.pdf" },
         { name: selectedApp?.candidateName, role: selectedApp?.candidateRole }
@@ -573,319 +673,321 @@ function ApplicationsAdmin() {
             )}
           </div>
         ) : (
-        <>
-        <div className="hidden md:block overflow-x-auto w-full min-w-0">
-          <Table className="min-w-[820px] w-full">
-            <TableHeader>
-              <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border">
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 pl-5 h-11 align-middle">
-                  Candidate
-                </TableHead>
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
-                  Target Position & Hospital
-                </TableHead>
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
-                  Council Reg Status
-                </TableHead>
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
-                  Clinical Match
-                </TableHead>
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
-                  Status
-                </TableHead>
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 pr-5 text-right h-11 align-middle">
-                  Actions
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            <div className="hidden md:block overflow-x-auto w-full min-w-0">
+              <Table className="min-w-[820px] w-full">
+                <TableHeader>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border">
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 pl-5 h-11 align-middle">
+                      Candidate
+                    </TableHead>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
+                      Target Position & Hospital
+                    </TableHead>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
+                      Council Reg Status
+                    </TableHead>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
+                      Clinical Match
+                    </TableHead>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
+                      Status
+                    </TableHead>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 pr-5 text-right h-11 align-middle">
+                      Actions
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((item) => (
+                    <TableRow key={item.id} className="hover:bg-muted/30 transition-colors border-b border-border/70">
+                      {/* Candidate Column */}
+                      <TableCell className="py-3.5 pl-5 align-middle">
+                        <div className="flex items-center gap-3">
+                          <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-xs shrink-0 shadow-2xs">
+                            {item.candidateName
+                              .split(" ")
+                              .map((x) => x[0])
+                              .slice(0, 2)
+                              .join("")}
+                          </div>
+                          <div>
+                            <div
+                              onClick={() => {
+                                setSelectedApp(item);
+                                setSheetOpen(true);
+                              }}
+                              className="font-bold text-foreground text-sm hover:text-primary transition-colors cursor-pointer"
+                            >
+                              {item.candidateName}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                              <span className="font-medium text-foreground/80">{item.candidateRole}</span>
+                              <span className="h-1 w-1 rounded-full bg-border" />
+                              <span>{item.candidateCity}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+
+                      {/* Position & Hospital */}
+                      <TableCell className="py-3.5 align-middle">
+                        <div className="font-bold text-foreground text-xs flex items-center gap-1.5">
+                          <HiOutlineBriefcase className="h-3.5 w-3.5 text-primary shrink-0" />
+                          <span>{item.jobTitle}</span>
+                        </div>
+                        <div className="text-[11px] text-primary font-semibold flex items-center gap-1 mt-0.5">
+                          <HiOutlineBuildingOffice2 className="h-3 w-3 shrink-0" />
+                          <span>{item.hospitalName}</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                          <HiOutlineCalendar className="h-3 w-3 shrink-0" />
+                          <span>{item.appliedDate}</span>
+                        </div>
+                      </TableCell>
+
+                      {/* Council Reg Status */}
+                      <TableCell className="py-3.5 align-middle">
+                        <div className="flex items-center gap-1.5">
+                          {item.councilVerified ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold text-xs">
+                              <HiOutlineCheckBadge className="h-3.5 w-3.5" /> Verified
+                            </span>
+                          ) : (
+                            <span className="text-amber-600 text-xs font-semibold">Pending Audit</span>
+                          )}
+                        </div>
+                        <div className="font-mono text-muted-foreground text-[11px] mt-0.5 font-semibold">
+                          {item.regNumber}
+                        </div>
+                      </TableCell>
+
+                      {/* Match Score */}
+                      <TableCell className="py-3.5 align-middle">
+                        <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                          <HiOutlineSparkles className="h-3.5 w-3.5" />
+                          {item.matchScore >= 90 ? `Exact Match (${item.matchScore}%)` : `${item.matchScore}%`}
+                        </span>
+                      </TableCell>
+
+                      {/* Status Badge */}
+                      <TableCell className="py-3.5 align-middle">
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border",
+                            item.status === "shortlisted"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800"
+                              : item.status === "rejected"
+                                ? "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800"
+                                : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "h-1.5 w-1.5 rounded-full",
+                              item.status === "shortlisted"
+                                ? "bg-emerald-500"
+                                : item.status === "rejected"
+                                  ? "bg-rose-500"
+                                  : "bg-amber-500"
+                            )}
+                          />
+                          {item.status === "shortlisted"
+                            ? "Dispatched"
+                            : item.status === "rejected"
+                              ? "Ineligible"
+                              : "Screening Needed"}
+                        </span>
+                      </TableCell>
+
+                      {/* Actions */}
+                      <TableCell className="py-3.5 pr-5 text-right align-middle">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setSelectedApp(item);
+                              setSheetOpen(true);
+                            }}
+                            className="text-xs font-bold gap-1.5 h-8 px-2.5 rounded-lg border-border hover:bg-muted cursor-pointer"
+                          >
+                            <HiOutlineEye className="h-3.5 w-3.5" />
+                            <span>Dossier</span>
+                          </Button>
+
+                          {item.status === "pending_admin" && (
+                            <>
+                              <Button
+                                size="sm"
+                                onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
+                                className="text-xs font-bold gap-1.5 h-8 px-3 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-2xs cursor-pointer"
+                              >
+                                <HiOutlinePaperAirplane className="h-3.5 w-3.5" />
+                                <span>Shortlist</span>
+                              </Button>
+
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedApp(item);
+                                  setRejectModalOpen(true);
+                                }}
+                                className="text-xs font-bold gap-1.5 h-8 px-2.5 rounded-lg border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 cursor-pointer"
+                              >
+                                <HiOutlineXMark className="h-3.5 w-3.5 stroke-[2.5]" />
+                                <span>Reject</span>
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+
+                  {filtered.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="h-36 text-center text-xs text-muted-foreground align-middle">
+                        <HiOutlineUserGroup className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
+                        No candidate applications match this filter or search.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* Mobile Cards View (< md) */}
+            <div className="md:hidden p-3.5 sm:p-4 space-y-4 bg-muted/20">
               {filtered.map((item) => (
-                <TableRow key={item.id} className="hover:bg-muted/30 transition-colors border-b border-border/70">
-                  {/* Candidate Column */}
-                  <TableCell className="py-3.5 pl-5 align-middle">
-                    <div className="flex items-center gap-3">
-                      <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-xs shrink-0 shadow-2xs">
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-2xs space-y-3.5 overflow-hidden min-w-0"
+                >
+                  {/* Header */}
+                  <div className="flex items-start justify-between gap-2.5 min-w-0">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary font-bold text-sm shrink-0 border border-primary/20">
                         {item.candidateName
                           .split(" ")
                           .map((x) => x[0])
                           .slice(0, 2)
                           .join("")}
                       </div>
-                      <div>
-                        <div
-                          onClick={() => {
-                            setSelectedApp(item);
-                            setSheetOpen(true);
-                          }}
-                          className="font-bold text-foreground text-sm hover:text-primary transition-colors cursor-pointer"
-                        >
+                      <div className="min-w-0">
+                        <h3 className="font-extrabold text-foreground text-sm leading-snug truncate">
                           {item.candidateName}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                          <span className="font-medium text-foreground/80">{item.candidateRole}</span>
-                          <span className="h-1 w-1 rounded-full bg-border" />
-                          <span>{item.candidateCity}</span>
-                        </div>
+                        </h3>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {item.candidateRole} · {item.candidateCity}
+                        </p>
                       </div>
                     </div>
-                  </TableCell>
 
-                  {/* Position & Hospital */}
-                  <TableCell className="py-3.5 align-middle">
-                    <div className="font-bold text-foreground text-xs flex items-center gap-1.5">
-                      <HiOutlineBriefcase className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span>{item.jobTitle}</span>
-                    </div>
-                    <div className="text-[11px] text-primary font-semibold flex items-center gap-1 mt-0.5">
-                      <HiOutlineBuildingOffice2 className="h-3 w-3 shrink-0" />
-                      <span>{item.hospitalName}</span>
-                    </div>
-                    <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                      <HiOutlineCalendar className="h-3 w-3 shrink-0" />
-                      <span>{item.appliedDate}</span>
-                    </div>
-                  </TableCell>
-
-                  {/* Council Reg Status */}
-                  <TableCell className="py-3.5 align-middle">
-                    <div className="flex items-center gap-1.5">
-                      {item.councilVerified ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold text-xs">
-                          <HiOutlineCheckBadge className="h-3.5 w-3.5" /> Verified
-                        </span>
-                      ) : (
-                        <span className="text-amber-600 text-xs font-semibold">Pending Audit</span>
-                      )}
-                    </div>
-                    <div className="font-mono text-muted-foreground text-[11px] mt-0.5 font-semibold">
-                      {item.regNumber}
-                    </div>
-                  </TableCell>
-
-                  {/* Match Score */}
-                  <TableCell className="py-3.5 align-middle">
-                    <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                      <HiOutlineSparkles className="h-3.5 w-3.5" /> {item.matchScore}%
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2 py-0.5 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+                      <HiOutlineSparkles className="h-3 w-3" />
+                      {item.matchScore >= 90 ? `Exact Match (${item.matchScore}%)` : `${item.matchScore}%`}
                     </span>
-                  </TableCell>
+                  </div>
 
-                  {/* Status Badge */}
-                  <TableCell className="py-3.5 align-middle">
-                    <span
+                  {/* Target Position & Hospital */}
+                  <div className="p-3 rounded-xl bg-muted/40 border border-border/60 space-y-1 min-w-0">
+                    <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                      Applied Position
+                    </div>
+                    <div className="font-bold text-foreground text-xs leading-snug truncate">
+                      {item.jobTitle}
+                    </div>
+                    <div className="text-xs text-primary font-semibold truncate">
+                      {item.hospitalName}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      Applied on {item.appliedDate}
+                    </div>
+                  </div>
+
+                  {/* Council & Status */}
+                  <div className="pt-2 border-t border-border/50 space-y-2 text-xs min-w-0">
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <span className="text-[11px] font-semibold text-muted-foreground shrink-0">Council</span>
+                      <div className="flex items-center gap-1.5 min-w-0 justify-end">
+                        {item.councilVerified ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold text-xs shrink-0">
+                            <HiOutlineCheckBadge className="h-3.5 w-3.5" /> Verified
+                          </span>
+                        ) : (
+                          <span className="text-amber-600 font-semibold text-xs shrink-0">Pending</span>
+                        )}
+                        <span className="font-mono text-[11px] text-muted-foreground truncate">
+                          ({item.regNumber})
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <span className="text-[11px] font-semibold text-muted-foreground shrink-0">Status</span>
+                      <div className="shrink-0">
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold border",
+                            item.status === "shortlisted"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : item.status === "rejected"
+                                ? "bg-rose-50 text-rose-700 border-rose-200"
+                                : "bg-amber-50 text-amber-700 border-amber-200"
+                          )}
+                        >
+                          {item.status === "shortlisted"
+                            ? "Dispatched"
+                            : item.status === "rejected"
+                              ? "Ineligible"
+                              : "Screening Needed"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="grid grid-cols-2 gap-2 pt-1 min-w-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedApp(item);
+                        setSheetOpen(true);
+                      }}
                       className={cn(
-                        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border",
-                        item.status === "shortlisted"
-                          ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800"
-                          : item.status === "rejected"
-                          ? "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800"
-                          : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
+                        "h-9 px-2 text-xs font-bold rounded-xl border-border hover:bg-muted text-foreground min-w-0 w-full",
+                        item.status !== "pending_admin" && "col-span-2"
                       )}
                     >
-                      <span
-                        className={cn(
-                          "h-1.5 w-1.5 rounded-full",
-                          item.status === "shortlisted"
-                            ? "bg-emerald-500"
-                            : item.status === "rejected"
-                            ? "bg-rose-500"
-                            : "bg-amber-500"
-                        )}
-                      />
-                      {item.status === "shortlisted"
-                        ? "Dispatched"
-                        : item.status === "rejected"
-                        ? "Ineligible"
-                        : "Screening Needed"}
-                    </span>
-                  </TableCell>
+                      <HiOutlineEye className="h-3.5 w-3.5 mr-1 text-muted-foreground shrink-0" />
+                      <span className="truncate">Dossier</span>
+                    </Button>
 
-                  {/* Actions */}
-                  <TableCell className="py-3.5 pr-5 text-right align-middle">
-                    <div className="flex items-center justify-end gap-2">
+                    {item.status === "pending_admin" && (
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setSelectedApp(item);
-                          setSheetOpen(true);
-                        }}
-                        className="text-xs font-bold gap-1.5 h-8 px-2.5 rounded-lg border-border hover:bg-muted cursor-pointer"
+                        onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
+                        className="h-9 px-2 text-xs font-bold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground gap-1 min-w-0 w-full shadow-2xs"
                       >
-                        <HiOutlineEye className="h-3.5 w-3.5" />
-                        <span>Dossier</span>
+                        <HiOutlinePaperAirplane className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">Shortlist</span>
                       </Button>
-
-                      {item.status === "pending_admin" && (
-                        <>
-                          <Button
-                            size="sm"
-                            onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
-                            className="text-xs font-bold gap-1.5 h-8 px-3 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-2xs cursor-pointer"
-                          >
-                            <HiOutlinePaperAirplane className="h-3.5 w-3.5" />
-                            <span>Shortlist</span>
-                          </Button>
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setSelectedApp(item);
-                              setRejectModalOpen(true);
-                            }}
-                            className="text-xs font-bold gap-1.5 h-8 px-2.5 rounded-lg border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 cursor-pointer"
-                          >
-                            <HiOutlineXMark className="h-3.5 w-3.5 stroke-[2.5]" />
-                            <span>Reject</span>
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
+                    )}
+                  </div>
+                </div>
               ))}
 
               {filtered.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-36 text-center text-xs text-muted-foreground align-middle">
-                    <HiOutlineUserGroup className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
-                    No candidate applications match this filter or search.
-                  </TableCell>
-                </TableRow>
+                <div className="p-8 text-center rounded-2xl border border-dashed border-border bg-card">
+                  <HiOutlineUserGroup className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
+                  <p className="text-xs text-muted-foreground">No candidate applications match this filter or search.</p>
+                </div>
               )}
-            </TableBody>
-          </Table>
-        </div>
-
-        {/* Mobile Cards View (< md) */}
-        <div className="md:hidden p-3.5 sm:p-4 space-y-4 bg-muted/20">
-          {filtered.map((item) => (
-            <div
-              key={item.id}
-              className="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-2xs space-y-3.5 overflow-hidden min-w-0"
-            >
-              {/* Header */}
-              <div className="flex items-start justify-between gap-2.5 min-w-0">
-                <div className="flex items-start gap-2.5 min-w-0">
-                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary font-bold text-sm shrink-0 border border-primary/20">
-                    {item.candidateName
-                      .split(" ")
-                      .map((x) => x[0])
-                      .slice(0, 2)
-                      .join("")}
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="font-extrabold text-foreground text-sm leading-snug truncate">
-                      {item.candidateName}
-                    </h3>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {item.candidateRole} · {item.candidateCity}
-                    </p>
-                  </div>
-                </div>
-
-                <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2 py-0.5 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
-                  <HiOutlineSparkles className="h-3 w-3" /> {item.matchScore}%
-                </span>
-              </div>
-
-              {/* Target Position & Hospital */}
-              <div className="p-3 rounded-xl bg-muted/40 border border-border/60 space-y-1 min-w-0">
-                <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
-                  Applied Position
-                </div>
-                <div className="font-bold text-foreground text-xs leading-snug truncate">
-                  {item.jobTitle}
-                </div>
-                <div className="text-xs text-primary font-semibold truncate">
-                  {item.hospitalName}
-                </div>
-                <div className="text-[10px] text-muted-foreground">
-                  Applied on {item.appliedDate}
-                </div>
-              </div>
-
-              {/* Council & Status */}
-              <div className="pt-2 border-t border-border/50 space-y-2 text-xs min-w-0">
-                <div className="flex items-center justify-between gap-2 min-w-0">
-                  <span className="text-[11px] font-semibold text-muted-foreground shrink-0">Council</span>
-                  <div className="flex items-center gap-1.5 min-w-0 justify-end">
-                    {item.councilVerified ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold text-xs shrink-0">
-                        <HiOutlineCheckBadge className="h-3.5 w-3.5" /> Verified
-                      </span>
-                    ) : (
-                      <span className="text-amber-600 font-semibold text-xs shrink-0">Pending</span>
-                    )}
-                    <span className="font-mono text-[11px] text-muted-foreground truncate">
-                      ({item.regNumber})
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-2 min-w-0">
-                  <span className="text-[11px] font-semibold text-muted-foreground shrink-0">Status</span>
-                  <div className="shrink-0">
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold border",
-                        item.status === "shortlisted"
-                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                          : item.status === "rejected"
-                          ? "bg-rose-50 text-rose-700 border-rose-200"
-                          : "bg-amber-50 text-amber-700 border-amber-200"
-                      )}
-                    >
-                      {item.status === "shortlisted"
-                        ? "Dispatched"
-                        : item.status === "rejected"
-                        ? "Ineligible"
-                        : "Screening Needed"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="grid grid-cols-2 gap-2 pt-1 min-w-0">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setSelectedApp(item);
-                    setSheetOpen(true);
-                  }}
-                  className={cn(
-                    "h-9 px-2 text-xs font-bold rounded-xl border-border hover:bg-muted text-foreground min-w-0 w-full",
-                    item.status !== "pending_admin" && "col-span-2"
-                  )}
-                >
-                  <HiOutlineEye className="h-3.5 w-3.5 mr-1 text-muted-foreground shrink-0" />
-                  <span className="truncate">Dossier</span>
-                </Button>
-
-                {item.status === "pending_admin" && (
-                  <Button
-                    size="sm"
-                    onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
-                    className="h-9 px-2 text-xs font-bold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground gap-1 min-w-0 w-full shadow-2xs"
-                  >
-                    <HiOutlinePaperAirplane className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">Shortlist</span>
-                  </Button>
-                )}
-              </div>
             </div>
-          ))}
-
-          {filtered.length === 0 && (
-            <div className="p-8 text-center rounded-2xl border border-dashed border-border bg-card">
-              <HiOutlineUserGroup className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
-              <p className="text-xs text-muted-foreground">No candidate applications match this filter or search.</p>
-            </div>
-          )}
-        </div>
-        </>
+          </>
         )}
       </div>
 
@@ -930,7 +1032,7 @@ function ApplicationsAdmin() {
                   </div>
                   <span className="font-black text-emerald-600 text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 shrink-0 flex items-center gap-1">
                     <HiOutlineSparkles className="h-3.5 w-3.5" />
-                    {selectedApp.matchScore}% Match
+                    {selectedApp.matchScore >= 90 ? `Exact Match (${selectedApp.matchScore}%)` : `${selectedApp.matchScore}% Match`}
                   </span>
                 </div>
 
@@ -1001,15 +1103,15 @@ function ApplicationsAdmin() {
                       selectedApp.status === "shortlisted"
                         ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                         : selectedApp.status === "rejected"
-                        ? "bg-rose-50 text-rose-700 border-rose-200"
-                        : "bg-amber-50 text-amber-700 border-amber-200"
+                          ? "bg-rose-50 text-rose-700 border-rose-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200"
                     )}
                   >
                     {selectedApp.status === "shortlisted"
                       ? "Dispatched to Facility"
                       : selectedApp.status === "rejected"
-                      ? "Ineligible"
-                      : "Pending Admin Screening"}
+                        ? "Ineligible"
+                        : "Pending Admin Screening"}
                   </span>
                 </div>
 
