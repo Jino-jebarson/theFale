@@ -25,7 +25,6 @@ import {
 import { RiVerifiedBadgeFill, RiChatVoiceLine } from "react-icons/ri";
 import { toast } from "sonner";
 import { AppShell, initials } from "@/components/fale/AppShell";
-import { ClinicalConciergeWidget } from "@/components/fale/ClinicalConciergeWidget";
 import { EmptyEarningsGraphic } from "@/components/fale/EmptyEarningsGraphic";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -1382,9 +1381,6 @@ return (
               </>
             )}
           </div>
-
-          {/* 3. Clinical Concierge AI Widget */}
-          <ClinicalConciergeWidget />
         </aside>
       </div>
     </div>

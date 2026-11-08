@@ -11,11 +11,12 @@ import {
   HiOutlineBanknotes, HiBanknotes,
   HiOutlineChatBubbleLeftRight, HiChatBubbleLeftRight,
   HiOutlineBookmark,
+  HiOutlineLifebuoy, HiLifebuoy,
 } from "react-icons/hi2";
 import { RiStethoscopeLine, RiVerifiedBadgeFill } from "react-icons/ri";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
-import { useApp, setState, Portal } from "@/lib/store";
+import { useApp, setState, Portal, setUnreadNotificationCount } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import {
@@ -37,7 +38,9 @@ import {
 import { isApiEnabled } from "@/lib/api";
 import { logout } from "@/lib/adapters/authAdapter";
 import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
-import { getFacilityApplicants } from "@/lib/adapters/facilityAdapter";
+import { getFacilityApplicants, getFacilityProfile } from "@/lib/adapters/facilityAdapter";
+import { getAdminDashboardMetrics, getAdminSupportTickets, type AdminDashboardMetricsDto } from "@/lib/adapters/adminAdapter";
+import { getNotifications } from "@/lib/adapters/notificationAdapter";
 
 const candidateNav = [
   { to: "/home", label: "Home", icon: HiOutlineHome, active: HiHome, badge: 0 },
@@ -63,6 +66,65 @@ export function initials(name?: string) {
   return (name || "FALE User").split(" ").map((x) => x[0]).slice(0, 2).join("").toUpperCase();
 }
 
+export function UserAvatar({
+  avatarUrl,
+  name,
+  portal,
+  size = "md",
+  className,
+}: {
+  avatarUrl?: string;
+  name?: string;
+  portal: Portal;
+  size?: "sm" | "md" | "lg";
+  className?: string;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const showImg = Boolean(avatarUrl && !imgError);
+
+  const sizeClasses = {
+    sm: "h-8 w-8 text-[11px]",
+    md: "h-9 w-9 text-xs",
+    lg: "h-11 w-11 text-xs",
+  }[size];
+
+  const roundedClasses = size === "lg" ? "rounded-2xl" : "rounded-full";
+
+  if (showImg) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name || "User Avatar"}
+        onError={() => setImgError(true)}
+        className={cn(
+          sizeClasses,
+          roundedClasses,
+          "object-cover border border-border/70 shadow-2xs shrink-0 ring-1 ring-border/40 bg-card",
+          className
+        )}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={cn(
+        "grid place-items-center font-bold text-primary-foreground shadow-2xs shrink-0",
+        sizeClasses,
+        roundedClasses,
+        portal === "admin"
+          ? "bg-primary text-white font-black"
+          : portal === "facility"
+            ? "bg-primary text-white"
+            : "bg-gradient-brand text-white",
+        className
+      )}
+    >
+      {portal === "admin" ? "AD" : initials(name)}
+    </span>
+  );
+}
+
 function AccountMenuContent({
   name,
   portal,
@@ -83,23 +145,18 @@ function AccountMenuContent({
   onSignOut: () => void;
 }) {
   const s = useApp();
+  const avatarUrl = profile["avatar"] || profile["logoUrl"] || profile["photoUrl"];
   return (
     <div className="w-full space-y-2">
       {/* Profile Card Header */}
       <div className="flex items-center gap-3 p-3 rounded-2xl bg-muted/40 border border-border/60">
         <div className="relative shrink-0">
-          <span
-            className={cn(
-              "grid h-11 w-11 place-items-center rounded-2xl text-xs font-black shadow-xs",
-              portal === "admin"
-                ? "bg-amber-600 text-white"
-                : portal === "facility"
-                  ? "bg-primary text-white"
-                  : "bg-gradient-brand text-white"
-            )}
-          >
-            {portal === "admin" ? "AD" : initials(name)}
-          </span>
+          <UserAvatar
+            avatarUrl={avatarUrl}
+            name={name}
+            portal={portal}
+            size="lg"
+          />
           <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card bg-emerald-500 shadow-2xs" />
         </div>
         <div className="min-w-0 flex-1">
@@ -187,6 +244,28 @@ function AccountMenuContent({
                 <p className="text-[10px] text-muted-foreground">Bookmarked healthcare opportunities</p>
               </div>
             </button>
+
+            <button
+              type="button"
+              onClick={() => onNavigate("/support")}
+              className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
+            >
+              <div className="relative shrink-0">
+                <span className="grid h-8 w-8 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <HiOutlineQuestionMarkCircle className="h-4 w-4" />
+                </span>
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-card animate-pulse" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-foreground">24/7 Concierge</p>
+                  <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400">
+                    Online · Fast Help
+                  </span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Priority WhatsApp & clinical assistance</p>
+              </div>
+            </button>
           </>
         )}
 
@@ -206,19 +285,21 @@ function AccountMenuContent({
           </button>
         )}
 
-        <button
-          type="button"
-          onClick={() => onNavigate("/support")}
-          className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
-        >
-          <span className="grid h-8 w-8 place-items-center rounded-xl bg-muted text-muted-foreground shrink-0">
-            <HiOutlineQuestionMarkCircle className="h-4 w-4 text-primary" />
-          </span>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-foreground">Help Center & Escrow Support</p>
-            <p className="text-[10px] text-muted-foreground">24/7 hospital concierge & FAQ</p>
-          </div>
-        </button>
+        {portal !== "candidate" && (
+          <button
+            type="button"
+            onClick={() => onNavigate("/support")}
+            className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-xs font-bold cursor-pointer hover:bg-muted/60 transition-colors text-left"
+          >
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-muted text-muted-foreground shrink-0">
+              <HiOutlineQuestionMarkCircle className="h-4 w-4 text-primary" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-foreground">Help Center & Escrow Support</p>
+              <p className="text-[10px] text-muted-foreground">24/7 hospital concierge & FAQ</p>
+            </div>
+          </button>
+        )}
       </div>
 
       <div className="h-px bg-border/60 my-1" />
@@ -296,22 +377,65 @@ export function AppShell({ children }: { children: ReactNode }) {
   const path = useRouterState({ select: (r) => r.location.pathname });
   const navigate = useNavigate();
 
-  const pendingCandidateKYC = s.candidateKYC.filter((c) => c.status === "pending").length;
-  const pendingFacilityKYC = s.facilityKYC.filter((f) => f.status === "pending").length;
-  const pendingJobApprovals = s.jobApprovals.filter((j) => j.status === "pending").length;
-  const pendingShortlisting = s.adminApplications.filter((a) => a.status === "pending_admin").length;
+  const [adminMetrics, setAdminMetrics] = useState<AdminDashboardMetricsDto | null>(null);
+  const [adminOpenTickets, setAdminOpenTickets] = useState<number>(0);
+
+  const pendingCandidateKYC = isApiEnabled && adminMetrics
+    ? (adminMetrics.pendingCandidateKycCount ?? 0)
+    : s.candidateKYC.filter((c) => c.status === "pending").length;
+
+  const pendingFacilityKYC = isApiEnabled && adminMetrics
+    ? (adminMetrics.pendingFacilityKycCount ?? 0)
+    : s.facilityKYC.filter((f) => f.status === "pending").length;
+
+  const pendingJobApprovals = isApiEnabled && adminMetrics
+    ? (adminMetrics.pendingPostingsCount ?? 0)
+    : s.jobApprovals.filter((j) => j.status === "pending").length;
+
+  const pendingShortlisting = isApiEnabled && adminMetrics
+    ? (adminMetrics.pendingApplicationsCount ?? 0)
+    : s.adminApplications.filter((a) => a.status === "pending_admin").length;
+
+  const pendingHuddleModeration = isApiEnabled && adminMetrics
+    ? (adminMetrics.flaggedHuddlePostsCount ?? 0)
+    : s.huddlePosts.filter(
+        (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
+      ).length;
+
+  const totalAdminPending =
+    pendingCandidateKYC +
+    pendingFacilityKYC +
+    pendingJobApprovals +
+    pendingShortlisting +
+    pendingHuddleModeration;
 
   const adminNav = [
-    { to: "/admin", label: "Overview", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: 0 },
-    { to: "/admin/candidates", label: "Candidate KYC", icon: HiOutlineIdentification, active: HiIdentification, badge: pendingCandidateKYC },
-    { to: "/admin/facilities", label: "Hospital Verification", icon: HiOutlineBuildingOffice2, active: HiBuildingOffice2, badge: pendingFacilityKYC },
-    { to: "/admin/postings", label: "Job Approvals", icon: HiOutlineDocumentCheck, active: HiDocumentCheck, badge: pendingJobApprovals },
-    { to: "/admin/applications", label: "Shortlisting", icon: HiOutlineUserGroup, active: HiUserGroup, badge: pendingShortlisting },
+    { to: "/admin", label: "Overview", shortLabel: "Overview", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: totalAdminPending },
+    { to: "/admin/candidates", label: "Candidate KYC", shortLabel: "KYC", icon: HiOutlineIdentification, active: HiIdentification, badge: pendingCandidateKYC },
+    { to: "/admin/facilities", label: "Hospital Verification", shortLabel: "Hospitals", icon: HiOutlineBuildingOffice2, active: HiBuildingOffice2, badge: pendingFacilityKYC },
+    { to: "/admin/postings", label: "Job Approvals", shortLabel: "Postings", icon: HiOutlineDocumentCheck, active: HiDocumentCheck, badge: pendingJobApprovals },
+    { to: "/admin/applications", label: "Shortlisting", shortLabel: "Shortlist", icon: HiOutlineUserGroup, active: HiUserGroup, badge: pendingShortlisting },
+    { to: "/admin/huddle", label: "Huddle Moderation", shortLabel: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: pendingHuddleModeration },
+    { to: "/admin/support", label: "Support Tickets", shortLabel: "Tickets", icon: HiOutlineLifebuoy, active: HiLifebuoy, badge: adminOpenTickets },
   ] as const;
 
   const isAdminPath = path.startsWith("/admin");
   const isFacilityPath = path.startsWith("/employer");
   const activePortal = isAdminPath ? "admin" : isFacilityPath ? "facility" : s.portal;
+
+  // Auto-sync active portal to global store when on route-specific paths
+  useEffect(() => {
+    if (path.startsWith("/employer") && s.portal !== "facility") {
+      setState({ portal: "facility" });
+    } else if (path.startsWith("/admin") && s.portal !== "admin") {
+      setState({ portal: "admin" });
+    } else if (
+      (path === "/home" || path === "/jobs" || path === "/shifts" || path === "/earnings" || path === "/applications" || path === "/learning" || path === "/profile") &&
+      s.portal !== "candidate"
+    ) {
+      setState({ portal: "candidate" });
+    }
+  }, [path, s.portal]);
 
   const [facilityShortlistedCount, setFacilityShortlistedCount] = useState<number>(() => {
     return (s.adminApplications || []).filter((a) => a.status === "shortlisted").length;
@@ -343,6 +467,44 @@ export function AppShell({ children }: { children: ReactNode }) {
       window.removeEventListener("fale:applications-updated", handleUpdate);
     };
   }, [activePortal, isFacilityPath, path]);
+
+  useEffect(() => {
+    if (!isApiEnabled || (activePortal !== "admin" && !isAdminPath)) return;
+    getAdminDashboardMetrics()
+      .then((data) => {
+        if (data) setAdminMetrics(data);
+      })
+      .catch(() => {});
+
+    getAdminSupportTickets("OPEN")
+      .then((t) => setAdminOpenTickets(t.length))
+      .catch(() => {});
+  }, [activePortal, isAdminPath, path]);
+
+  // Real-time unread notification badge synchronization for navbar bell
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    getNotifications()
+      .then((data) => {
+        if (Array.isArray(data)) {
+          let list = data;
+          try {
+            const clearedAt = Number(localStorage.getItem("fale_admin_cleared_at") || 0);
+            const dismissed = new Set(JSON.parse(localStorage.getItem("fale_dismissed_notifs") || "[]"));
+            if (activePortal === "admin" && clearedAt > 0) {
+              list = list.filter((n) => {
+                if (dismissed.has(n.id)) return false;
+                const created = (n as any).createdAt ? new Date((n as any).createdAt).getTime() : 0;
+                return created > clearedAt;
+              });
+            }
+          } catch {}
+          const unread = list.filter((n) => n.unread).length;
+          setUnreadNotificationCount(unread);
+        }
+      })
+      .catch(() => {});
+  }, [path, activePortal]);
 
   const facilityShortlistedBadge = isApiEnabled
     ? facilityShortlistedCount
@@ -378,41 +540,61 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   useEffect(() => {
-    if (!isApiEnabled || activePortal !== "candidate" || s.profile["role"]) return;
-    getCandidateProfile()
-      .then((profileData) => {
-        if (!profileData) return;
-        const openVal = profileData.openToWork != null ? Boolean(profileData.openToWork) : true;
-        setState((prev) => ({
-          candidateLevel: profileData.isStudent ? "student" : (profileData.candidateLevel?.toLowerCase() as any),
-          profile: {
-            ...prev.profile,
-            openToWork: openVal,
-            name: profileData.name || prev.profile["name"],
-            email: profileData.email || prev.profile["email"],
-            mobile: profileData.phone || prev.profile["mobile"],
-            city: profileData.city || prev.profile["city"],
-            state: profileData.state || prev.profile["state"],
-            role: profileData.profession || (profileData.isStudent ? profileData.course : "Doctor"),
-            specialty: profileData.specialty || "General medicine",
-            qual: profileData.qualification || "MBBS",
-            college: profileData.college || prev.profile["college"],
-            institution: profileData.college || prev.profile["institution"],
-            council: profileData.council || prev.profile["council"],
-            regNo: profileData.regNumber || prev.profile["regNo"],
-            regYear: profileData.regYear || prev.profile["regYear"],
-            exp: profileData.experienceYears || (profileData.isStudent ? "Student" : "Fresher"),
-            level: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
-            cadreLevel: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
-            kycStatus: profileData.kycStatus || prev.profile["kycStatus"],
-            notice: profileData.noticePeriod || "Immediate",
-            availability: profileData.availability || "Immediate",
-            avatar: profileData.documents?.find((d) => d.documentType === "PHOTO")?.fileUrl || prev.profile["avatar"],
-          },
-        }));
-      })
-      .catch(console.error);
-  }, [activePortal, s.profile]);
+    if (!isApiEnabled) return;
+    if (activePortal === "candidate") {
+      getCandidateProfile()
+        .then((profileData) => {
+          if (!profileData) return;
+          const photoDoc = profileData.documents?.find((d) => d.documentType === "PHOTO")?.fileUrl;
+          const openVal = profileData.openToWork != null ? Boolean(profileData.openToWork) : true;
+          setState((prev) => ({
+            candidateLevel: profileData.isStudent ? "student" : (profileData.candidateLevel?.toLowerCase() as any),
+            profile: {
+              ...prev.profile,
+              openToWork: openVal,
+              name: profileData.name || prev.profile["name"],
+              email: profileData.email || prev.profile["email"],
+              mobile: profileData.phone || prev.profile["mobile"],
+              city: profileData.city || prev.profile["city"],
+              state: profileData.state || prev.profile["state"],
+              role: profileData.profession || prev.profile["role"] || (profileData.isStudent ? profileData.course : "Doctor"),
+              specialty: profileData.specialty || prev.profile["specialty"] || "General medicine",
+              qual: profileData.qualification || prev.profile["qual"] || "MBBS",
+              college: profileData.college || prev.profile["college"],
+              institution: profileData.college || prev.profile["institution"],
+              council: profileData.council || prev.profile["council"],
+              regNo: profileData.regNumber || prev.profile["regNo"],
+              regYear: profileData.regYear || prev.profile["regYear"],
+              exp: profileData.experienceYears || prev.profile["exp"] || (profileData.isStudent ? "Student" : "Fresher"),
+              level: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
+              cadreLevel: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
+              kycStatus: profileData.kycStatus || prev.profile["kycStatus"],
+              notice: profileData.noticePeriod || "Immediate",
+              availability: profileData.availability || "Immediate",
+              avatar: photoDoc || prev.profile["avatar"],
+            },
+          }));
+        })
+        .catch(console.error);
+    } else if (activePortal === "facility") {
+      getFacilityProfile()
+        .then((facData) => {
+          if (!facData) return;
+          setState((prev) => ({
+            profile: {
+              ...prev.profile,
+              hospitalName: facData.hospitalName || prev.profile["hospitalName"],
+              recruiter: facData.contactPersonName || prev.profile["recruiter"],
+              email: facData.contactEmail || prev.profile["email"],
+              phone: facData.contactPhone || prev.profile["phone"],
+              logoUrl: facData.logoUrl || prev.profile["logoUrl"],
+              avatar: facData.logoUrl || prev.profile["avatar"],
+            },
+          }));
+        })
+        .catch(console.error);
+    }
+  }, [activePortal]);
 
   const closeMenus = () => {
     setDesktopMenuOpen(false);
@@ -498,129 +680,146 @@ export function AppShell({ children }: { children: ReactNode }) {
           headerVisible ? "translate-y-0" : "-translate-y-full pointer-events-none"
         )}
       >
-        <div className="flex h-16 w-full items-center gap-4 px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
+        <div className="flex h-16 w-full items-center gap-2 sm:gap-4 px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-3 shrink-0">
             <Link to={homeLink}><Logo /></Link>
           </div>
-          <div className="relative hidden max-w-sm flex-1 lg:block">
+          <div className="relative hidden max-w-[200px] xl:max-w-xs 2xl:max-w-sm flex-1 xl:block shrink min-w-0">
             <HiOutlineMagnifyingGlass className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               placeholder={
-                s.portal === "admin"
+                activePortal === "admin"
                   ? "Search KYC docs, registrations, hospitals..."
-                  : s.portal === "facility"
+                  : activePortal === "facility"
                     ? "Search candidates, roles..."
                     : "Search jobs, hospitals, skills..."
               }
-              onKeyDown={(e) => e.key === "Enter" && s.portal === "candidate" && navigate({ to: "/jobs", search: { q: (e.target as HTMLInputElement).value } })}
+              onKeyDown={(e) => e.key === "Enter" && activePortal === "candidate" && navigate({ to: "/jobs", search: { q: (e.target as HTMLInputElement).value } })}
               className="h-10 w-full rounded-full border-0 bg-muted pl-10 pr-4 text-sm outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
-          <nav className="ml-auto hidden h-16 items-center md:flex">
+          <nav className="ml-auto hidden h-16 items-center md:flex shrink min-w-0">
             {nav.map((n) => {
               const isPostOpening = n.to === "/employer/post" && (path === "/employer/post" || path === "/employer/post-shift");
               const on = isPostOpening || path === n.to || (n.to !== "/employer" && n.to !== "/admin" && path.startsWith(n.to + "/"));
               const Icon = on ? n.active : n.icon;
+              const shortLabel = "shortLabel" in n ? (n as any).shortLabel : n.label;
               return (
                 <Link
                   key={n.to}
                   to={n.to}
                   preload="intent"
                   className={cn(
-                    "relative flex h-16 min-w-[84px] px-3 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors whitespace-nowrap",
+                    "relative flex h-16 min-w-[68px] xl:min-w-[80px] px-1.5 xl:px-2.5 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors whitespace-nowrap",
                     on ? "text-primary font-semibold" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   <div className="relative">
                     <Icon className={cn("h-6 w-6 shrink-0", on ? "text-primary" : "text-muted-foreground")} />
                     {"badge" in n && Number(n.badge) > 0 && (
-                      <span className="absolute -top-1 -right-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white shadow-xs">
+                      <span className="absolute -top-1 -right-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-white shadow-xs">
                         {n.badge}
                       </span>
                     )}
                   </div>
-                  <span className="leading-none">{n.label}</span>
+                  <span className="leading-none hidden xl:inline">{n.label}</span>
+                  <span className="leading-none inline xl:hidden">{shortLabel}</span>
                   {on && <span className="absolute bottom-0 inset-x-2 h-0.5 rounded-t-full bg-primary" />}
                 </Link>
               );
             })}
           </nav>
-          <Link to="/notifications" preload="intent" className="relative ml-auto rounded-full p-2 text-muted-foreground hover:bg-muted md:ml-0" aria-label="Notifications">
-            <HiOutlineBell className="h-6 w-6" />
-            <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-destructive" />
-          </Link>
-          <ThemeToggle />
-          {/* Desktop User Menu Dropdown */}
-          <div className="hidden md:block">
-            <DropdownMenu open={desktopMenuOpen} onOpenChange={setDesktopMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Open profile menu"
-                  className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
-                >
-                  <span className={cn(
-                    "grid h-9 w-9 place-items-center rounded-full text-xs font-bold text-primary-foreground",
-                    s.portal === "admin" ? "bg-amber-600 text-white" : "bg-gradient-brand"
-                  )}>
-                    {s.portal === "admin" ? "AD" : initials(name)}
-                  </span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" sideOffset={8} className="w-80 rounded-3xl border border-border/80 bg-card/98 backdrop-blur-xl p-3 shadow-2xl">
-                <AccountMenuContent
-                  name={name}
-                  portal={activePortal}
-                  profile={s.profile}
-                  theme={theme}
-                  setTheme={setTheme}
-                  switchPortal={handleSwitchPortal}
-                  onNavigate={handleNavigate}
-                  onSignOut={handleSignOut}
-                />
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
 
-          {/* Mobile User Menu Bottom Sheet */}
-          <div className="block md:hidden">
-            <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
-              <SheetTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Open profile menu"
-                  className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+          {/* Action Cluster: Notifications, Theme Toggle, Profile Avatar - Always Protected with shrink-0 */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto md:ml-0">
+            <Link
+              to="/notifications"
+              preload="intent"
+              className={cn(
+                "relative rounded-full p-2 transition-colors",
+                path === "/notifications" ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"
+              )}
+              aria-label="Notifications"
+            >
+              <HiOutlineBell className="h-5 w-5" />
+              {(s.unreadNotificationCount ?? 0) > 0 && (
+                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border-2 border-card bg-destructive animate-pulse" />
+              )}
+            </Link>
+            <ThemeToggle />
+
+            {/* Desktop User Menu Dropdown */}
+            <div className="hidden md:block">
+              <DropdownMenu open={desktopMenuOpen} onOpenChange={setDesktopMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Open profile menu"
+                    className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer hover:opacity-90 transition-opacity"
+                  >
+                    <UserAvatar
+                      avatarUrl={s.profile["avatar"] || s.profile["logoUrl"] || s.profile["photoUrl"]}
+                      name={name}
+                      portal={activePortal}
+                      size="md"
+                    />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" sideOffset={8} className="w-80 rounded-3xl border border-border/80 bg-card/98 backdrop-blur-xl p-3 shadow-2xl">
+                  <AccountMenuContent
+                    name={name}
+                    portal={activePortal}
+                    profile={s.profile}
+                    theme={theme}
+                    setTheme={setTheme}
+                    switchPortal={handleSwitchPortal}
+                    onNavigate={handleNavigate}
+                    onSignOut={handleSignOut}
+                  />
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            {/* Mobile User Menu Bottom Sheet */}
+            <div className="block md:hidden">
+              <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+                <SheetTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Open profile menu"
+                    className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer hover:opacity-90 transition-opacity"
+                  >
+                    <UserAvatar
+                      avatarUrl={s.profile["avatar"] || s.profile["logoUrl"] || s.profile["photoUrl"]}
+                      name={name}
+                      portal={activePortal}
+                      size="md"
+                    />
+                  </button>
+                </SheetTrigger>
+                <SheetContent
+                  side="bottom"
+                  className="rounded-t-[28px] border-t border-border/80 bg-card max-h-[85vh] overflow-y-auto px-4 pb-6 pt-1 shadow-2xl focus:outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button:last-child]:top-3 [&>button:last-child]:right-3.5 [&>button:last-child]:h-7 [&>button:last-child]:w-7 [&>button:last-child]:grid [&>button:last-child]:place-items-center [&>button:last-child]:rounded-full [&>button:last-child]:bg-muted/70 [&>button:last-child]:text-muted-foreground [&>button:last-child]:hover:text-foreground [&>button:last-child]:hover:bg-muted"
                 >
-                  <span className={cn(
-                    "grid h-9 w-9 place-items-center rounded-full text-xs font-bold text-primary-foreground",
-                    s.portal === "admin" ? "bg-amber-600 text-white" : "bg-gradient-brand"
-                  )}>
-                    {s.portal === "admin" ? "AD" : initials(name)}
-                  </span>
-                </button>
-              </SheetTrigger>
-              <SheetContent
-                side="bottom"
-                className="rounded-t-[28px] border-t border-border/80 bg-card max-h-[85vh] overflow-y-auto px-4 pb-6 pt-1 shadow-2xl focus:outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button:last-child]:top-3 [&>button:last-child]:right-3.5 [&>button:last-child]:h-7 [&>button:last-child]:w-7 [&>button:last-child]:grid [&>button:last-child]:place-items-center [&>button:last-child]:rounded-full [&>button:last-child]:bg-muted/70 [&>button:last-child]:text-muted-foreground [&>button:last-child]:hover:text-foreground [&>button:last-child]:hover:bg-muted"
-              >
-                {/* Centered Drag Handle with balanced breathing room */}
-                <div className="relative flex items-center justify-center pt-2 pb-3.5 shrink-0">
-                  <div className="h-1.5 w-12 rounded-full bg-muted-foreground/30" />
-                </div>
-                <SheetTitle className="sr-only">Account & Portal Menu</SheetTitle>
-                <SheetDescription className="sr-only">Switch active portal, review profile, and adjust theme</SheetDescription>
-                <AccountMenuContent
-                  name={name}
-                  portal={activePortal}
-                  profile={s.profile}
-                  theme={theme}
-                  setTheme={setTheme}
-                  switchPortal={handleSwitchPortal}
-                  onNavigate={handleNavigate}
-                  onSignOut={handleSignOut}
-                />
-              </SheetContent>
-            </Sheet>
+                  {/* Centered Drag Handle with balanced breathing room */}
+                  <div className="relative flex items-center justify-center pt-2 pb-3.5 shrink-0">
+                    <div className="h-1.5 w-12 rounded-full bg-muted-foreground/30" />
+                  </div>
+                  <SheetTitle className="sr-only">Account & Portal Menu</SheetTitle>
+                  <SheetDescription className="sr-only">Switch active portal, review profile, and adjust theme</SheetDescription>
+                  <AccountMenuContent
+                    name={name}
+                    portal={activePortal}
+                    profile={s.profile}
+                    theme={theme}
+                    setTheme={setTheme}
+                    switchPortal={handleSwitchPortal}
+                    onNavigate={handleNavigate}
+                    onSignOut={handleSignOut}
+                  />
+                </SheetContent>
+              </Sheet>
+            </div>
           </div>
         </div>
       </header>
@@ -630,25 +829,26 @@ export function AppShell({ children }: { children: ReactNode }) {
           const isPostOpening = n.to === "/employer/post" && (path === "/employer/post" || path === "/employer/post-shift");
           const on = isPostOpening || path === n.to || (n.to !== "/employer" && n.to !== "/admin" && path.startsWith(n.to + "/"));
           const Icon = on ? n.active : n.icon;
+          const shortLabel = "shortLabel" in n ? (n as any).shortLabel : n.label;
           return (
             <Link
               key={n.to}
               to={n.to}
               preload="intent"
               className={cn(
-                "flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium transition-all active:scale-95 min-w-0 px-1 whitespace-nowrap",
+                "flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium transition-all active:scale-95 min-w-0 px-0.5 whitespace-nowrap",
                 on ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground"
               )}
             >
               <div className="relative">
                 <Icon className="h-5 w-5 shrink-0" />
                 {"badge" in n && Number(n.badge) > 0 && (
-                  <span className="absolute -top-1 -right-2 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-amber-500 px-0.5 text-[8px] font-bold text-white">
+                  <span className="absolute -top-1 -right-2 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-bold text-white">
                     {n.badge}
                   </span>
                 )}
               </div>
-              <span className="truncate max-w-full text-center">{n.label}</span>
+              <span className="truncate max-w-full text-center">{shortLabel}</span>
             </Link>
           );
         })}

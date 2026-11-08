@@ -31,6 +31,7 @@ import { Route as AdminFacilitiesRouteImport } from './routes/admin.facilities'
 import { Route as AdminHuddleRouteImport } from './routes/admin.huddle'
 import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AdminPostingsRouteImport } from './routes/admin.postings'
+import { Route as AdminSupportRouteImport } from './routes/admin.support'
 import { Route as EmployerIndexRouteImport } from './routes/employer.index'
 import { Route as EmployerApplicantsRouteImport } from './routes/employer.applicants'
 import { Route as EmployerCandidatesRouteImport } from './routes/employer.candidates'
@@ -154,6 +155,11 @@ const AdminPostingsRoute = AdminPostingsRouteImport.update({
   path: '/admin/postings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminSupportRoute = AdminSupportRouteImport.update({
+  id: '/admin/support',
+  path: '/admin/support',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EmployerIndexRoute = EmployerIndexRouteImport.update({
   id: '/employer/',
   path: '/employer/',
@@ -237,6 +243,7 @@ export interface FileRoutesByFullPath {
   '/admin/huddle': typeof AdminHuddleRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/postings': typeof AdminPostingsRoute
+  '/admin/support': typeof AdminSupportRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
   '/employer/post': typeof EmployerPostRoute
@@ -273,6 +280,7 @@ export interface FileRoutesByTo {
   '/admin/huddle': typeof AdminHuddleRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/postings': typeof AdminPostingsRoute
+  '/admin/support': typeof AdminSupportRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
   '/employer/post': typeof EmployerPostRoute
@@ -310,6 +318,7 @@ export interface FileRoutesById {
   '/admin/huddle': typeof AdminHuddleRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/postings': typeof AdminPostingsRoute
+  '/admin/support': typeof AdminSupportRoute
   '/employer/applicants': typeof EmployerApplicantsRoute
   '/employer/candidates': typeof EmployerCandidatesRoute
   '/employer/post': typeof EmployerPostRoute
@@ -348,6 +357,7 @@ export interface FileRouteTypes {
     | '/admin/huddle'
     | '/admin/login'
     | '/admin/postings'
+    | '/admin/support'
     | '/employer/applicants'
     | '/employer/candidates'
     | '/employer/post'
@@ -384,6 +394,7 @@ export interface FileRouteTypes {
     | '/admin/huddle'
     | '/admin/login'
     | '/admin/postings'
+    | '/admin/support'
     | '/employer/applicants'
     | '/employer/candidates'
     | '/employer/post'
@@ -420,6 +431,7 @@ export interface FileRouteTypes {
     | '/admin/huddle'
     | '/admin/login'
     | '/admin/postings'
+    | '/admin/support'
     | '/employer/applicants'
     | '/employer/candidates'
     | '/employer/post'
@@ -457,6 +469,7 @@ export interface RootRouteChildren {
   AdminHuddleRoute: typeof AdminHuddleRoute
   AdminLoginRoute: typeof AdminLoginRoute
   AdminPostingsRoute: typeof AdminPostingsRoute
+  AdminSupportRoute: typeof AdminSupportRoute
   EmployerApplicantsRoute: typeof EmployerApplicantsRoute
   EmployerCandidatesRoute: typeof EmployerCandidatesRoute
   EmployerPostRoute: typeof EmployerPostRoute
@@ -628,6 +641,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminPostingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/support': {
+      id: '/admin/support'
+      path: '/admin/support'
+      fullPath: '/admin/support'
+      preLoaderRoute: typeof AdminSupportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/employer/': {
       id: '/employer/'
       path: '/employer'
@@ -737,6 +757,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminHuddleRoute: AdminHuddleRoute,
   AdminLoginRoute: AdminLoginRoute,
   AdminPostingsRoute: AdminPostingsRoute,
+  AdminSupportRoute: AdminSupportRoute,
   EmployerApplicantsRoute: EmployerApplicantsRoute,
   EmployerCandidatesRoute: EmployerCandidatesRoute,
   EmployerPostRoute: EmployerPostRoute,

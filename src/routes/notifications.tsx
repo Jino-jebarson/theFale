@@ -24,6 +24,7 @@ import {
   HiOutlineBellSlash,
   HiOutlineCalendarDays,
   HiOutlineDocumentCheck,
+  HiOutlineChatBubbleLeftRight,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
@@ -38,13 +39,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { useApp } from "@/lib/store";
+import { useApp, setUnreadNotificationCount } from "@/lib/store";
 import { isApiEnabled } from "@/lib/api";
 import {
   getNotifications,
   markNotificationRead,
   markAllNotificationsRead,
+  deleteNotification,
+  clearAllNotifications as clearAllNotificationsApi,
 } from "@/lib/adapters/notificationAdapter";
+import {
+  getCandidateViewStats,
+  type CandidateViewStats,
+} from "@/lib/adapters/candidateAdapter";
 
 export const Route = createFileRoute("/notifications")({
   head: () => ({
@@ -59,11 +66,11 @@ export const Route = createFileRoute("/notifications")({
   component: NotificationsPage,
 });
 
-type NotificationCategory = "all" | "shifts" | "jobs" | "cme" | "credentials";
+type NotificationCategory = "all" | "shifts" | "jobs" | "cme" | "credentials" | "huddle";
 
 interface NotificationItem {
   id: string;
-  category: "shifts" | "jobs" | "cme" | "credentials";
+  category: "shifts" | "jobs" | "cme" | "credentials" | "huddle";
   title: string;
   hospital: string;
   hospitalCode: string;
@@ -261,34 +268,153 @@ function NotificationsPage() {
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
   const [acceptedShifts, setAcceptedShifts] = useState<string[]>([]);
   const [confirmedInterviews, setConfirmedInterviews] = useState<string[]>([]);
+  const [viewStats, setViewStats] = useState<CandidateViewStats>({
+    totalViews: 0,
+    viewsToday: 0,
+    hospitalsViewedToday: 0,
+    weeklyGrowthPercent: 0,
+    hasIncreased: false,
+  });
+
+  useEffect(() => {
+    if (!isApiEnabled || s.portal !== "candidate") return;
+    getCandidateViewStats()
+      .then((data) => {
+        if (data && data.totalViews != null) {
+          setViewStats(data);
+        }
+      })
+      .catch((err) => console.warn("Failed to load candidate view stats:", err));
+  }, [s.portal]);
 
   useEffect(() => {
     if (!isApiEnabled) return;
     setLoading(true);
     getNotifications()
       .then((apiNotifs) => {
-        setItems(
-          (apiNotifs || []).map((n) => ({
+        let list = apiNotifs || [];
+        try {
+          const clearedAt = Number(localStorage.getItem("fale_admin_cleared_at") || 0);
+          const dismissed = new Set(JSON.parse(localStorage.getItem("fale_dismissed_notifs") || "[]"));
+          if (s.portal === "admin" && clearedAt > 0) {
+            list = list.filter((n) => {
+              if (dismissed.has(n.id)) return false;
+              const created = (n as any).createdAt ? new Date((n as any).createdAt).getTime() : 0;
+              return created > clearedAt;
+            });
+          }
+        } catch {}
+        const mapped: NotificationItem[] = list.map((n) => {
+          const rawType = ((n.type || "") as string).toUpperCase();
+          let category: NotificationCategory = "jobs";
+          let hospital = "FALE Healthcare Network";
+          let hospitalCode = "FL";
+          let hospitalGradient = "from-blue-600 to-indigo-700";
+          let urgent = false;
+          let actionLink = n.actionLink || (n as any).actionUrl || undefined;
+
+          if (rawType === "ADMIN_KYC") {
+            category = "credentials";
+            hospital = "FALE Doctor Credential Board";
+            hospitalCode = "KYC";
+            hospitalGradient = "from-amber-600 to-orange-700";
+            urgent = true;
+          } else if (rawType === "ADMIN_FACILITY") {
+            category = "credentials";
+            hospital = "FALE Facility Verification";
+            hospitalCode = "HSP";
+            hospitalGradient = "from-blue-600 to-indigo-700";
+            urgent = true;
+          } else if (rawType === "ADMIN_POSTING") {
+            category = "jobs";
+            hospital = "FALE Job Compliance";
+            hospitalCode = "JOB";
+            hospitalGradient = "from-purple-600 to-indigo-700";
+          } else if (rawType === "ADMIN_SUPPORT") {
+            category = "jobs";
+            hospital = "FALE Escalation Desk";
+            hospitalCode = "SP";
+            hospitalGradient = "from-rose-600 to-red-700";
+            urgent = true;
+          } else if (rawType === "ADMIN_HUDDLE") {
+            category = "huddle";
+            hospital = "FALE Community Safety";
+            hospitalCode = "MOD";
+            hospitalGradient = "from-red-600 to-amber-700";
+            urgent = true;
+          } else if (rawType === "ADMIN_PAYOUT") {
+            category = "shifts";
+            hospital = "FALE Escrow Clearance";
+            hospitalCode = "₹";
+            hospitalGradient = "from-emerald-600 to-teal-700";
+          } else if (rawType.includes("SHIFT") || rawType === "PAYOUT") {
+            category = "shifts";
+            if (rawType === "PAYOUT") {
+              hospital = "FALE Escrow Settlement";
+              hospitalCode = "₹";
+              hospitalGradient = "from-emerald-600 to-teal-700";
+            } else if (rawType === "SHIFT_URGENT" || n.title.includes("Urgent") || n.title.includes("⚡")) {
+              hospital = "Emergency Surge Shift";
+              hospitalCode = "⚡";
+              hospitalGradient = "from-amber-600 to-rose-700";
+              urgent = true;
+            } else {
+              hospital = "Locum Shift Operations";
+              hospitalCode = "LS";
+              hospitalGradient = "from-blue-600 to-cyan-700";
+            }
+          } else if (rawType.includes("HUDDLE")) {
+            category = "huddle";
+            hospital = "FALE Clinical Huddle";
+            hospitalCode = "HD";
+            hospitalGradient = "from-purple-600 to-indigo-700";
+          } else if (rawType.includes("KYC") || rawType.includes("UPGRADE") || rawType.includes("PROFILE_VIEW")) {
+            category = "credentials";
+            hospital = rawType === "PROFILE_VIEW" ? "Institutional Reach" : "FALE Compliance Board";
+            hospitalCode = rawType === "PROFILE_VIEW" ? "👁️" : "KYC";
+            hospitalGradient = "from-emerald-600 to-teal-800";
+          } else if (rawType === "SUPPORT") {
+            hospital = "FALE Help & Support";
+            hospitalCode = "SP";
+            hospitalGradient = "from-amber-600 to-orange-700";
+          } else if (rawType === "WALLET") {
+            category = "shifts";
+            hospital = "Hospital Escrow Vault";
+            hospitalCode = "💼";
+            hospitalGradient = "from-rose-600 to-amber-700";
+            urgent = true;
+          }
+
+          return {
             id: n.id,
-            category: ((n as any).category?.toLowerCase() as any) || "jobs",
+            category,
             title: n.title,
-            hospital: "FALE Healthcare Network",
-            hospitalCode: "FL",
-            hospitalGradient: "from-blue-600 to-indigo-700",
+            hospital,
+            hospitalCode,
+            hospitalGradient,
             message: n.message,
             time: (n as any).createdAt
-              ? new Date((n as any).createdAt).toLocaleDateString("en-IN")
+              ? new Date((n as any).createdAt).toLocaleDateString("en-IN", {
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
               : "Recently",
-            unread: !n.read,
-            urgent: false,
-          }))
-        );
+            unread: Boolean((n as any).unread ?? !(n as any).read ?? !(n as any).isRead),
+            urgent,
+            actionLink,
+          };
+        });
+        setItems(mapped);
+        setUnreadNotificationCount(mapped.filter((x) => x.unread).length);
         setLoadError(null);
       })
       .catch((err) => {
         console.error("Failed to load notifications:", err);
         setLoadError("Unable to load notifications.");
         setItems([]);
+        setUnreadNotificationCount(0);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -312,21 +438,51 @@ function NotificationsPage() {
       markAllNotificationsRead().catch(console.error);
     }
     setItems((prev) => prev.map((item) => ({ ...item, unread: false })));
+    setUnreadNotificationCount(0);
     toast.success("All notifications marked as read!");
   };
 
-  const toggleItemRead = (id: string) => {
+  const clearAllNotifications = () => {
     if (isApiEnabled) {
+      clearAllNotificationsApi().catch(console.error);
+    }
+    try {
+      localStorage.setItem("fale_admin_cleared_at", Date.now().toString());
+    } catch {}
+    setItems([]);
+    setUnreadNotificationCount(0);
+    toast.info("All notifications cleared!");
+  };
+
+  const toggleItemRead = (id: string) => {
+    const target = items.find((item) => item.id === id);
+    if (!target) return;
+    const willBeUnread = !target.unread;
+    if (isApiEnabled && !willBeUnread) {
       markNotificationRead(id).catch(console.error);
     }
-    setItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, unread: !item.unread } : item))
-    );
+    setItems((prev) => {
+      const next = prev.map((item) => (item.id === id ? { ...item, unread: willBeUnread } : item));
+      setUnreadNotificationCount(next.filter((x) => x.unread).length);
+      return next;
+    });
   };
 
   const deleteItem = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    setItems((prev) => prev.filter((item) => item.id !== id));
+    if (isApiEnabled) {
+      deleteNotification(id).catch(console.error);
+    }
+    try {
+      const dismissed = JSON.parse(localStorage.getItem("fale_dismissed_notifs") || "[]");
+      dismissed.push(id);
+      localStorage.setItem("fale_dismissed_notifs", JSON.stringify(dismissed));
+    } catch {}
+    setItems((prev) => {
+      const next = prev.filter((item) => item.id !== id);
+      setUnreadNotificationCount(next.filter((x) => x.unread).length);
+      return next;
+    });
     toast.info("Notification removed");
   };
 
@@ -358,10 +514,14 @@ function NotificationsPage() {
         return <HiOutlineClock className="h-3 w-3 text-white" />;
       case "jobs":
         return <HiOutlineBriefcase className="h-3 w-3 text-white" />;
+      case "huddle":
+        return <HiOutlineChatBubbleLeftRight className="h-3 w-3 text-white" />;
       case "cme":
         return <HiOutlineAcademicCap className="h-3 w-3 text-white" />;
       case "credentials":
         return <HiOutlineShieldCheck className="h-3 w-3 text-white" />;
+      default:
+        return <HiOutlineBell className="h-3 w-3 text-white" />;
     }
   };
 
@@ -371,10 +531,14 @@ function NotificationsPage() {
         return "bg-emerald-500";
       case "jobs":
         return "bg-blue-600";
+      case "huddle":
+        return "bg-purple-600";
       case "cme":
         return "bg-amber-500";
       case "credentials":
-        return "bg-purple-600";
+        return "bg-teal-600";
+      default:
+        return "bg-primary";
     }
   };
 
@@ -420,15 +584,31 @@ function NotificationsPage() {
                 <span className="sm:hidden">Mark read</span>
               </Button>
             )}
+            {items.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={clearAllNotifications}
+                className="flex-1 sm:flex-initial rounded-xl font-bold text-xs border-border/80 text-muted-foreground hover:text-destructive h-8 sm:h-9 justify-center"
+              >
+                <HiOutlineTrash className="mr-1.5 h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Clear all</span>
+                <span className="sm:hidden">Clear</span>
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
               asChild
               className="flex-1 sm:flex-initial rounded-xl font-bold text-xs border-border/80 h-8 sm:h-9 justify-center"
             >
-              <Link to="/profile">
-                <span className="hidden sm:inline">View Profile Vault</span>
-                <span className="sm:hidden">Profile Vault</span>
+              <Link to={s.portal === "facility" ? "/employer/profile" : s.portal === "admin" ? "/admin" : "/profile"}>
+                <span className="hidden sm:inline">
+                  {s.portal === "facility" ? "Hospital Profile" : s.portal === "admin" ? "Admin Console" : "View Profile Vault"}
+                </span>
+                <span className="sm:hidden">
+                  {s.portal === "facility" ? "Profile" : s.portal === "admin" ? "Admin" : "Profile Vault"}
+                </span>
               </Link>
             </Button>
           </div>
@@ -449,21 +629,31 @@ function NotificationsPage() {
               </h2>
               <nav className="space-y-1">
                 {(
-                  isStudent
+                  s.portal === "admin"
                     ? [
-                      { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
-                      { id: "shifts", label: "Stipends & Rotations", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
-                      { id: "jobs", label: "Internships & Viva", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
-                      { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
-                      { id: "credentials", label: "Bona Fide Vault", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
+                      { id: "all", label: "All Moderation Alerts", count: items.length, icon: HiOutlineBell },
+                      { id: "credentials", label: "KYC & Hospital Approvals", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
+                      { id: "jobs", label: "Jobs & Support Desks", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
+                      { id: "shifts", label: "Escrow Settlements", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
+                      { id: "huddle", label: "Huddle Moderation", count: items.filter((x) => x.category === "huddle").length, icon: HiOutlineChatBubbleLeftRight },
                     ]
-                    : [
-                      { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
-                      { id: "shifts", label: "On-Call Shifts", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
-                      { id: "jobs", label: "Interviews & Jobs", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
-                      { id: "cme", label: "CME & Accreditations", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
-                      { id: "credentials", label: "Verified Credentials", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
-                    ]
+                    : isStudent
+                      ? [
+                        { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
+                        { id: "shifts", label: "Stipends & Rotations", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
+                        { id: "jobs", label: "Internships & Viva", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
+                        { id: "huddle", label: "Huddle Community", count: items.filter((x) => x.category === "huddle").length, icon: HiOutlineChatBubbleLeftRight },
+                        { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
+                        { id: "credentials", label: "Bona Fide Vault", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
+                      ]
+                      : [
+                        { id: "all", label: "All Alerts", count: items.length, icon: HiOutlineBell },
+                        { id: "shifts", label: "On-Call Shifts", count: items.filter((x) => x.category === "shifts").length, icon: HiOutlineClock },
+                        { id: "jobs", label: "Interviews & Jobs", count: items.filter((x) => x.category === "jobs").length, icon: HiOutlineBriefcase },
+                        { id: "huddle", label: "Huddle Community", count: items.filter((x) => x.category === "huddle").length, icon: HiOutlineChatBubbleLeftRight },
+                        { id: "cme", label: "CME & Accreditations", count: items.filter((x) => x.category === "cme").length, icon: HiOutlineAcademicCap },
+                        { id: "credentials", label: "Verified Credentials", count: items.filter((x) => x.category === "credentials").length, icon: HiOutlineShieldCheck },
+                      ]
                 ).map((cat) => {
                   const Icon = cat.icon;
                   const active = selectedCategory === cat.id;
@@ -504,38 +694,52 @@ function NotificationsPage() {
               </div>
             </div>
 
-            {/* Naukri-Style Recruiter Pulse Widget */}
-            <div className="surface p-4 rounded-3xl border border-border/80 space-y-3 shadow-card bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20 min-w-0">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-extrabold text-foreground flex items-center gap-1.5">
-                  <HiOutlineBolt className="h-4 w-4 text-amber-500" /> {isStudent ? "Academic Reach" : "Recruiter Reach"}
-                </span>
-                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0 font-bold text-[10px] px-2 py-0">
-                  {isStudent ? "Top Intern" : "Top 5%"}
-                </Badge>
-              </div>
-              <div className="space-y-1">
-                <div className="text-xl font-black text-foreground">
-                  {isStudent ? "38 Faculty Views" : "48 Profile Views"}
+            {/* Naukri-Style Recruiter Pulse Widget - Shown Only to Candidates with Dynamic View Stats */}
+            {s.portal === "candidate" && (
+              <div className="surface p-4 rounded-3xl border border-border/80 space-y-3 shadow-card bg-gradient-to-br from-card via-card to-primary-soft/40 dark:to-primary-soft/20 min-w-0">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-extrabold text-foreground flex items-center gap-1.5">
+                    <HiOutlineBolt className="h-4 w-4 text-amber-500" /> {isStudent ? "Academic Reach" : "Recruiter Reach"}
+                  </span>
+                  <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0 font-bold text-[10px] px-2 py-0">
+                    {viewStats.weeklyGrowthPercent > 0
+                      ? `+${viewStats.weeklyGrowthPercent}% wk`
+                      : isStudent
+                        ? "Top Intern"
+                        : "Top 5%"}
+                  </Badge>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-snug">
-                  {isStudent
-                    ? "Apollo, Manipal, and college clinical directors reviewed your student logbook this week."
-                    : "Apollo, Fortis, and Kauvery hospital recruiters viewed your clinical dossier this week."}
-                </p>
+                <div className="space-y-1">
+                  <div className="text-xl font-black text-foreground">
+                    {viewStats.totalViews > 0
+                      ? `${viewStats.totalViews} ${isStudent ? "Faculty Views" : "Profile Views"}`
+                      : isStudent
+                        ? "Student Profile Active"
+                        : "Profile Active"}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    {viewStats.hospitalsViewedToday > 0
+                      ? `${viewStats.hospitalsViewedToday} hospital recruiter${viewStats.hospitalsViewedToday === 1 ? "" : "s"} viewed your clinical dossier today.`
+                      : viewStats.totalViews > 0
+                        ? `Apollo, Fortis, and accredited hospital recruiters viewed your clinical dossier ${viewStats.totalViews} times.`
+                        : isStudent
+                          ? "Apollo, Manipal, and college clinical directors review active student logbooks weekly."
+                          : "Apollo, Fortis, and Kauvery hospital recruiters review verified clinical dossiers weekly."}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  asChild
+                  className="w-full rounded-xl text-xs font-bold border-border/80 h-8 hover:text-primary hover:border-primary/50 transition-colors"
+                >
+                  <Link to="/profile">
+                    <span>{isStudent ? "Update Logbook" : "Boost Visibility"}</span>
+                    <HiOutlineArrowRight className="ml-1 h-3.5 w-3.5" />
+                  </Link>
+                </Button>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                asChild
-                className="w-full rounded-xl text-xs font-bold border-border/80 h-8"
-              >
-                <Link to="/profile">
-                  <span>{isStudent ? "Update Logbook" : "Boost Visibility"}</span>
-                  <HiOutlineArrowRight className="ml-1 h-3.5 w-3.5" />
-                </Link>
-              </Button>
-            </div>
+            )}
 
             {/* Instant Delivery Channels (Apple Style Glassmorphic Toggles) */}
             <div className="surface p-4 rounded-3xl border border-border/80 space-y-3 shadow-card text-xs min-w-0">
@@ -573,7 +777,27 @@ function NotificationsPage() {
           {/* ======================================================= */}
           <main className="space-y-4 w-full min-w-0">
             {/* Urgent Priority Broadcast */}
-            {isStudent ? (
+            {s.portal === "admin" ? (
+              <div className="relative overflow-hidden rounded-3xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-card to-amber-500/5 p-4 sm:p-5 shadow-xs flex items-start gap-3.5 min-w-0">
+                <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-amber-500" />
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-amber-500 text-white font-black text-xs shadow-xs">
+                  🛡️
+                </span>
+                <div className="space-y-1 flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+                      FALE Admin Operations & Compliance Hub
+                    </span>
+                    <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold border-0 text-[10px] px-2 py-0">
+                      Super Admin
+                    </Badge>
+                  </div>
+                  <p className="text-xs sm:text-sm font-semibold text-foreground leading-snug break-words">
+                    Real-time compliance triggers for clinician medical council KYC, hospital establishment approvals, rate moderation, and clinical dispute tickets.
+                  </p>
+                </div>
+              </div>
+            ) : isStudent ? (
               <div className="relative overflow-hidden rounded-3xl border border-primary/30 bg-gradient-to-r from-primary/10 via-card to-primary/5 p-4 sm:p-5 shadow-xs flex items-start gap-3.5 min-w-0">
                 <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-primary" />
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary text-white font-black text-xs shadow-xs">
@@ -626,21 +850,29 @@ function NotificationsPage() {
             {/* Mobile Category Scroll Pills (Visible on mobile/tablet) */}
             <div className="flex lg:hidden items-center gap-1.5 overflow-x-auto scrollbar-none pb-1 w-full min-w-0">
               {(
-                isStudent
+                s.portal === "admin"
                   ? [
                     { id: "all", label: "All Alerts", count: items.length },
-                    { id: "shifts", label: "Stipends", count: items.filter((x) => x.category === "shifts").length },
-                    { id: "jobs", label: "Internships", count: items.filter((x) => x.category === "jobs").length },
-                    { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length },
-                    { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
+                    { id: "credentials", label: "KYC & Approvals", count: items.filter((x) => x.category === "credentials").length },
+                    { id: "jobs", label: "Jobs & Support", count: items.filter((x) => x.category === "jobs").length },
+                    { id: "shifts", label: "Escrow Settlements", count: items.filter((x) => x.category === "shifts").length },
+                    { id: "huddle", label: "Huddle Moderation", count: items.filter((x) => x.category === "huddle").length },
                   ]
-                  : [
-                    { id: "all", label: "All Alerts", count: items.length },
-                    { id: "shifts", label: "Shifts", count: items.filter((x) => x.category === "shifts").length },
-                    { id: "jobs", label: "Interviews", count: items.filter((x) => x.category === "jobs").length },
-                    { id: "cme", label: "CME Points", count: items.filter((x) => x.category === "cme").length },
-                    { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
-                  ]
+                  : isStudent
+                    ? [
+                      { id: "all", label: "All Alerts", count: items.length },
+                      { id: "shifts", label: "Stipends", count: items.filter((x) => x.category === "shifts").length },
+                      { id: "jobs", label: "Internships", count: items.filter((x) => x.category === "jobs").length },
+                      { id: "cme", label: "Student CME", count: items.filter((x) => x.category === "cme").length },
+                      { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
+                    ]
+                    : [
+                      { id: "all", label: "All Alerts", count: items.length },
+                      { id: "shifts", label: "Shifts", count: items.filter((x) => x.category === "shifts").length },
+                      { id: "jobs", label: "Interviews", count: items.filter((x) => x.category === "jobs").length },
+                      { id: "cme", label: "CME Points", count: items.filter((x) => x.category === "cme").length },
+                      { id: "credentials", label: "Vault", count: items.filter((x) => x.category === "credentials").length },
+                    ]
               ).map((cat) => (
                 <button
                   key={cat.id}
@@ -880,6 +1112,45 @@ function NotificationsPage() {
                                 <Link to={n.actionLink}>
                                   <HiOutlineEye className="h-4 w-4 text-primary" />
                                   <span>Track Application</span>
+                                </Link>
+                              </Button>
+                            )}
+
+                            {/* Direct Action Link for API Notifications */}
+                            {n.actionLink && !n.actionType && (
+                              <Button
+                                size="sm"
+                                asChild
+                                variant="outline"
+                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
+                              >
+                                <Link to={n.actionLink}>
+                                  <HiOutlineEye className="h-3.5 w-3.5" />
+                                  <span>
+                                    {n.actionLink === "/admin/candidates"
+                                      ? "Review Doctor KYC"
+                                      : n.actionLink === "/admin/facilities"
+                                        ? "Verify Hospital"
+                                        : n.actionLink === "/admin/postings"
+                                          ? "Moderate Posting"
+                                          : n.actionLink === "/admin/support"
+                                            ? "Answer Support Ticket"
+                                            : n.actionLink === "/admin/huddle"
+                                              ? "Moderate Huddle"
+                                              : n.actionLink === "/admin"
+                                                ? "Open Admin Console"
+                                                : n.actionLink === "/earnings"
+                                                  ? "View Escrow Payout"
+                                                  : n.actionLink === "/huddle"
+                                                    ? "View in Huddle"
+                                                    : n.actionLink === "/support"
+                                                      ? "Track Support Ticket"
+                                                      : n.actionLink === "/shifts"
+                                                        ? "View Shifts"
+                                                        : n.actionLink === "/profile"
+                                                          ? "View Profile"
+                                                          : "View Details"}
+                                  </span>
                                 </Link>
                               </Button>
                             )}

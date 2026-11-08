@@ -87,3 +87,21 @@ export async function markAllNotificationsRead(): Promise<void> {
     method: "PATCH",
   });
 }
+
+/**
+ * Delete a single notification.
+ */
+export async function deleteNotification(id: string): Promise<void> {
+  await apiFetch(`/notifications/${id}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Clear all notifications for current user.
+ */
+export async function clearAllNotifications(): Promise<void> {
+  await apiFetch("/notifications/clear-all", {
+    method: "DELETE",
+  });
+}

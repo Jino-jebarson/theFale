@@ -292,3 +292,33 @@ export async function onboardAdminMentor(mentor: {
     }),
   });
 }
+
+export interface AdminSupportTicketDto {
+  id: string;
+  userId?: string;
+  userName?: string;
+  userEmail?: string;
+  userRole?: string;
+  subject: string;
+  description: string;
+  category: string;
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED" | string;
+  adminNotes?: string;
+  createdAt: string;
+}
+
+export async function getAdminSupportTickets(status?: string): Promise<AdminSupportTicketDto[]> {
+  const query = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";
+  return apiFetch<AdminSupportTicketDto[]>(`/admin/support/tickets${query}`);
+}
+
+export async function updateAdminSupportTicketStatus(
+  ticketId: string,
+  status: string,
+  adminNotes?: string
+): Promise<AdminSupportTicketDto> {
+  return apiFetch<AdminSupportTicketDto>(`/admin/support/tickets/${ticketId}/status`, {
+    method: "PUT",
+    body: JSON.stringify({ status, adminNotes }),
+  });
+}

@@ -201,9 +201,13 @@ export async function onboardCandidate(data: CandidateOnboardingPayload): Promis
 /**
  * Update candidate profile.
  */
-export async function updateCandidateProfile(data: Partial<CandidateOnboardingPayload>): Promise<CandidateProfile> {
+export async function updateCandidateProfile(data: Partial<CandidateOnboardingPayload> & Record<string, any>): Promise<CandidateProfile> {
   const body = {
     ...data,
+    fullName: data.fullName || (data as any).name,
+    primarySpecialty: data.primarySpecialty || (data as any).specialty,
+    collegeName: data.collegeName || (data as any).college,
+    councilRegistrationNumber: data.councilRegistrationNumber || (data as any).regNumber,
     expectedSalaryMinPaise: data.expectedSalaryMinRupees
       ? rupeesToPaise(data.expectedSalaryMinRupees)
       : undefined,
@@ -232,13 +236,13 @@ export async function uploadCandidateDocument(
   originalFileName: string,
   fileUrl: string
 ): Promise<CandidateDocument> {
-  const params = new URLSearchParams({
-    documentType,
-    originalFileName,
-    fileUrl,
-  });
-  return apiFetch<CandidateDocument>(`/candidates/me/documents?${params.toString()}`, {
+  return apiFetch<CandidateDocument>("/candidates/me/documents", {
     method: "POST",
+    body: JSON.stringify({
+      documentType,
+      originalFileName,
+      fileUrl,
+    }),
   });
 }
 

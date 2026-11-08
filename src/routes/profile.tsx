@@ -562,15 +562,19 @@ function Profile() {
       // 2. If API enabled, persist to PostgreSQL backend
       if (isApiEnabled) {
         await updateCandidateProfile({
+          fullName: editForm.name,
           name: editForm.name,
           profession: editForm.profession,
+          primarySpecialty: editForm.specialty,
           specialty: editForm.specialty,
           phone: editForm.phone,
           email: editForm.email,
           languages: parsedLangs,
           bio: editForm.bio,
           council: editForm.council,
+          councilRegistrationNumber: editForm.regNumber,
           regNumber: editForm.regNumber,
+          collegeName: editForm.college,
           college: editForm.college,
           qualification: editForm.qualification,
           addressLine: editForm.addressLine,

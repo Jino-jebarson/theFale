@@ -9,6 +9,7 @@ export interface SupportTicketDto {
   description: string;
   category: string;
   status: string;
+  adminNotes?: string;
   createdAt: string;
 }
 

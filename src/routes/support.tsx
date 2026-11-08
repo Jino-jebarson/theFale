@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   HiOutlineEnvelope,
@@ -47,7 +47,7 @@ import {
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
-import { createSupportTicket, getMyTickets } from "@/lib/adapters/supportAdapter";
+import { createSupportTicket, getMyTickets, SupportTicketDto } from "@/lib/adapters/supportAdapter";
 
 export const Route = createFileRoute("/support")({
   head: () => ({
@@ -185,6 +185,7 @@ const faqs: FAQItem[] = [
 
 function SupportPage() {
   const s = useApp();
+  const isFacility = s.portal === "facility";
   const [copiedType, setCopiedType] = useState<"email" | "phone" | null>(null);
   const [activeMainTab, setActiveMainTab] = useState<"faqs" | "ticket" | "track" | "escalation">("faqs");
   const [faqCategory, setFaqCategory] = useState<"all" | "candidate" | "facility" | "escrow" | "verification">("all");
@@ -192,11 +193,18 @@ function SupportPage() {
   const [helpfulFeedback, setHelpfulFeedback] = useState<Record<string, "yes" | "no">>({});
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Ticket Form state
-  const [userRole, setUserRole] = useState<"candidate" | "facility">(s.portal === "facility" ? "facility" : "candidate");
+  // Ticket Form state - dynamically bound to active portal
+  const [userRole, setUserRole] = useState<"candidate" | "facility">(isFacility ? "facility" : "candidate");
   const [fullName, setFullName] = useState(String(s.profile["name"] || s.profile["recruiter"] || ""));
   const [email, setEmail] = useState(String(s.profile["email"] || ""));
-  const [phone, setPhone] = useState(String(s.profile["phone"] || ""));
+  const [phone, setPhone] = useState(String(s.profile["phone"] || s.profile["mobile"] || ""));
+
+  useEffect(() => {
+    setUserRole(isFacility ? "facility" : "candidate");
+    if (!fullName) setFullName(String(s.profile["name"] || s.profile["recruiter"] || ""));
+    if (!email) setEmail(String(s.profile["email"] || ""));
+    if (!phone) setPhone(String(s.profile["phone"] || s.profile["mobile"] || ""));
+  }, [s.portal, s.profile, isFacility]);
   const [category, setCategory] = useState("verification");
   const [urgency, setUrgency] = useState<"standard" | "high" | "emergency">("standard");
   const [subject, setSubject] = useState("");
@@ -209,17 +217,122 @@ function SupportPage() {
     timestamp: string;
   } | null>(null);
 
+  // Helper to dynamically calculate SLA milestone & styling based on status
+  const getTicketProgress = (status: string) => {
+    const s = (status || "").toUpperCase();
+    if (s === "RESOLVED") {
+      return {
+        step: 4,
+        displayStatus: "Resolved · Solution Confirmed",
+        badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
+        dotClass: "bg-emerald-500",
+        eta: "Completed",
+        pulse: false,
+      };
+    }
+    if (s === "CLOSED") {
+      return {
+        step: 4,
+        displayStatus: "Closed · Ticket Completed",
+        badgeClass: "bg-muted text-muted-foreground border-border",
+        dotClass: "bg-muted-foreground",
+        eta: "Case Archived",
+        pulse: false,
+      };
+    }
+    if (s === "IN_PROGRESS") {
+      return {
+        step: 3,
+        displayStatus: "In Progress · Clinical Operations Review",
+        badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
+        dotClass: "bg-amber-500",
+        eta: "Within 45 minutes",
+        pulse: true,
+      };
+    }
+    // Default: OPEN
+    return {
+      step: 1,
+      displayStatus: "Open · Queued at Clinical Operations Desk",
+      badgeClass: "bg-sky-500/15 text-sky-700 dark:text-sky-400 border-sky-500/30",
+      dotClass: "bg-sky-500",
+      eta: "Under 2 hours",
+      pulse: true,
+    };
+  };
+
   // Ticket status tracker input
   const [trackIdInput, setTrackIdInput] = useState("");
   const [trackedStatus, setTrackedStatus] = useState<{
     id: string;
     status: string;
+    rawStatus: string;
     step: number;
     agent: string;
     eta: string;
     type: string;
     lastUpdate: string;
+    subject?: string;
+    description?: string;
+    adminNotes?: string;
+    badgeClass: string;
+    dotClass: string;
+    pulse: boolean;
   } | null>(null);
+
+  // User submitted tickets list (loaded from database)
+  const [myTickets, setMyTickets] = useState<SupportTicketDto[]>([]);
+  const [isLoadingTickets, setIsLoadingTickets] = useState(false);
+
+  const loadTicketDetails = (ticket: SupportTicketDto) => {
+    const progress = getTicketProgress(ticket.status);
+    setTrackIdInput(ticket.id);
+    setTrackedStatus({
+      id: ticket.id,
+      status: progress.displayStatus,
+      rawStatus: (ticket.status || "OPEN").toUpperCase(),
+      step: progress.step,
+      agent: "FALE Clinical Support Lead",
+      eta: progress.eta,
+      type: ticket.category || "General Support",
+      lastUpdate: ticket.createdAt
+        ? new Date(ticket.createdAt).toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "Recently",
+      subject: ticket.subject,
+      description: ticket.description,
+      adminNotes: ticket.adminNotes,
+      badgeClass: progress.badgeClass,
+      dotClass: progress.dotClass,
+      pulse: progress.pulse,
+    });
+  };
+
+  const fetchMyTickets = async () => {
+    if (!isApiEnabled) return;
+    setIsLoadingTickets(true);
+    try {
+      const list = await getMyTickets();
+      setMyTickets(list || []);
+      // If no ticket is currently tracked and user has tickets, load their latest one
+      if (list && list.length > 0 && !trackedStatus) {
+        loadTicketDetails(list[0]);
+      }
+    } catch (err) {
+      console.warn("Could not fetch user tickets", err);
+    } finally {
+      setIsLoadingTickets(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMyTickets();
+  }, [activeMainTab]);
 
   const copyToClipboard = async (text: string, type: "email" | "phone") => {
     try {
@@ -251,6 +364,8 @@ function SupportPage() {
           urgency,
           timestamp: "Just now",
         });
+        loadTicketDetails(created);
+        fetchMyTickets();
         toast.success("Support ticket created in FALE CRM!", {
           description: `Ticket #${created.id} is active and assigned.`,
         });
@@ -279,46 +394,43 @@ function SupportPage() {
   const handleTrackTicket = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!trackIdInput.trim()) {
-      toast.error("Please enter a ticket reference ID (e.g. FALE-CARE-84920).");
+      toast.error("Please enter a ticket reference ID (e.g. 6495c68a-5cce-431e-bb3e-85d6ca2c0a4e).");
       return;
     }
-    const cleanId = trackIdInput.trim().toUpperCase();
+    const cleanId = trackIdInput.trim().toLowerCase();
     if (isApiEnabled) {
       try {
         const tickets = await getMyTickets();
+        setMyTickets(tickets || []);
         const found = tickets.find(
-          (t) => t.id.toUpperCase() === cleanId || t.id.toLowerCase() === trackIdInput.trim().toLowerCase()
+          (t) => t.id.toLowerCase() === cleanId || t.id.toLowerCase().includes(cleanId)
         );
         if (found) {
-          setTrackedStatus({
-            id: found.id,
-            status: found.status || "In Review with Support Team",
-            step: found.status === "RESOLVED" ? 4 : found.status === "IN_PROGRESS" ? 2 : 1,
-            agent: "FALE Clinical Support Lead",
-            eta: "Within 24 hours",
-            type: found.category || "General Support",
-            lastUpdate: found.createdAt ? new Date(found.createdAt).toLocaleDateString() : "Recently",
-          });
+          loadTicketDetails(found);
           toast.success(`Ticket #${found.id} retrieved successfully`);
         } else {
-          toast.error(`Ticket #${cleanId} not found in your submitted tickets.`);
+          toast.error(`Ticket #${trackIdInput.trim()} not found in your account.`);
         }
       } catch (err: any) {
         toast.error("Failed to retrieve ticket status: " + (err.message || "Network error"));
       }
       return;
     }
-    const isEmg = cleanId.includes("EMG");
+    const isEmg = cleanId.includes("emg");
     setTrackedStatus({
-      id: cleanId,
+      id: trackIdInput.trim(),
       status: isEmg ? "Active Clinical Dispatch · Level 1 Expedited" : "In Review with Senior Clinical Lead",
+      rawStatus: isEmg ? "IN_PROGRESS" : "OPEN",
       step: isEmg ? 3 : 2,
       agent: "Dr. Kavitha Menon (Chief Healthcare Operations Lead)",
       eta: isEmg ? "Within 15 minutes" : "Within 45 minutes",
       type: "Clinical Credential & 24-Hr Escrow Review",
       lastUpdate: "3 mins ago (Automated timesheet verification check)",
+      badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
+      dotClass: "bg-amber-500",
+      pulse: true,
     });
-    toast.success(`Ticket #${cleanId} retrieved successfully`);
+    toast.success(`Ticket #${trackIdInput.trim()} retrieved successfully`);
   };
 
   const handleFeedback = (faqId: string, val: "yes" | "no") => {
@@ -517,7 +629,7 @@ function SupportPage() {
             {[
               { id: "faqs", label: "Knowledge Base & FAQs", icon: HiOutlineQuestionMarkCircle },
               { id: "ticket", label: "Submit Priority Ticket", icon: HiOutlinePaperAirplane },
-              { id: "track", label: "Track Existing Ticket", icon: HiOutlineClock },
+              { id: "track", label: "Track Existing Ticket", icon: HiOutlineClock, count: myTickets.length },
               { id: "escalation", label: "Grievance & Escalation Matrix", icon: HiOutlineScale },
             ].map((tab) => {
               const active = activeMainTab === tab.id;
@@ -536,6 +648,16 @@ function SupportPage() {
                 >
                   <TabIcon className="h-4 w-4" />
                   <span>{tab.label}</span>
+                  {Boolean(tab.count) && (
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[10px] font-mono font-bold",
+                        active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -765,37 +887,33 @@ function SupportPage() {
                 </div>
               ) : (
                 <form onSubmit={handleTicketSubmit} className="space-y-4 text-xs">
-                  {/* Persona Toggle */}
+                  {/* Dynamic Account Type Indicator (No switch tab) */}
                   <div className="space-y-1.5">
-                    <label className="font-bold text-foreground">I am contacting FALE as a:</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setUserRole("candidate")}
-                        className={cn(
-                          "flex items-center justify-center gap-2 rounded-2xl p-3.5 font-bold transition-all border cursor-pointer",
-                          userRole === "candidate"
-                            ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                            : "bg-muted/30 text-muted-foreground border-border hover:text-foreground"
+                    <label className="font-bold text-foreground">Requester Account Type</label>
+                    <div className="flex items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-3.5 shadow-2xs">
+                      <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-white shrink-0 shadow-xs">
+                        {isFacility ? (
+                          <HiOutlineBuildingOffice2 className="h-5 w-5" />
+                        ) : (
+                          <HiOutlineDocumentCheck className="h-5 w-5" />
                         )}
-                      >
-                        <HiOutlineDocumentCheck className="h-4 w-4" />
-                        <span>Healthcare Clinician</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setUserRole("facility")}
-                        className={cn(
-                          "flex items-center justify-center gap-2 rounded-2xl p-3.5 font-bold transition-all border cursor-pointer",
-                          userRole === "facility"
-                            ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                            : "bg-muted/30 text-muted-foreground border-border hover:text-foreground"
-                        )}
-                      >
-                        <HiOutlineBuildingOffice2 className="h-4 w-4" />
-                        <span>Hospital / Institution</span>
-                      </button>
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-black text-foreground">
+                            {isFacility ? "Hospital / Institution" : "Healthcare Clinician"}
+                          </p>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-extrabold">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Verified Account
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                          {isFacility
+                            ? (s.profile["hospitalName"] || s.profile["facilityName"] || s.profile["org"] || "Accredited Healthcare Partner")
+                            : `${s.profile["role"] || s.profile["profession"] || "Clinician"} · ${s.profile["specialty"] || s.profile["city"] || "FALE Network"}`}
+                        </p>
+                      </div>
                     </div>
                   </div>
 
@@ -808,7 +926,7 @@ function SupportPage() {
                         required
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
-                        placeholder="Dr. Kavitha Rajan"
+                        placeholder={isFacility ? (s.profile["recruiter"] as string || "Hospital HR Admin") : (s.profile["name"] as string || "Dr. Kavitha Rajan")}
                         className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
                       />
                     </div>
@@ -834,7 +952,7 @@ function SupportPage() {
                         required
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="kavitha@hospital.com"
+                        placeholder={isFacility ? (s.profile["email"] as string || "admin@hospital.com") : (s.profile["email"] as string || "clinician@fale.care")}
                         className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
                       />
                     </div>
@@ -931,152 +1049,304 @@ function SupportPage() {
             </div>
           )}
 
-          {/* ================= TAB 3: TRACK TICKET WITH 4-STEP VISUAL PROGRESS STEPPER (Naukri FastForward Tracker) ================= */}
+          {/* ================= TAB 3: TRACK TICKET WITH 4-STEP VISUAL PROGRESS STEPPER ================= */}
           {activeMainTab === "track" && (
-            <div className="max-w-3xl mx-auto rounded-3xl border border-border bg-card p-6 sm:p-10 shadow-xs space-y-8">
-              <div className="space-y-1">
-                <div className="inline-flex items-center gap-1.5 text-xs font-bold text-primary bg-primary/10 px-3 py-1 rounded-full">
-                  <HiOutlineClock className="h-3.5 w-3.5" />
-                  <span>Real-time Ticket SLA Tracker</span>
+            <div className="max-w-4xl mx-auto space-y-8">
+              {/* Tracker Form Card */}
+              <div className="rounded-3xl border border-border bg-card p-6 sm:p-10 shadow-xs space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-1.5 text-xs font-bold text-primary bg-primary/10 px-3 py-1 rounded-full">
+                      <HiOutlineClock className="h-3.5 w-3.5" />
+                      <span>Real-time Ticket SLA Tracker</span>
+                    </div>
+                    <h2 className="text-xl font-bold text-foreground">Track Your Support Ticket</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Enter any ticket reference ID or select from your submitted inquiries below.
+                    </p>
+                  </div>
+                  {isApiEnabled && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={fetchMyTickets}
+                      disabled={isLoadingTickets}
+                      className="rounded-xl text-xs flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer"
+                    >
+                      <HiOutlineArrowPath className={cn("h-3.5 w-3.5", isLoadingTickets && "animate-spin")} />
+                      <span>Refresh Tickets</span>
+                    </Button>
+                  )}
                 </div>
-                <h2 className="text-xl font-bold text-foreground">Track Your Support Ticket</h2>
-                <p className="text-xs text-muted-foreground">
-                  Enter your ticket reference ID (e.g. FALE-CARE-84920) to check current milestone, assigned clinical manager, and resolution SLA.
-                </p>
+
+                <form onSubmit={handleTrackTicket} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Enter Ticket ID (e.g. 6495c68a-5cce-431e-bb3e-85d6ca2c0a4e)"
+                    value={trackIdInput}
+                    onChange={(e) => setTrackIdInput(e.target.value)}
+                    className="h-12 flex-1 rounded-2xl border border-input bg-card px-4 text-xs font-mono font-bold text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 tracking-wide"
+                  />
+                  <Button type="submit" size="default" className="rounded-2xl text-xs font-bold h-12 px-6 cursor-pointer">
+                    Track
+                  </Button>
+                </form>
+
+                {/* Quick sample ticket triggers when API is offline */}
+                {!trackedStatus && !isApiEnabled && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="text-[11px] font-semibold">Try sample tickets:</span>
+                    {["FALE-CARE-84920", "FALE-EMG-10492"].map((sample) => (
+                      <button
+                        key={sample}
+                        type="button"
+                        onClick={() => {
+                          setTrackIdInput(sample);
+                          const isEmg = sample.includes("EMG");
+                          setTrackedStatus({
+                            id: sample,
+                            status: isEmg ? "Active Clinical Dispatch · Level 1 Expedited" : "In Review with Senior Clinical Lead",
+                            rawStatus: isEmg ? "IN_PROGRESS" : "OPEN",
+                            step: isEmg ? 3 : 2,
+                            agent: "Dr. Kavitha Menon (Chief Healthcare Operations Lead)",
+                            eta: isEmg ? "Within 15 minutes" : "Within 45 minutes",
+                            type: "Clinical Credential & 24-Hr Escrow Review",
+                            lastUpdate: "3 mins ago (Automated timesheet verification check)",
+                            badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
+                            dotClass: "bg-amber-500",
+                            pulse: true,
+                          });
+                        }}
+                        className="rounded-lg border border-border/80 bg-muted/40 px-2.5 py-1 font-mono text-[11px] font-bold text-foreground hover:border-primary/50 cursor-pointer"
+                      >
+                        #{sample}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Live Milestone Tracker Card */}
+                {trackedStatus && (
+                  <div className="rounded-3xl border border-border bg-muted/20 p-6 sm:p-8 space-y-6">
+                    {/* Ticket Header Banner */}
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-border/70 pb-4">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Ticket Reference</span>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-mono font-bold text-foreground text-base sm:text-lg break-all">#{trackedStatus.id}</h3>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(trackedStatus.id, "email")}
+                            className="text-muted-foreground hover:text-foreground cursor-pointer p-1 rounded-md hover:bg-muted"
+                            title="Copy Ticket ID"
+                          >
+                            <HiOutlineClipboardDocument className="h-4 w-4" />
+                          </button>
+                        </div>
+                        {trackedStatus.subject && (
+                          <p className="text-xs font-semibold text-foreground mt-1">
+                            Subject: {trackedStatus.subject}
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-left sm:text-right shrink-0">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Current Status</span>
+                        <span className={cn("inline-flex items-center gap-1.5 font-bold text-xs px-2.5 py-1 rounded-full border mt-1", trackedStatus.badgeClass)}>
+                          <span className={cn("h-2 w-2 rounded-full", trackedStatus.dotClass, trackedStatus.pulse && "animate-pulse")} />
+                          {trackedStatus.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 4-Step Visual Progress Stepper (Naukri style) */}
+                    <div className="space-y-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Resolution Milestones
+                      </span>
+                      <div className="grid grid-cols-4 gap-2 pt-2">
+                        {[
+                          { step: 1, label: "Ticket Logged" },
+                          { step: 2, label: "Assigned Lead" },
+                          { step: 3, label: "Clinical Review" },
+                          { step: 4, label: trackedStatus.rawStatus === "CLOSED" ? "Closed" : "Resolved" },
+                        ].map((sItem) => {
+                          const isDone = trackedStatus.step > sItem.step || (trackedStatus.step === 4 && sItem.step === 4);
+                          const isCurrent = trackedStatus.step === sItem.step && trackedStatus.step !== 4;
+                          return (
+                            <div key={sItem.step} className="space-y-2 text-center">
+                              <div className="relative">
+                                <div
+                                  className={cn(
+                                    "h-2 rounded-full transition-all",
+                                    isDone
+                                      ? "bg-emerald-500"
+                                      : isCurrent
+                                        ? "bg-primary animate-pulse"
+                                        : "bg-muted"
+                                  )}
+                                />
+                              </div>
+                              <span
+                                className={cn(
+                                  "text-[11px] font-bold block",
+                                  isDone
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : isCurrent
+                                      ? "text-primary font-black"
+                                      : "text-muted-foreground"
+                                )}
+                              >
+                                {sItem.label}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Official Admin / Clinical Desk Notes Response */}
+                    {trackedStatus.adminNotes && (
+                      <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-1.5 text-xs">
+                        <div className="flex items-center gap-1.5 font-bold text-foreground">
+                          <HiOutlineChatBubbleLeftRight className="h-4 w-4 text-primary" />
+                          <span>Official Clinical Operations Response</span>
+                        </div>
+                        <p className="text-muted-foreground leading-relaxed whitespace-pre-line">
+                          {trackedStatus.adminNotes}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Ticket Metadata Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1 text-xs">
+                      <div className="rounded-2xl border border-border bg-card p-4 space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Assigned Lead</span>
+                        <strong className="text-foreground text-sm block">{trackedStatus.agent}</strong>
+                        <span className="text-[11px] text-muted-foreground">Verified FALE Clinical Supervisor</span>
+                      </div>
+
+                      <div className="rounded-2xl border border-border bg-card p-4 space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Guaranteed SLA</span>
+                        <strong className="text-primary text-sm font-bold block">{trackedStatus.eta}</strong>
+                        <span className="text-[11px] text-muted-foreground">{trackedStatus.lastUpdate}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 text-xs text-muted-foreground">
+                      <span>Need to escalate this case?</span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMainTab("escalation")}
+                        className="text-primary font-bold hover:underline cursor-pointer"
+                      >
+                        View Escalation Matrix →
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <form onSubmit={handleTrackTicket} className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Enter Ticket ID (e.g. FALE-CARE-84920)"
-                  value={trackIdInput}
-                  onChange={(e) => setTrackIdInput(e.target.value)}
-                  className="h-12 flex-1 rounded-2xl border border-input bg-card px-4 text-xs font-mono font-bold text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 uppercase tracking-wide"
-                />
-                <Button type="submit" size="default" className="rounded-2xl text-xs font-bold h-12 px-6 cursor-pointer">
-                  Track
-                </Button>
-              </form>
-
-              {/* Quick sample ticket triggers */}
-              {!trackedStatus && !isApiEnabled && (
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span className="text-[11px] font-semibold">Try sample tickets:</span>
-                  {["FALE-CARE-84920", "FALE-EMG-10492"].map((sample) => (
-                    <button
-                      key={sample}
-                      type="button"
-                      onClick={() => {
-                        setTrackIdInput(sample);
-                        const isEmg = sample.includes("EMG");
-                        setTrackedStatus({
-                          id: sample,
-                          status: isEmg ? "Active Clinical Dispatch · Level 1 Expedited" : "In Review with Senior Clinical Lead",
-                          step: isEmg ? 3 : 2,
-                          agent: "Dr. Kavitha Menon (Chief Healthcare Operations Lead)",
-                          eta: isEmg ? "Within 15 minutes" : "Within 45 minutes",
-                          type: "Clinical Credential & 24-Hr Escrow Review",
-                          lastUpdate: "3 mins ago (Automated timesheet verification check)",
-                        });
-                      }}
-                      className="rounded-lg border border-border/80 bg-muted/40 px-2.5 py-1 font-mono text-[11px] font-bold text-foreground hover:border-primary/50 cursor-pointer"
-                    >
-                      #{sample}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {trackedStatus && (
-                <div className="rounded-3xl border border-border bg-muted/20 p-6 sm:p-8 space-y-6">
-                  {/* Ticket Header Banner */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/70 pb-4">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Ticket Reference</span>
-                      <h3 className="font-mono font-bold text-foreground text-lg sm:text-xl">#{trackedStatus.id}</h3>
-                    </div>
-                    <div className="text-left sm:text-right">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Status</span>
-                      <span className="inline-flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400 text-xs">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                        {trackedStatus.status}
-                      </span>
-                    </div>
+              {/* ================= MY SUBMITTED TICKETS (Database-backed) ================= */}
+              <div className="rounded-3xl border border-border bg-card p-6 sm:p-8 space-y-5 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-bold text-foreground">My Submitted Inquiries</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Tickets linked to your {isFacility ? "hospital" : "clinician"} profile. Visible anytime you log in.
+                    </p>
                   </div>
+                  <span className="rounded-full bg-primary/10 text-primary px-3 py-1 text-xs font-bold font-mono">
+                    {myTickets.length} {myTickets.length === 1 ? "Ticket" : "Tickets"}
+                  </span>
+                </div>
 
-                  {/* 4-Step Visual Progress Stepper (Naukri style) */}
-                  <div className="space-y-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                      Resolution Milestones
-                    </span>
-                    <div className="grid grid-cols-4 gap-2 pt-2">
-                      {[
-                        { step: 1, label: "Ticket Logged" },
-                        { step: 2, label: "Assigned Lead" },
-                        { step: 3, label: "Clinical Review" },
-                        { step: 4, label: "Resolved" },
-                      ].map((sItem) => {
-                        const isDone = trackedStatus.step > sItem.step;
-                        const isCurrent = trackedStatus.step === sItem.step;
-                        return (
-                          <div key={sItem.step} className="space-y-2 text-center">
-                            <div className="relative">
-                              <div
-                                className={cn(
-                                  "h-2 rounded-full transition-all",
-                                  isDone
-                                    ? "bg-emerald-500"
-                                    : isCurrent
-                                      ? "bg-primary animate-pulse"
-                                      : "bg-muted"
-                                )}
-                              />
+                {isLoadingTickets && myTickets.length === 0 ? (
+                  <div className="py-12 text-center text-xs text-muted-foreground flex flex-col items-center gap-2">
+                    <HiOutlineArrowPath className="h-6 w-6 animate-spin text-primary" />
+                    <span>Loading your submitted tickets...</span>
+                  </div>
+                ) : myTickets.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border p-8 text-center space-y-3">
+                    <HiOutlineLifebuoy className="h-8 w-8 text-muted-foreground mx-auto" />
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold text-foreground">No support tickets found</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        When you submit a support ticket, it will appear here permanently so you can track progress anytime.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => setActiveMainTab("ticket")}
+                      className="rounded-xl text-xs font-bold cursor-pointer"
+                    >
+                      Submit Priority Ticket
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {myTickets.map((t) => {
+                      const prog = getTicketProgress(t.status);
+                      const isCurrentActive = trackedStatus?.id === t.id;
+                      return (
+                        <div
+                          key={t.id}
+                          className={cn(
+                            "rounded-2xl border p-4 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4",
+                            isCurrentActive
+                              ? "border-primary bg-primary/5 shadow-2xs"
+                              : "border-border bg-card hover:bg-muted/20"
+                          )}
+                        >
+                          <div className="space-y-1.5 min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs font-black text-foreground">
+                                #{t.id}
+                              </span>
+                              <span className={cn("inline-flex items-center gap-1 font-bold text-[10px] px-2 py-0.5 rounded-full border", prog.badgeClass)}>
+                                <span className={cn("h-1.5 w-1.5 rounded-full", prog.dotClass, prog.pulse && "animate-pulse")} />
+                                {t.status.toUpperCase()}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground">
+                                · {new Date(t.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                              </span>
                             </div>
-                            <span
-                              className={cn(
-                                "text-[11px] font-bold block",
-                                isDone
-                                  ? "text-emerald-600 dark:text-emerald-400"
-                                  : isCurrent
-                                    ? "text-primary font-black"
-                                    : "text-muted-foreground"
-                              )}
-                            >
-                              {sItem.label}
-                            </span>
+                            <p className="text-xs font-bold text-foreground truncate">
+                              {t.subject || "Concierge Support Request"}
+                            </p>
+                            {t.description && (
+                              <p className="text-[11px] text-muted-foreground line-clamp-1">
+                                {t.description}
+                              </p>
+                            )}
+                            {t.adminNotes && (
+                              <div className="text-[11px] text-primary flex items-center gap-1 font-semibold">
+                                <HiOutlineCheckBadge className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">Response: {t.adminNotes}</span>
+                              </div>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
 
-                  {/* Ticket Metadata Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 text-xs">
-                    <div className="rounded-2xl border border-border bg-card p-4 space-y-1">
-                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Assigned Lead</span>
-                      <strong className="text-foreground text-sm block">{trackedStatus.agent}</strong>
-                      <span className="text-[11px] text-muted-foreground">Verified FALE Clinical Supervisor</span>
-                    </div>
-
-                    <div className="rounded-2xl border border-border bg-card p-4 space-y-1">
-                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Guaranteed SLA</span>
-                      <strong className="text-primary text-sm font-bold block">{trackedStatus.eta}</strong>
-                      <span className="text-[11px] text-muted-foreground">{trackedStatus.lastUpdate}</span>
-                    </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={isCurrentActive ? "default" : "outline"}
+                              onClick={() => {
+                                loadTicketDetails(t);
+                                window.scrollTo({ top: 300, behavior: "smooth" });
+                              }}
+                              className="rounded-xl text-xs font-bold cursor-pointer"
+                            >
+                              {isCurrentActive ? "Viewing Live" : "Track Status"}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-
-                  <div className="flex items-center justify-between pt-2 text-xs text-muted-foreground">
-                    <span>Need to escalate this case?</span>
-                    <button
-                      type="button"
-                      onClick={() => setActiveMainTab("escalation")}
-                      className="text-primary font-bold hover:underline cursor-pointer"
-                    >
-                      View Escalation Matrix →
-                    </button>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
 

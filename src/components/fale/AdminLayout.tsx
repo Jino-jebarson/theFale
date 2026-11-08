@@ -21,6 +21,8 @@ import {
   HiOutlineBell,
   HiOutlineChatBubbleLeftRight,
   HiChatBubbleLeftRight,
+  HiOutlineLifebuoy,
+  HiLifebuoy,
 } from "react-icons/hi2";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
@@ -28,7 +30,7 @@ import { useApp, setState, Portal } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
-import { getAdminDashboardMetrics, type AdminDashboardMetricsDto } from "@/lib/adapters/adminAdapter";
+import { getAdminDashboardMetrics, getAdminSupportTickets, type AdminDashboardMetricsDto } from "@/lib/adapters/adminAdapter";
 import { logout } from "@/lib/adapters/authAdapter";
 import {
   DropdownMenu,
@@ -60,6 +62,7 @@ export function AdminLayout({
   const navigate = useNavigate();
 
   const [metrics, setMetrics] = useState<AdminDashboardMetricsDto | null>(null);
+  const [openTicketsCount, setOpenTicketsCount] = useState<number>(0);
 
   useEffect(() => {
     if (!isApiEnabled) return;
@@ -70,6 +73,10 @@ export function AdminLayout({
       .catch((err) => {
         console.warn("Failed to load admin metrics:", err);
       });
+
+    getAdminSupportTickets("OPEN")
+      .then((t) => setOpenTicketsCount(t.length))
+      .catch(() => {});
   }, [path]);
 
   const pendingCandidateKYC = isApiEnabled && metrics
@@ -150,6 +157,14 @@ export function AdminLayout({
       active: HiChatBubbleLeftRight,
       badge: pendingHuddleModeration,
     },
+    {
+      to: "/admin/support",
+      label: "Support Tickets",
+      shortLabel: "Tickets",
+      icon: HiOutlineLifebuoy,
+      active: HiLifebuoy,
+      badge: openTicketsCount,
+    },
   ] as const;
 
   const switchPortal = (p: Portal) => {
@@ -172,7 +187,7 @@ export function AdminLayout({
           </div>
 
           {/* Quick Search Bar */}
-          <div className="relative hidden max-w-xs flex-1 lg:block">
+          <div className="relative hidden max-w-[200px] xl:max-w-xs flex-1 xl:block shrink min-w-0">
             <HiOutlineMagnifyingGlass className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               placeholder="Search candidate, council reg, hospital…"
@@ -181,7 +196,7 @@ export function AdminLayout({
           </div>
 
           {/* Top Horizontal Navigation Menu */}
-          <nav className="ml-auto hidden h-16 items-center md:flex">
+          <nav className="ml-auto hidden h-16 items-center md:flex shrink min-w-0">
             {adminNav.map((n) => {
               const on =
                 path === n.to ||
@@ -194,7 +209,7 @@ export function AdminLayout({
                   to={n.to}
                   preload="intent"
                   className={cn(
-                    "relative flex h-16 min-w-[88px] px-3 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors whitespace-nowrap",
+                    "relative flex h-16 min-w-[68px] xl:min-w-[80px] px-1.5 xl:px-2.5 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors whitespace-nowrap",
                     on
                       ? "text-primary font-bold"
                       : "text-muted-foreground hover:text-foreground"
@@ -213,7 +228,8 @@ export function AdminLayout({
                       </span>
                     )}
                   </div>
-                  <span className="leading-none">{n.label}</span>
+                  <span className="leading-none hidden xl:inline">{n.label}</span>
+                  <span className="leading-none inline xl:hidden">{n.shortLabel}</span>
                   {on && (
                     <span className="absolute bottom-0 inset-x-2 h-0.5 rounded-t-full bg-primary" />
                   )}
@@ -222,28 +238,34 @@ export function AdminLayout({
             })}
           </nav>
 
-          {/* Notifications Icon */}
-          <Link
-            to="/notifications"
-            preload="intent"
-            className="relative ml-auto rounded-full p-2 text-muted-foreground hover:bg-muted md:ml-0"
-            aria-label="Notifications"
-          >
-            <HiOutlineBell className="h-5 w-5" />
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border-2 border-card bg-destructive" />
-          </Link>
+          {/* Action Cluster: Notifications, Theme Toggle, Profile Avatar - Always Protected with shrink-0 */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto md:ml-0">
+            <Link
+              to="/notifications"
+              preload="intent"
+              className={cn(
+                "relative rounded-full p-2 transition-colors",
+                path === "/notifications" ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted"
+              )}
+              aria-label="Notifications"
+            >
+              <HiOutlineBell className="h-5 w-5" />
+              {(s.unreadNotificationCount ?? 0) > 0 && (
+                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border-2 border-card bg-destructive animate-pulse" />
+              )}
+            </Link>
 
-          {/* Theme Switcher */}
-          <ThemeToggle />
+            {/* Theme Switcher */}
+            <ThemeToggle />
 
-          {/* Admin User Profile Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer">
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-primary text-xs font-black text-white shadow-xs">
-                AD
-              </span>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
+            {/* Admin User Profile Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary cursor-pointer">
+                <span className="grid h-9 w-9 place-items-center rounded-full bg-primary text-xs font-black text-white shadow-xs">
+                  AD
+                </span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
               <DropdownMenuLabel>
                 <div className="flex items-center gap-1.5 font-bold text-foreground">
                   <span>Clinical Ops Admin</span>
@@ -289,7 +311,8 @@ export function AdminLayout({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-      </header>
+      </div>
+    </header>
 
       {/* Sub-Header Strip with Title, Badge & Action Buttons */}
       <div className="border-b border-border/80 bg-card/75 backdrop-blur px-4 sm:px-6 lg:px-8 py-5 sm:py-6 shadow-2xs">

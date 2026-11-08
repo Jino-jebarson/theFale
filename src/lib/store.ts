@@ -290,6 +290,7 @@ export interface AppState {
   huddleSessions: HuddleSession[];
   candidatePayoutMethod?: CandidatePayoutMethod;
   candidatePayouts?: CandidatePayoutTransaction[];
+  unreadNotificationCount?: number;
 }
 
 const KEY = "fale-pro-v2";
@@ -298,6 +299,7 @@ const initialMockState: AppState = {
   contact: "",
   signedIn: false,
   onboarded: false,
+  unreadNotificationCount: 0,
   huddlePosts: [],
   huddleQuestions: [],
   huddleSessions: [],
@@ -731,6 +733,7 @@ const initialEmptyState: AppState = {
   contact: "",
   signedIn: false,
   onboarded: false,
+  unreadNotificationCount: 0,
   huddlePosts: [],
   huddleQuestions: [],
   huddleSessions: [],
@@ -861,6 +864,10 @@ export function useApp(): AppState {
     },
     () => initial,
   );
+}
+
+export function setUnreadNotificationCount(count: number) {
+  setState({ unreadNotificationCount: Math.max(0, count) });
 }
 
 // ──────────────────────────────────────────────────────────────────────
