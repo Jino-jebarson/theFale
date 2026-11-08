@@ -23,6 +23,7 @@ import {
   HiOutlineLockClosed,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill, RiHospitalLine } from "react-icons/ri";
+import { BotMessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
 import { OrgMark } from "@/components/fale/JobCard";
@@ -41,6 +42,7 @@ import { cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees } from "@/lib/api";
 import { getFacilityWallet, getHospitalBankAccount } from "@/lib/adapters/facilityAdapter";
 import { postShift } from "@/lib/adapters/shiftAdapter";
+import { parseWhatsAppJobMessage, suggestShiftPayWithAi } from "@/lib/adapters/aiAdapter";
 
 export const Route = createFileRoute("/employer/post-shift")({
   head: () => ({
@@ -62,18 +64,6 @@ export const Route = createFileRoute("/employer/post-shift")({
   }),
   component: PostShiftScreen,
 });
-
-// Preset Clinical Roles for fast 1-click selection
-const clinicalRolePresets = [
-  { role: "ICU Staff Nurse", dept: "Critical care", defaultRate: 450 },
-  { role: "Emergency Medical Officer", dept: "Emergency & Trauma", defaultRate: 850 },
-  { role: "OT Scrub Nurse", dept: "Operation Theatre", defaultRate: 420 },
-  { role: "Dialysis Technician", dept: "Nephrology", defaultRate: 350 },
-  { role: "Cath Lab Specialist", dept: "Cardiology", defaultRate: 480 },
-  { role: "Pediatric Ward Nurse", dept: "Pediatrics & NICU", defaultRate: 380 },
-  { role: "Phlebotomist", dept: "General Inpatient", defaultRate: 260 },
-  { role: "Duty Medical Officer", dept: "General Inpatient", defaultRate: 750 },
-];
 
 // Preset Hospital Departments
 const hospitalDepts = [
@@ -209,6 +199,103 @@ function PostShiftScreen() {
   const [insufficientEscrowModalOpen, setInsufficientEscrowModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // AI Magic WhatsApp Shift Fill State (#9)
+  const [whatsAppPrompt, setWhatsAppPrompt] = useState("");
+  const [aiParsing, setAiParsing] = useState(false);
+
+  // AI Shift Pay Benchmark State (#13)
+  const [aiRateSuggestion, setAiRateSuggestion] = useState<{
+    recommendedHourlyRate: number;
+    explanation: string;
+  } | null>(null);
+  const [loadingAiRate, setLoadingAiRate] = useState(false);
+
+  const handleFetchAiRateSuggestion = async (targetRole?: string, targetDept?: string) => {
+    const role = targetRole || roleTitle;
+    if (!role.trim()) return;
+    setLoadingAiRate(true);
+    try {
+      const res = await suggestShiftPayWithAi(
+        `${role} in ${targetDept || dept || "General"} (${selectedSlot} shift)`,
+        city || "Bengaluru"
+      );
+      if (res.structuredData && res.structuredData.recommendedHourlyRate) {
+        setAiRateSuggestion({
+          recommendedHourlyRate: Number(res.structuredData.recommendedHourlyRate),
+          explanation: res.structuredData.explanation || `Recommended market rate for ${role}.`
+        });
+      } else {
+        const text = res.response || res.content || "";
+        const match = text.match(/₹?\s*(\d{3,4})\s*(?:\/|\s*per|\s*hr|\s*hour)/i);
+        const rate = match ? Number(match[1]) : 480;
+        setAiRateSuggestion({
+          recommendedHourlyRate: rate,
+          explanation: text || `Market standard for ${role}.`
+        });
+      }
+    } catch (err) {
+      console.warn("Shift pay AI suggest failed:", err);
+    } finally {
+      setLoadingAiRate(false);
+    }
+  };
+
+  useEffect(() => {
+    handleFetchAiRateSuggestion(roleTitle, dept);
+  }, []);
+
+  const handleAiMagicFill = async () => {
+    if (!whatsAppPrompt.trim()) {
+      toast.error("Please paste or type a WhatsApp shift message first.");
+      return;
+    }
+    setAiParsing(true);
+    try {
+      const res = await parseWhatsAppJobMessage(whatsAppPrompt);
+      if (res.structuredData) {
+        const d = res.structuredData;
+        const role = d.title || d.role;
+        const deptName = d.department;
+        const count = d.requiredCount || d.vacancies;
+        const shiftType = (d.shiftType || d.shiftTiming || "").toUpperCase();
+        const shiftRate = d.ratePerShift || d.payRate;
+        const ratePerHour = d.hourlyRate || (shiftRate ? Math.round(Number(shiftRate) / 8) : null);
+
+        if (role) setRoleTitle(role);
+        if (deptName) {
+          const matchedDept = hospitalDepts.find(
+            (hd) =>
+              hd.toLowerCase() === deptName.toLowerCase() ||
+              deptName.toLowerCase().includes(hd.toLowerCase()) ||
+              hd.toLowerCase().includes(deptName.toLowerCase())
+          );
+          setDept(matchedDept || deptName);
+        }
+        if (count) setOpenings(Number(count));
+        if (shiftType.includes("NIGHT")) setSelectedSlot("night");
+        else if (shiftType.includes("EVENING")) setSelectedSlot("evening");
+        else if (shiftType.includes("DAY") || shiftType.includes("MORNING")) setSelectedSlot("morning");
+        if (ratePerHour) setHourlyRate(Number(ratePerHour));
+        if (d.location) setUnitFloor(d.location);
+        if (d.notes) setDutyNotes(d.notes);
+
+        toast.success("Shift parameters extracted from message!", {
+          description: `Auto-filled: ${role || "Role"} · ${count || 1} staff · ${shiftType || "Shift"} · ₹${ratePerHour || hourlyRate}/hr`,
+        });
+
+        if (role) {
+          handleFetchAiRateSuggestion(role, deptName);
+        }
+      } else {
+        toast.info("Shift parsed", { description: res.response || "Parameters auto-filled" });
+      }
+    } catch {
+      toast.error("Could not parse message. Please check text.");
+    } finally {
+      setAiParsing(false);
+    }
+  };
+
   // Computed timing & hours
   const activeTimeStr = useMemo(() => {
     if (selectedSlot === "custom") {
@@ -278,14 +365,6 @@ function PostShiftScreen() {
     const base = city === "Bengaluru" ? 92 : city === "Chennai" ? 78 : city === "Mumbai" ? 114 : 64;
     return isUrgent ? base : Math.round(base * 0.7);
   }, [city, isUrgent]);
-
-  // Handle Role preset selection
-  const handleSelectPresetRole = (p: (typeof clinicalRolePresets)[0]) => {
-    setRoleTitle(p.role);
-    setDept(p.dept);
-    setHourlyRate(p.defaultRate);
-    toast.success(`Loaded "${p.role}" shift preset`);
-  };
 
   // Toggle perk
   const handleTogglePerk = (perk: string) => {
@@ -487,37 +566,51 @@ function PostShiftScreen() {
         </div>
 
         {/* ========================================================= */}
-        {/* QUICK 1-CLICK ROLE PRESETS BAR */}
-        {/* ========================================================= */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none">
-          <span className="text-muted-foreground font-semibold shrink-0">Quick presets:</span>
-          {clinicalRolePresets.map((preset) => {
-            const isSelected = roleTitle === preset.role;
-            return (
-              <button
-                type="button"
-                key={preset.role}
-                onClick={() => handleSelectPresetRole(preset)}
-                className={cn(
-                  "px-3 py-1 rounded-lg text-xs font-medium border transition-all cursor-pointer whitespace-nowrap shrink-0",
-                  isSelected
-                    ? "bg-primary text-primary-foreground border-primary font-bold shadow-2xs"
-                    : "bg-card border-border/70 text-foreground hover:border-primary/50 hover:bg-muted/40"
-                )}
-              >
-                <span>{preset.role}</span>
-                <span className="ml-1 opacity-80 font-mono text-[10px]">₹{preset.defaultRate}/h</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* ========================================================= */}
         {/* 2-COLUMN MAIN LAYOUT: FORM + LIVE CANDIDATE PREVIEW */}
         {/* ========================================================= */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* LEFT COLUMN: FORM SECTIONS (8 COLUMNS) */}
           <div className="lg:col-span-7 xl:col-span-8 space-y-6">
+            {/* AI WhatsApp Quick Shift Generator (#9) */}
+            <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 sm:p-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary text-white text-xs">
+                    <BotMessageSquare className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-bold text-foreground">
+                      Quick Shift Parser
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground">
+                      Paste shift notes or a WhatsApp request from your nursing department to auto-fill fields.
+                    </p>
+                  </div>
+                </div>
+                <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary shrink-0">
+                  AI Assistant
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={whatsAppPrompt}
+                  onChange={(e) => setWhatsAppPrompt(e.target.value)}
+                  placeholder="e.g. Need 2 ICU sisters, nights, 3800/shift tomorrow at Koramangala"
+                  className="flex-1 rounded-xl border border-border/80 bg-background px-3.5 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                />
+                <Button
+                  type="button"
+                  onClick={handleAiMagicFill}
+                  disabled={aiParsing}
+                  className="bg-primary text-white text-xs font-bold shrink-0 hover:bg-primary-hover rounded-xl px-4"
+                >
+                  {aiParsing ? "Parsing..." : "Auto-Fill Form"}
+                </Button>
+              </div>
+            </div>
+
             {/* ----------------------------------------------------- */}
             {/* 01 · ROLE & DEPARTMENT */}
             {/* ----------------------------------------------------- */}
@@ -800,24 +893,48 @@ function PostShiftScreen() {
                   </span>
                 </div>
 
-                {/* Preset Benchmarks */}
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                  <span className="text-xs text-muted-foreground font-medium">Benchmarks:</span>
-                  {[320, 380, 450, 600, 850].map((r) => (
+                {/* AI Shift Pay Market Rate Suggestion (#13) */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20 text-xs gap-2">
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <BotMessageSquare className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                    <div className="text-[11px] text-muted-foreground leading-relaxed">
+                      {loadingAiRate ? (
+                        <span className="font-semibold text-primary animate-pulse">
+                          Analyzing prevailing hospital rate benchmarks with Gemini...
+                        </span>
+                      ) : aiRateSuggestion ? (
+                        <span>
+                          <strong className="text-foreground">AI Benchmark:</strong> Recommended <strong className="text-primary font-bold">₹{aiRateSuggestion.recommendedHourlyRate}/hr</strong>. {aiRateSuggestion.explanation}
+                        </span>
+                      ) : (
+                        <span>
+                          <strong className="text-foreground">Market Benchmark:</strong> AI recommended rates available for {roleTitle || "this role"} in {city}.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
                     <button
                       type="button"
-                      key={r}
-                      onClick={() => setHourlyRate(r)}
-                      className={cn(
-                        "px-2.5 py-0.5 rounded-lg text-xs font-mono transition-all cursor-pointer border",
-                        hourlyRate === r
-                          ? "border-primary bg-primary text-primary-foreground font-bold shadow-2xs"
-                          : "border-border/70 bg-card text-foreground hover:border-primary/40"
-                      )}
+                      disabled={loadingAiRate}
+                      onClick={() => handleFetchAiRateSuggestion()}
+                      className="text-[10px] font-bold text-muted-foreground hover:text-foreground cursor-pointer px-2 py-1 rounded-lg border border-border/80 bg-background hover:bg-muted"
                     >
-                      ₹{r}
+                      {loadingAiRate ? "Calculating..." : "Recalculate with AI"}
                     </button>
-                  ))}
+                    {aiRateSuggestion && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHourlyRate(aiRateSuggestion.recommendedHourlyRate);
+                          toast.success(`Applied AI market rate: ₹${aiRateSuggestion.recommendedHourlyRate}/hr`);
+                        }}
+                        className="text-[10px] font-bold bg-primary text-white hover:bg-primary-hover px-2.5 py-1 rounded-lg shadow-xs cursor-pointer"
+                      >
+                        Apply ₹{aiRateSuggestion.recommendedHourlyRate}/hr
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 

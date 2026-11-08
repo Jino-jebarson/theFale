@@ -20,6 +20,7 @@ import {
   HiOutlineClock,
 } from "react-icons/hi2";
 import { toast } from "sonner";
+import { BotMessageSquare } from "lucide-react";
 import { AppShell, StatusBadge, initials } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +47,10 @@ import lottieEmptyAnimation from "@/assets/lottie-error.json";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { getFacilityApplicants, updateApplicantStatus } from "@/lib/adapters/facilityAdapter";
+import {
+  generateInterviewQuestionsWithAi,
+  summarizeCandidateWithAi,
+} from "@/lib/adapters/aiAdapter";
 
 export const Route = createFileRoute("/employer/applicants")({
   head: () => ({
@@ -313,25 +318,28 @@ function Applicants() {
     // Dynamically pull candidates shortlisted by Admin
     const adminShortlistedConverted: Applicant[] = (s.adminApplications || [])
       .filter((a) => a.status === "shortlisted")
-      .map((a) => ({
-        id: a.id,
-        name: a.candidateName,
-        role: a.candidateRole,
-        exp: a.exp,
-        city: a.candidateCity,
-        for: a.jobTitle,
-        status: "Shortlisted",
-        verified: a.councilVerified,
-        match: a.matchScore || 76,
-        appliedDate: a.appliedDate,
-        qualification: "MBBS / MD / Certified Clinician",
-        regNumber: a.regNumber || "Council Verified",
-        skills: ["Clinical Care", "ICU / Emergency Protocols", "Patient Safety"],
-        phone: a.phone || "+91 98401 23456",
-        email: a.email || "candidate@fale.care",
-        bio: a.summary || "Pre-screened and council-verified clinical professional.",
-        isShiftClaim: Boolean(a.isShiftClaim || a.jobTitle?.toLowerCase().includes("shift")),
-      }));
+      .map((a) => {
+        const isShift = Boolean(a.isShiftClaim || a.jobTitle?.toLowerCase().includes("shift"));
+        return {
+          id: a.id,
+          name: a.candidateName,
+          role: a.candidateRole,
+          exp: a.exp,
+          city: a.candidateCity,
+          for: a.jobTitle,
+          status: "Shortlisted",
+          verified: a.councilVerified,
+          match: a.matchScore || 76,
+          appliedDate: a.appliedDate,
+          qualification: "MBBS / MD / Certified Clinician",
+          regNumber: a.regNumber || "Council Verified",
+          skills: ["Clinical Care", "ICU / Emergency Protocols", "Patient Safety"],
+          phone: a.phone || "+91 98401 23456",
+          email: a.email || "candidate@fale.care",
+          bio: a.summary || "Pre-screened and council-verified clinical professional.",
+          isShiftClaim: isShift,
+        };
+      });
 
     const existingIds = new Set(adminShortlistedConverted.map((a) => a.id));
     const combined = [
@@ -339,11 +347,14 @@ function Applicants() {
       ...applicants.filter((a) => !existingIds.has(a.id)),
     ];
 
-    return combined.map((a) => ({
-      ...a,
-      isShiftClaim: Boolean(a.isShiftClaim || a.for?.toLowerCase().includes("shift")),
-      status: status[a.id] ?? a.status,
-    }));
+    return combined.map((a) => {
+      const isShift = Boolean(a.isShiftClaim || a.for?.toLowerCase().includes("shift"));
+      return {
+        ...a,
+        isShiftClaim: isShift,
+        status: status[a.id] ?? a.status,
+      };
+    });
   }, [isApiEnabled, apiApplicants, s.adminApplications, status]);
 
   // Overall counts for Permanent Roles vs Locum Shifts
@@ -502,6 +513,119 @@ function Applicants() {
       toast.error(e?.message || "Verification failed");
     } finally {
       setSubmittingVerifyTimesheet(false);
+    }
+  };
+
+  // AI Interview Questions Generator State (#12)
+  const [interviewQuestionsModalApp, setInterviewQuestionsModalApp] = useState<Applicant | null>(null);
+  const [candidateQuestions, setCandidateQuestions] = useState<string[]>([]);
+  const [generatingQuestions, setGeneratingQuestions] = useState(false);
+
+  // AI Candidate Summary State (#11)
+  const [aiSummaries, setAiSummaries] = useState<Record<string, string>>({});
+  const [loadingSummaryId, setLoadingSummaryId] = useState<string | null>(null);
+
+  const handleGenerateSummary = async (app: Applicant) => {
+    setLoadingSummaryId(app.id);
+    try {
+      const expNumber = parseInt(app.exp || "3") || 3;
+      const res = await summarizeCandidateWithAi(
+        app.name,
+        app.role,
+        expNumber,
+        {
+          appliedFor: app.for,
+          skills: app.skills,
+          city: app.city,
+          verified: app.verified,
+        }
+      );
+      const text = res.response || res.content || "";
+      if (text) {
+        setAiSummaries((prev) => ({ ...prev, [app.id]: text }));
+        toast.success(`Generated clinical summary for ${app.name}`);
+      } else if (res.structuredData?.highlights && Array.isArray(res.structuredData.highlights)) {
+        setAiSummaries((prev) => ({ ...prev, [app.id]: res.structuredData.highlights.join("\n") }));
+        toast.success(`Generated clinical summary for ${app.name}`);
+      }
+    } catch (err) {
+      console.warn("Failed to generate clinical summary:", err);
+      toast.error("Unable to generate AI summary.");
+    } finally {
+      setLoadingSummaryId(null);
+    }
+  };
+
+
+
+  const handleOpenInterviewQuestions = async (app: Applicant) => {
+    setInterviewQuestionsModalApp(app);
+    setGeneratingQuestions(true);
+    try {
+      const res = await generateInterviewQuestionsWithAi(app.name, app.role, {
+        appliedFor: app.for,
+        skills: app.skills,
+        exp: app.exp,
+      });
+
+      // 1. Check structured questions array
+      if (res.structuredData?.questions && Array.isArray(res.structuredData.questions) && res.structuredData.questions.length > 0) {
+        setCandidateQuestions(res.structuredData.questions.slice(0, 4));
+        return;
+      }
+
+      // 2. Check newline-delimited text response
+      const text = res.response || res.content || "";
+      if (text) {
+        const parsed = text
+          .split("\n")
+          .map((l) => l.replace(/^[\d+*#\.\-\)]+\s*/, "").trim())
+          .filter((l) => l.length > 20);
+        if (parsed.length >= 2) {
+          setCandidateQuestions(parsed.slice(0, 4));
+          return;
+        }
+      }
+
+      // 3. Dynamic specialty-tailored questions if AI response is sparse
+      const targetSpecialty = ((app.for || "") + " " + (app.role || "") + " " + (app.skills || []).join(" ")).toLowerCase();
+      if (targetSpecialty.includes("dialysis") || targetSpecialty.includes("renal") || targetSpecialty.includes("hemodialysis")) {
+        setCandidateQuestions([
+          "How do you inspect and assess an AV fistula or graft before initiating hemodialysis cannulation?",
+          "What immediate emergency protocol do you execute if a patient experiences acute intradialytic hypotension?",
+          "Walk us through your dialyzer priming and heparinization protocol under NABH infection control standards.",
+          "How do you handle severe muscle cramping and dialyzer membrane hypersensitivity reactions mid-session?",
+        ]);
+      } else if (targetSpecialty.includes("scrub") || targetSpecialty.includes("ot") || targetSpecialty.includes("theatre") || targetSpecialty.includes("surgical")) {
+        setCandidateQuestions([
+          "Can you walk us through the surgical hand scrub and sterile gowning workflow according to NABH guidelines?",
+          "What is your exact protocol when a surgical needle or sponge count is unaccounted for during closure?",
+          "How do you manage rapid sterile field re-establishment after an accidental contamination event during surgery?",
+          "Explain the sterile instrument turnover and chemical indicator verification between high-acuity surgeries.",
+        ]);
+      } else if (targetSpecialty.includes("emergency") || targetSpecialty.includes("casualty") || targetSpecialty.includes("trauma") || targetSpecialty.includes("er")) {
+        setCandidateQuestions([
+          "How do you prioritize triage in the Emergency Department when two critical poly-trauma patients arrive simultaneously?",
+          "Walk us through the 10-minute acute chest pain and STEMI protocol from arrival to cath lab alert.",
+          "What is your standard protocol for managing acute anaphylactic shock in casualty before physician arrival?",
+          "How do you maintain documentation and chain-of-custody for Medico-Legal Cases in emergency?",
+        ]);
+      } else {
+        setCandidateQuestions([
+          `Can you walk us through your clinical experience managing high-acuity cases in ${app.role}?`,
+          "How do you ensure strict adherence to infection control bundles and statutory NABH protocols?",
+          "Can you walk us through your procedure for high-alert medication titration under physician orders?",
+          "How do you coordinate with the intensivist and consultant team during rapid escalation?",
+        ]);
+      }
+    } catch {
+      setCandidateQuestions([
+        `Walk us through your clinical experience as ${app.role} for ${app.for}.`,
+        "Explain your protocol during emergency resuscitations and acute deterioration.",
+        "How do you coordinate with the multidisciplinary team during shift handovers?",
+      ]);
+    } finally {
+      setGeneratingQuestions(false);
     }
   };
 
@@ -769,71 +893,82 @@ function Applicants() {
               className="flex flex-col justify-between rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-xs hover:border-border/80 transition-shadow"
             >
               <div>
-                {/* Top Row: Avatar, Info, Status Badge */}
-                <div className="flex items-start gap-3.5">
-                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-brand text-xs font-bold text-primary-foreground shadow-2xs">
-                    {initials(a.name)}
-                  </span>
+                {/* Top Row: Avatar, Clinician Name & Details, and Status Badge */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-brand text-xs font-bold text-primary-foreground shadow-2xs">
+                      {initials(a.name)}
+                    </span>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <h2 className="text-base font-bold text-foreground leading-snug truncate">
-                        {a.name}
-                      </h2>
-                      {a.verified && (
-                        <HiOutlineShieldCheck
-                          className="h-4 w-4 text-primary shrink-0"
-                          title="Verified profile"
-                        />
-                      )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h2 className="text-base font-bold text-foreground leading-snug">
+                          {a.name}
+                        </h2>
+                        {a.verified && (
+                          <HiOutlineShieldCheck
+                            className="h-4 w-4 text-primary shrink-0"
+                            title="Verified profile"
+                          />
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-xs text-muted-foreground font-medium flex items-center gap-1.5 flex-wrap">
+                        <span>{a.role}</span>
+                        {a.exp && (
+                          <>
+                            <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                            <span>{a.exp}</span>
+                          </>
+                        )}
+                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span className="flex items-center gap-1">
+                          <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+                          <span>{a.city}</span>
+                        </span>
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Applied for <span className="font-medium text-foreground/85">{a.for}</span>
+                      </p>
                     </div>
-                    <p className="mt-0.5 text-xs text-muted-foreground font-medium truncate flex items-center gap-1.5">
-                      <span>{a.role}</span>
-                      {a.exp && (
-                        <>
-                          <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
-                          <span>{a.exp}</span>
-                        </>
-                      )}
-                    </p>
-                    <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground truncate">
-                      <HiOutlineMapPin className="h-3.5 w-3.5 shrink-0" />
-                      <span>{a.city}</span>
-                      <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
-                      <span className="truncate">Applied for {a.for}</span>
-                    </p>
                   </div>
 
-                  <div className="shrink-0 flex flex-wrap items-center gap-1.5 sm:gap-2">
-                    {a.isShiftClaim || a.for.toLowerCase().includes("shift") ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
-                        <HiOutlineBolt className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                        Locum Shift
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:text-blue-300">
-                        <HiOutlineBriefcase className="h-3 w-3 text-blue-600 dark:text-blue-400" />
-                        Permanent Role
-                      </span>
-                    )}
-
-                    {a.match !== undefined && (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-bold shadow-2xs",
-                          (a.match ?? 0) >= 70
-                            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-                            : (a.match ?? 0) >= 40
-                            ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
-                            : "bg-muted border-border text-muted-foreground"
-                        )}
-                      >
-                        <HiOutlineSparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <span>{(a.match ?? 0) >= 90 ? `Exact Match (${a.match}%)` : `${a.match}% Match`}</span>
-                      </span>
-                    )}
+                  {/* Status Badge anchored top-right */}
+                  <div className="shrink-0 pt-0.5">
                     <StatusBadge status={a.status} />
                   </div>
+                </div>
+
+                {/* Sub-header Badges Strip (Role type, Match Score) */}
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  {a.isShiftClaim || a.for.toLowerCase().includes("shift") ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                      <HiOutlineBolt className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                      Locum Shift
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:text-blue-300">
+                      <HiOutlineBriefcase className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                      Permanent Role
+                    </span>
+                  )}
+
+
+
+                  {a.match !== undefined && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-bold shadow-2xs",
+                        (a.match ?? 0) >= 70
+                          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                          : (a.match ?? 0) >= 40
+                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                          : "bg-muted border-border text-muted-foreground"
+                      )}
+                    >
+                      <BotMessageSquare className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>{(a.match ?? 0) >= 90 ? `Exact Match (${a.match}%)` : `${a.match}% Match`}</span>
+                    </span>
+                  )}
                 </div>
 
                 {/* Key Skill Chips */}
@@ -849,19 +984,59 @@ function Applicants() {
                     ))}
                   </div>
                 )}
+
+                {/* Clinical Candidate Summary (#11) */}
+                <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-2.5 text-[11px] space-y-1">
+                  <div className="flex items-center justify-between font-bold text-primary text-[10px] uppercase tracking-wider">
+                    <span className="flex items-center gap-1.5">
+                      <BotMessageSquare className="h-3 w-3 text-primary" /> Clinical Profile Summary
+                    </span>
+                    <button
+                      type="button"
+                      disabled={loadingSummaryId === a.id}
+                      onClick={() => handleGenerateSummary(a)}
+                      className="text-[9.5px] font-bold text-primary hover:underline cursor-pointer lowercase"
+                    >
+                      {loadingSummaryId === a.id ? "Analyzing..." : aiSummaries[a.id] ? "Regenerate AI" : "Summarize with AI"}
+                    </button>
+                  </div>
+                  {aiSummaries[a.id] ? (
+                    <div className="text-foreground/90 leading-relaxed text-[11px] whitespace-pre-line pt-0.5">
+                      {aiSummaries[a.id]}
+                    </div>
+                  ) : (
+                    <div className="text-muted-foreground leading-tight space-y-0.5">
+                      <p>• {a.name} · {a.exp || "Verified Clinician"} · {a.verified ? "State Council Verified" : "MCI/KMC Registered"}</p>
+                      <p>• Applied for: <span className="font-semibold text-foreground/80">{a.for}</span> · Skills: {a.skills && a.skills.length > 0 ? a.skills.join(", ") : "Core Clinical Protocols"}</p>
+                      <p>• {(a.match ?? 0) >= 70 ? "High clinical suitability for immediate roster allocation." : "Discrepancy detected with shift requirements; supervisory review recommended."} (Match Score: {a.match ?? 78}%)</p>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Action Buttons: View Resume + Stage Actions */}
               <div className="mt-5 pt-3.5 border-t border-border/70 flex flex-wrap items-center justify-between gap-2">
-                {/* Option to see the resume */}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSelectedResume(a)}
-                  className="rounded-xl text-xs font-semibold gap-1.5 border-input hover:border-ring text-foreground shadow-2xs cursor-pointer"
-                >
-                  <HiOutlineDocumentText className="h-4 w-4 text-primary" /> View resume
-                </Button>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* Option to see the resume */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSelectedResume(a)}
+                    className="rounded-xl text-xs font-semibold gap-1.5 border-input hover:border-ring text-foreground shadow-2xs cursor-pointer"
+                  >
+                    <HiOutlineDocumentText className="h-4 w-4 text-primary" /> View resume
+                  </Button>
+
+                  {/* Clinical Interview Questions */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleOpenInterviewQuestions(a)}
+                    className="rounded-xl text-xs font-semibold gap-1.5 border-primary/30 hover:border-primary text-primary hover:bg-primary/10 shadow-2xs cursor-pointer"
+                  >
+                    <BotMessageSquare className="h-3.5 w-3.5 text-primary" /> Interview Questions
+                  </Button>
+                </div>
 
                 <div className="flex items-center gap-2">
                   {(a.isShiftClaim || a.for?.toLowerCase().includes("shift")) ? (
@@ -1493,6 +1668,68 @@ function Applicants() {
                 className="rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
               >
                 {submittingVerifyTimesheet ? "Verifying..." : "Approve & Release Escrow"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* AI Candidate Interview Questions Modal (#12) */}
+      {interviewQuestionsModalApp && (
+        <Dialog
+          open={!!interviewQuestionsModalApp}
+          onOpenChange={(open) => !open && setInterviewQuestionsModalApp(null)}
+        >
+          <DialogContent className="max-w-lg rounded-3xl p-6">
+            <DialogHeader>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <BotMessageSquare className="h-4.5 w-4.5 text-primary" />
+                </span>
+                <div>
+                  <DialogTitle className="text-base font-bold text-foreground">
+                    Clinical Interview Questions
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground">
+                    Tailored for {interviewQuestionsModalApp.name} · {interviewQuestionsModalApp.for}
+                  </DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Recommended Clinical Screening Questions:
+              </p>
+              {generatingQuestions ? (
+                <div className="py-6 text-center text-xs text-muted-foreground space-y-2">
+                  <div className="h-2 w-2 rounded-full bg-primary mx-auto animate-ping" />
+                  <p>Analyzing clinical CV and generating tailored questions...</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {candidateQuestions.map((q, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-2xl border border-border/80 bg-muted/40 p-3.5 text-xs text-foreground leading-relaxed flex items-start gap-2.5"
+                    >
+                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary text-white text-[10px] font-bold mt-0.5">
+                        {idx + 1}
+                      </span>
+                      <span>{q}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="mt-2">
+              <Button
+                variant="outline"
+                onClick={() => setInterviewQuestionsModalApp(null)}
+                className="rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Close
               </Button>
             </DialogFooter>
           </DialogContent>

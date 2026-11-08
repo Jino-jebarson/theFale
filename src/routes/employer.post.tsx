@@ -7,7 +7,7 @@ import {
   HiOutlineFire,
   HiOutlineCheck,
 } from "react-icons/hi2";
-import { RiVerifiedBadgeFill } from "react-icons/ri";
+import { RiVerifiedBadgeFill, RiRobot2Line } from "react-icons/ri";
 import { toast } from "sonner";
 import { AppShell, PageHead } from "@/components/fale/AppShell";
 import { OrgMark } from "@/components/fale/JobCard";
@@ -19,6 +19,7 @@ import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { postFacilityJob } from "@/lib/adapters/facilityAdapter";
+import { generateJobDescriptionWithAi } from "@/lib/adapters/aiAdapter";
 
 export const Route = createFileRoute("/employer/post")({
   head: () => ({
@@ -175,6 +176,7 @@ function Post() {
   const [description, setDescription] = useState(presets[0].desc);
   const [requireCouncilReg, setRequireCouncilReg] = useState(true);
   const [isUrgent, setIsUrgent] = useState(false);
+  const [generatingJd, setGeneratingJd] = useState(false);
 
   const cityOptions = useMemo(() => {
     const base = [hospitalCity, ...indianCities];
@@ -548,9 +550,31 @@ function Post() {
 
               {/* Responsibilities & Requirements */}
               <div className="space-y-1.5">
-                <label htmlFor="responsibilities-text" className="text-xs font-semibold text-foreground block">
-                  Responsibilities &amp; requirements <span className="text-destructive">*</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="responsibilities-text" className="text-xs font-semibold text-foreground block">
+                    Responsibilities &amp; requirements <span className="text-destructive">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setGeneratingJd(true);
+                      try {
+                        const res = await generateJobDescriptionWithAi(title || profession || "Healthcare Specialist", dept || "Hospital Department");
+                        if (res.response) {
+                          setDescription(res.response);
+                          toast.success("AI Generated NABH-Compliant Job Description!");
+                        }
+                      } finally {
+                        setGeneratingJd(false);
+                      }
+                    }}
+                    disabled={generatingJd}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 border border-primary/25 px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/20 transition-all cursor-pointer"
+                  >
+                    <RiRobot2Line className="h-3.5 w-3.5 text-primary" />
+                    <span>{generatingJd ? "Generating..." : "Auto-Generate Job Description"}</span>
+                  </button>
+                </div>
                 <textarea
                   id="responsibilities-text"
                   required

@@ -43,6 +43,8 @@ import {
   RiVerifiedBadgeFill,
 } from "react-icons/ri";
 import { toast } from "sonner";
+import { BotMessageSquare } from "lucide-react";
+import { moderateHuddlePostWithAi } from "@/lib/adapters/aiAdapter";
 import { AdminLayout } from "@/components/fale/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -139,6 +141,93 @@ function AdminHuddleModeration() {
   // Inspection Drawer
   const [selectedPost, setSelectedPost] = useState<HuddlePost | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+
+  // AI Moderation Scan State (#17)
+  const [aiModerationResults, setAiModerationResults] = useState<Record<string, {
+    status: "SAFE" | "FLAGGED";
+    category: string;
+    rationale: string;
+    isApproved: boolean;
+  }>>({});
+  const [scanningPostId, setScanningPostId] = useState<string | null>(null);
+
+  const getPostAiModeration = (post: HuddlePost) => {
+    if (aiModerationResults[post.id]) return aiModerationResults[post.id];
+
+    const text = (post.text || "").toLowerCase();
+    const hasPhoneOrRecruiter = /(?:\+91|whatsapp|phone|call me|contact me|telegram|dm me|hiring alert)/i.test(text);
+    const hasPhi = /\b(?:uhid|mrd|ipd|opd|patient name|bed\s*#?\d+)\b/i.test(text) || post.reports.some((r) => r.toLowerCase().includes("privacy"));
+    const hasHarassment = /(fake|scam|fraud|cheat|stupid|idiot)/i.test(text);
+
+    const isFlagged = hasPhoneOrRecruiter || hasPhi || hasHarassment || post.reports.length > 0;
+    let category = "Clinical Knowledge Discussion";
+    let rationale = "Clean clinical knowledge exchange adhering to FALE clinical forum governance.";
+
+    if (hasPhi) {
+      category = "Patient Privacy Risk: PHI / Identifier pattern detected";
+      rationale = "Potential patient identification numbers or un-redacted clinical identifiers detected.";
+    } else if (hasPhoneOrRecruiter) {
+      category = "Spam Risk: Off-platform contact / solicitation identified";
+      rationale = "Direct phone number, WhatsApp contact solicitation, or off-platform recruitment detected.";
+    } else if (hasHarassment) {
+      category = "Community Policy Infraction: Hostile language detected";
+      rationale = "Hostile language or non-professional phrasing detected in peer clinical forum.";
+    } else if (post.reports.length > 0) {
+      category = "Community Flagged: Peer reports under review";
+      rationale = `Flagged by ${post.reports.length} peer clinical reports for administrative review.`;
+    }
+
+    return {
+      status: isFlagged ? ("FLAGGED" as const) : ("SAFE" as const),
+      category,
+      rationale,
+      isApproved: !isFlagged,
+    };
+  };
+
+  const handleScanPostWithAi = async (post: HuddlePost) => {
+    setScanningPostId(post.id);
+    try {
+      const res = await moderateHuddlePostWithAi(post.text);
+      const text = res.response || res.content || "";
+      const sData = res.structuredData || {};
+      const lower = text.toLowerCase();
+      const isFlagged =
+        sData.status === "FLAGGED" ||
+        sData.isApproved === false ||
+        lower.startsWith("flagged") ||
+        lower.includes("flagged") ||
+        lower.includes("violation") ||
+        lower.includes("phi") ||
+        lower.includes("spam");
+
+      const category = sData.category || (isFlagged
+        ? lower.includes("phi") || lower.includes("patient") || lower.includes("identifier")
+          ? "Patient Privacy Risk: PHI / Identifier pattern detected"
+          : "Spam Risk: Off-platform contact / solicitation identified"
+        : "Community Safe: Verified Clinical Exchange");
+
+      const rationale = sData.rationale || text || (isFlagged
+        ? "Flagged by AI safety filters for potential policy infraction."
+        : "Clean clinical post adhering to community safety guidelines.");
+
+      setAiModerationResults((prev) => ({
+        ...prev,
+        [post.id]: {
+          status: isFlagged ? "FLAGGED" : "SAFE",
+          category,
+          rationale,
+          isApproved: !isFlagged,
+        },
+      }));
+      toast.success(`AI Moderation scan complete: ${isFlagged ? "Violation Detected" : "Clear"}`);
+    } catch (err: any) {
+      console.warn("AI Moderation failed:", err);
+      toast.error("Failed to run AI Moderation scan");
+    } finally {
+      setScanningPostId(null);
+    }
+  };
 
   // Dialog states
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -703,13 +792,8 @@ function AdminHuddleModeration() {
             ) : (
               <div className="space-y-3">
                 {filteredFlagged.map((post) => {
-                  const isSpam =
-                    post.text.toLowerCase().includes("whatsapp") ||
-                    post.text.toLowerCase().includes("+91");
-                  const isPrivacy =
-                    post.text.toLowerCase().includes("uhid") ||
-                    post.text.toLowerCase().includes("mrd") ||
-                    post.reports.some((r) => r.toLowerCase().includes("privacy"));
+                  const modScan = getPostAiModeration(post);
+                  const isViolation = modScan.status === "FLAGGED";
 
                   return (
                     <div
@@ -739,18 +823,43 @@ function AdminHuddleModeration() {
 
                         {/* Status badges */}
                         <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0">
-                          <span className="rounded-md bg-primary/10 border border-primary/20 text-primary px-2 py-0.5 text-[10px] font-bold flex items-center gap-1 whitespace-nowrap">
+                          <span
+                            className={cn(
+                              "rounded-md border px-2 py-0.5 text-[10px] font-bold flex items-center gap-1 whitespace-nowrap",
+                              isViolation
+                                ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                                : "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                            )}
+                          >
                             <RiAlertLine className="h-3 w-3 shrink-0" />
-                            {isSpam
-                              ? "Recruiter Spam"
-                              : isPrivacy
-                                ? "Privacy Breach"
-                                : "Community Flagged"}
+                            {isViolation ? "Flagged Review" : "Community Safe"}
                           </span>
                           <span className="text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full whitespace-nowrap">
                             {post.reports.length} report{post.reports.length > 1 ? "s" : ""}
                           </span>
                         </div>
+                      </div>
+
+                      {/* Community Moderation Guardrail Analysis */}
+                      <div
+                        className={cn(
+                          "rounded-lg border p-2.5 text-[11px] flex flex-wrap items-center justify-between gap-1.5",
+                          isViolation
+                            ? "bg-amber-500/5 border-amber-500/20"
+                            : "bg-emerald-500/5 border-emerald-500/20"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "font-bold flex items-center gap-1.5",
+                            isViolation ? "text-amber-800 dark:text-amber-300" : "text-emerald-800 dark:text-emerald-300"
+                          )}
+                        >
+                          <BotMessageSquare className="h-3.5 w-3.5" /> Moderation Scan:
+                        </span>
+                        <span className="text-[10px] font-semibold text-foreground/85">
+                          {modScan.category}
+                        </span>
                       </div>
 
                       {/* Flag report reasons list */}
@@ -1787,6 +1896,85 @@ function AdminHuddleModeration() {
                   </ul>
                 </div>
               )}
+
+              {/* AI Community Moderation Scan Card (#17) */}
+              {(() => {
+                const modScan = getPostAiModeration(selectedPost);
+                const isScanning = scanningPostId === selectedPost.id;
+                const isViolation = modScan.status === "FLAGGED";
+
+                return (
+                  <div
+                    className={cn(
+                      "rounded-2xl border p-4 sm:p-5 space-y-3 shadow-xs transition-colors",
+                      isViolation
+                        ? "border-amber-500/30 bg-amber-500/5"
+                        : "border-emerald-500/30 bg-emerald-500/5"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "grid h-7 w-7 place-items-center rounded-lg",
+                            isViolation ? "bg-amber-500/10 text-amber-600" : "bg-emerald-500/10 text-emerald-600"
+                          )}
+                        >
+                          <BotMessageSquare className="h-4 w-4" />
+                        </span>
+                        <span
+                          className={cn(
+                            "text-xs font-bold uppercase tracking-wider",
+                            isViolation ? "text-amber-800 dark:text-amber-300" : "text-emerald-800 dark:text-emerald-300"
+                          )}
+                        >
+                          AI Community Moderation Scan
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "text-[10px] font-extrabold px-2 py-0.5 rounded-full border",
+                            isViolation
+                              ? "text-amber-700 dark:text-amber-300 bg-amber-500/15 border-amber-500/30"
+                              : "text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 border-emerald-500/30"
+                          )}
+                        >
+                          {isViolation ? "Policy Violation Flagged" : "Community Safe"}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isScanning}
+                          onClick={() => handleScanPostWithAi(selectedPost)}
+                          className={cn(
+                            "h-6 px-2 text-[10px] font-bold rounded-md gap-1 cursor-pointer",
+                            isViolation
+                              ? "border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
+                              : "border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+                          )}
+                        >
+                          <BotMessageSquare className="h-3 w-3" />
+                          <span>{isScanning ? "Scanning with AI..." : "Re-scan Content"}</span>
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="text-xs text-foreground/90 leading-relaxed space-y-1.5">
+                      <p
+                        className={cn(
+                          "font-bold text-[11px]",
+                          isViolation ? "text-amber-800 dark:text-amber-300" : "text-emerald-800 dark:text-emerald-300"
+                        )}
+                      >
+                        Category: {modScan.category}
+                      </p>
+                      <p className="text-foreground/80 leading-relaxed text-[11px]">
+                        {modScan.rationale}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Full Discussion Content */}
               <div className="space-y-1.5">

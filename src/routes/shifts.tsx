@@ -259,102 +259,100 @@ function Shifts() {
         if (sort === "rate") return bRate - aRate;
         return a.date.localeCompare(b.date);
       });
-}, [shiftsWithMatch, q, cityF, timingF, sort]);
+  }, [shiftsWithMatch, q, cityF, timingF, sort]);
 
-const appliedShiftObjects = useMemo(() => {
-  return allShifts.filter((sh) => claimedShiftIds.includes(sh.id));
-}, [allShifts, claimedShiftIds]);
+  const appliedShiftObjects = useMemo(() => {
+    return allShifts.filter((sh) => claimedShiftIds.includes(sh.id));
+  }, [allShifts, claimedShiftIds]);
 
-const appliedCount = isApiEnabled ? claimedShiftIds.length : s.shiftApps.length;
+  const appliedCount = isApiEnabled ? claimedShiftIds.length : s.shiftApps.length;
 
-const confirmedCount = useMemo(() => {
-  if (isApiEnabled) {
-    return myClaims.filter((c) => c.status === "CONFIRMED" || c.status === "CHECKED_IN").length;
-  }
-  return 0;
-}, [isApiEnabled, myClaims]);
-
-const pendingReviewCount = useMemo(() => {
-  if (isApiEnabled) {
-    return myClaims.filter((c) => !["CONFIRMED", "CHECKED_IN", "COMPLETED", "REJECTED", "CANCELLED"].includes(c.status)).length;
-  }
-  return s.shiftApps.length;
-}, [isApiEnabled, myClaims, s.shiftApps]);
-
-const totalPotentialEarnings = useMemo(() => {
-  return appliedShiftObjects.reduce((acc, sh) => {
-    const r = typeof sh.rate === "number" ? sh.rate : (sh as any).rateNumber || 0;
-    const h = sh.hours || 8;
-    const pay = sh.totalPayNumber || (r * h);
-    return acc + pay;
-  }, 0);
-}, [appliedShiftObjects]);
-
-const handleApply = async (id: string, title: string, org: string) => {
-  if (applyingId === id) return;
-
-  setApplyingId(id);
-  try {
+  const confirmedCount = useMemo(() => {
     if (isApiEnabled) {
-      const claim = await claimShift(id);
-      setMyClaims((prev) => [...prev.filter((c) => c.shiftId !== id), claim]);
+      return myClaims.filter((c) => c.status === "CONFIRMED" || c.status === "CHECKED_IN").length;
     }
-    const newAdminApp = {
-      id: "claim-" + Date.now(),
-      candidateName: s.profile?.name || (isStudent ? "Clinical Student" : "Candidate"),
-      candidateRole: s.profile?.course || s.profile?.role || "Healthcare Clinician",
-      exp: s.profile?.exp || (isStudent ? "Final Year Intern" : "1 Year"),
-      candidateCity: s.profile?.city || "Chennai",
-      jobTitle: `${title} (Locum Shift)`,
-      status: "shortlisted",
-      councilVerified: true,
-      matchScore: 96,
-      appliedDate: "Today",
-      regNumber: s.profile?.regNo || (isStudent ? "College Verified" : "Council Verified"),
-      phone: s.profile?.phone || "+91 98401 23456",
-      email: s.profile?.email || "candidate@fale.care",
-      summary: `Applied for ${title} locum shift duty coverage.`,
-    };
-    setState((x) => ({
-      shiftApps: Array.from(new Set([...(x.shiftApps || []), id])),
-      adminApplications: [newAdminApp, ...(x.adminApplications || [])],
-    }));
-    setApiShifts((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, hasClaimed: true } : item))
-    );
-    const hasLinkedPayout = Boolean(s.candidatePayoutMethod && (s.candidatePayoutMethod.upiId || s.candidatePayoutMethod.accountNumber));
-    if (!hasLinkedPayout) {
-      toast.success("Shift claimed successfully!", {
-        description: `You're confirmed for ${title} at ${org}. Tip: Link your UPI or Bank in Earnings to receive automated 24-hr payout after duty signoff!`,
-      });
-    } else {
-      toast.success("Shift claimed successfully!", {
-        description: `Your interest in ${title} at ${org} was submitted. Hospital notified!`,
-      });
+    return 0;
+  }, [isApiEnabled, myClaims]);
+
+  const pendingReviewCount = useMemo(() => {
+    if (isApiEnabled) {
+      return myClaims.filter((c) => !["CONFIRMED", "CHECKED_IN", "COMPLETED", "REJECTED", "CANCELLED"].includes(c.status)).length;
     }
-  } catch (err: any) {
-    const msg = err?.message || "";
-    if (msg.toLowerCase().includes("already claimed") || err?.status === 409) {
-      // Automatically disable and mark shift as applied in UI
+    return s.shiftApps.length;
+  }, [isApiEnabled, myClaims, s.shiftApps]);
+
+  const totalPotentialEarnings = useMemo(() => {
+    return appliedShiftObjects.reduce((acc, sh) => {
+      const r = typeof sh.rate === "number" ? sh.rate : (sh as any).rateNumber || 0;
+      const h = sh.hours || 8;
+      const pay = sh.totalPayNumber || (r * h);
+      return acc + pay;
+    }, 0);
+  }, [appliedShiftObjects]);
+
+  const handleApply = async (id: string, title: string, org: string) => {
+    if (applyingId === id) return;
+
+    setApplyingId(id);
+    try {
+      if (isApiEnabled) {
+        const claim = await claimShift(id);
+        setMyClaims((prev) => [...prev.filter((c) => c.shiftId !== id), claim]);
+      }
+      const newAdminApp = {
+        id: "claim-" + Date.now(),
+        candidateName: s.profile?.name || (isStudent ? "Clinical Student" : "Candidate"),
+        candidateRole: s.profile?.course || s.profile?.role || "Healthcare Clinician",
+        exp: s.profile?.exp || (isStudent ? "Final Year Intern" : "1 Year"),
+        candidateCity: s.profile?.city || "Chennai",
+        jobTitle: `${title} (Locum Shift)`,
+        status: "shortlisted",
+        councilVerified: true,
+        matchScore: 96,
+        appliedDate: "Today",
+        regNumber: s.profile?.regNo || (isStudent ? "College Verified" : "Council Verified"),
+        phone: s.profile?.phone || "+91 98401 23456",
+        email: s.profile?.email || "candidate@fale.care",
+        summary: `Applied for ${title} locum shift duty coverage.`,
+      };
       setState((x) => ({
         shiftApps: Array.from(new Set([...(x.shiftApps || []), id])),
+        adminApplications: [newAdminApp, ...(x.adminApplications || [])],
       }));
       setApiShifts((prev) =>
         prev.map((item) => (item.id === id ? { ...item, hasClaimed: true } : item))
       );
-      getMyClaims().then((claims) => setMyClaims(claims)).catch(() => { });
-      toast.info("Shift already claimed", {
-        description: "You have already claimed a slot for this shift. Check status under review.",
-      });
-    } else {
-      toast.error("Shift claim failed", {
-        description: msg || "Slot unavailable or already filled.",
-      });
+      const hasLinkedPayout = Boolean(s.candidatePayoutMethod && (s.candidatePayoutMethod.upiId || s.candidatePayoutMethod.accountNumber));
+      if (!hasLinkedPayout) {
+        toast.success("Shift claimed successfully!", {
+          description: `You're confirmed for ${title} at ${org}. Tip: Link your UPI or Bank in Earnings to receive automated 24-hr payout after duty signoff!`,
+        });
+      } else {
+        toast.success("Shift claimed successfully!", {
+          description: `Your interest in ${title} at ${org} was submitted. Hospital notified!`,
+        });
+      }
+    } catch (err: any) {
+      const msg = err?.message || "";
+      if (msg.toLowerCase().includes("already claimed") || err?.status === 409) {
+        setState((x) => ({
+          shiftApps: Array.from(new Set([...(x.shiftApps || []), id])),
+        }));
+        setApiShifts((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, hasClaimed: true } : item))
+        );
+        toast.info("Shift already claimed", {
+          description: "You have already claimed a slot for this shift. Check status under review.",
+        });
+      } else {
+        toast.error("Shift claim failed", {
+          description: msg || "Slot unavailable or already filled.",
+        });
+      }
+    } finally {
+      setApplyingId(null);
     }
-  } finally {
-    setApplyingId(null);
-  }
-};
+  };
 
 const handleWithdraw = async (id: string, title: string) => {
   setWithdrawingId(id);
@@ -400,47 +398,47 @@ const handleCheckIn = async (claimId: string, shiftTitle: string) => {
   }
 };
 
-  const [signOffModalData, setSignOffModalData] = useState<{
-    claimId: string;
-    shiftTitle: string;
-    facilityName: string;
-    scheduledHours: number;
-    ratePerHour: number;
-  } | null>(null);
-  const [actualHoursWorked, setActualHoursWorked] = useState<number>(8);
-  const [submittingSignOff, setSubmittingSignOff] = useState(false);
+const [signOffModalData, setSignOffModalData] = useState<{
+  claimId: string;
+  shiftTitle: string;
+  facilityName: string;
+  scheduledHours: number;
+  ratePerHour: number;
+} | null>(null);
+const [actualHoursWorked, setActualHoursWorked] = useState<number>(8);
+const [submittingSignOff, setSubmittingSignOff] = useState(false);
 
-  const openSignOffModal = (claimId: string, sh: UiShiftItem) => {
-    const hours = Number(sh.hours) || 8;
-    const rate = typeof sh.rate === "number" ? sh.rate : (sh.rateNumber || 500);
-    setSignOffModalData({
-      claimId,
-      shiftTitle: sh.title,
-      facilityName: sh.org,
-      scheduledHours: hours,
-      ratePerHour: rate,
+const openSignOffModal = (claimId: string, sh: UiShiftItem) => {
+  const hours = Number(sh.hours) || 8;
+  const rate = typeof sh.rate === "number" ? sh.rate : (sh.rateNumber || 500);
+  setSignOffModalData({
+    claimId,
+    shiftTitle: sh.title,
+    facilityName: sh.org,
+    scheduledHours: hours,
+    ratePerHour: rate,
+  });
+  setActualHoursWorked(hours);
+};
+
+const handleConfirmDutySignOff = async () => {
+  if (!signOffModalData) return;
+  setSubmittingSignOff(true);
+  try {
+    const updated = await completeShift(signOffModalData.claimId, {
+      actualHours: actualHoursWorked,
     });
-    setActualHoursWorked(hours);
-  };
-
-  const handleConfirmDutySignOff = async () => {
-    if (!signOffModalData) return;
-    setSubmittingSignOff(true);
-    try {
-      const updated = await completeShift(signOffModalData.claimId, {
-        actualHours: actualHoursWorked,
-      });
-      setMyClaims((prev) => prev.map((c) => (c.id === signOffModalData.claimId ? updated : c)));
-      toast.success("Timesheet submitted for verification!", {
-        description: `Reported ${actualHoursWorked} hrs for "${signOffModalData.shiftTitle}". Hospital supervisor will review and verify for payout.`,
-      });
-      setSignOffModalData(null);
-    } catch (err: any) {
-      toast.error("Completion failed", { description: err?.message });
-    } finally {
-      setSubmittingSignOff(false);
-    }
-  };
+    setMyClaims((prev) => prev.map((c) => (c.id === signOffModalData.claimId ? updated : c)));
+    toast.success("Timesheet submitted for verification!", {
+      description: `Reported ${actualHoursWorked} hrs for "${signOffModalData.shiftTitle}". Hospital supervisor will review and verify for payout.`,
+    });
+    setSignOffModalData(null);
+  } catch (err: any) {
+    toast.error("Completion failed", { description: err?.message });
+  } finally {
+    setSubmittingSignOff(false);
+  }
+};
 
 const handleCompleteShift = async (claimId: string, shiftTitle: string) => {
   try {

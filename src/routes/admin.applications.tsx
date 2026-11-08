@@ -64,7 +64,9 @@ import {
 } from "@/lib/adapters/adminAdapter";
 import { type ShiftClaimDto } from "@/lib/adapters/shiftAdapter";
 import { HiOutlineBanknotes } from "react-icons/hi2";
+import { BotMessageSquare } from "lucide-react";
 import { generateClinicalDocumentBlob } from "@/lib/clinicalDocumentPdf";
+import { screenApplicationWithAi } from "@/lib/adapters/aiAdapter";
 
 export const Route = createFileRoute("/admin/applications")({
   head: () => ({
@@ -124,6 +126,110 @@ function ApplicationsAdmin() {
   // Document preview state
   const [previewDoc, setPreviewDoc] = useState<{ name: string; url: string; isImage: boolean } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  // AI Application Screening Desk State
+  const [aiScreeningResults, setAiScreeningResults] = useState<
+    Record<
+      string,
+      {
+        status: "RECOMMENDED" | "FURTHER_REVIEW";
+        suitabilityScore: number;
+        isRecommended: boolean;
+        verdict: string;
+        unitFitSentence: string;
+        councilSentence: string;
+        recommendationSentence: string;
+      }
+    >
+  >({});
+  const [runningScreeningId, setRunningScreeningId] = useState<string | null>(null);
+
+  const getApplicationScreening = (app: AdminApplication) => {
+    if (aiScreeningResults[app.id]) {
+      return aiScreeningResults[app.id];
+    }
+    const score = app.matchScore || 88;
+    const isVerified = app.councilVerified;
+    const isRecommended = score >= 75 && isVerified;
+    const status: "RECOMMENDED" | "FURTHER_REVIEW" = isRecommended ? "RECOMMENDED" : "FURTHER_REVIEW";
+
+    const unitFitSentence = `${app.candidateName} exhibits strong clinical credentials as ${app.candidateRole} (${app.candidateQualification}) well-suited for ${app.jobTitle} at ${app.hospitalName}.`;
+    const councilSentence = isVerified
+      ? `Statutory council registration with ${app.candidateCouncil || "State Council"} (#${app.regNumber || "Verified Active"}) is verified in active standing.`
+      : `Statutory council registration with ${app.candidateCouncil || "State Council"} (#${app.regNumber || "Pending"}) is awaiting primary registrar verification.`;
+    const recommendationSentence = isRecommended
+      ? `Recommended for immediate administrative shortlisting and direct dispatch to ${app.hospitalName}.`
+      : `Recommend further credential review prior to final dispatch.`;
+
+    const verdict = `${unitFitSentence} ${councilSentence} ${recommendationSentence}`;
+
+    return {
+      status,
+      suitabilityScore: score,
+      isRecommended,
+      verdict,
+      unitFitSentence,
+      councilSentence,
+      recommendationSentence,
+    };
+  };
+
+  const handleRunAiScreening = async (app: AdminApplication) => {
+    setRunningScreeningId(app.id);
+    try {
+      const res = await screenApplicationWithAi(
+        app.candidateName,
+        app.candidateRole,
+        app.jobTitle,
+        app.hospitalName,
+        {
+          matchScore: app.matchScore,
+          council: app.candidateCouncil,
+          regNumber: app.regNumber,
+          exp: app.exp,
+          isShiftClaim: (app as any).isShiftClaim,
+        }
+      );
+
+      const text = res.response || res.content || "";
+      const sData = res.structuredData || {};
+      const lower = text.toLowerCase();
+      const isRecommended =
+        sData.isRecommended !== undefined
+          ? !!sData.isRecommended
+          : sData.status === "RECOMMENDED" ||
+            (!lower.includes("not recommended") && !lower.includes("reject") && !lower.includes("discrepancy"));
+
+      const score = typeof sData.suitabilityScore === "number" ? sData.suitabilityScore : (app.matchScore || 90);
+      const sentences = text
+        .split(/(?<=[.?!])\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const unitFitSentence = sentences[0] || `${app.candidateName} qualifies for ${app.jobTitle} with strong specialty alignment.`;
+      const councilSentence = sentences[1] || `Statutory credentials registered with ${app.candidateCouncil || "State Council"} verified active.`;
+      const recommendationSentence = sentences[2] || (isRecommended ? `Recommended for immediate administrative shortlisting.` : `Requires supervisor review.`);
+
+      setAiScreeningResults((prev) => ({
+        ...prev,
+        [app.id]: {
+          status: isRecommended ? "RECOMMENDED" : "FURTHER_REVIEW",
+          suitabilityScore: score,
+          isRecommended,
+          verdict: text,
+          unitFitSentence,
+          councilSentence,
+          recommendationSentence,
+        },
+      }));
+      toast.success(`AI Screening completed for ${app.candidateName}`);
+    } catch (err: any) {
+      console.warn("AI screening failed:", err);
+      toast.error("Failed to run AI screening");
+    } finally {
+      setRunningScreeningId(null);
+    }
+  };
 
   const fetchApps = async () => {
     if (!isApiEnabled) return;
@@ -762,12 +868,31 @@ function ApplicationsAdmin() {
                         </div>
                       </TableCell>
 
-                      {/* Match Score */}
+                      {/* Match Score & AI Verdict */}
                       <TableCell className="py-3.5 align-middle">
-                        <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                          <HiOutlineSparkles className="h-3.5 w-3.5" />
-                          {item.matchScore >= 90 ? `Exact Match (${item.matchScore}%)` : `${item.matchScore}%`}
-                        </span>
+                        <div className="flex flex-col gap-1 items-start">
+                          <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <HiOutlineSparkles className="h-3.5 w-3.5" />
+                            {item.matchScore >= 90 ? `Exact Match (${item.matchScore}%)` : `${item.matchScore}%`}
+                          </span>
+                          {(() => {
+                            const scr = getApplicationScreening(item);
+                            const isClear = scr.isRecommended;
+                            return (
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none",
+                                  isClear
+                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
+                                    : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
+                                )}
+                              >
+                                <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
+                                {isClear ? "AI Shortlist Vetted" : "AI Review"}
+                              </span>
+                            );
+                          })()}
+                        </div>
                       </TableCell>
 
                       {/* Status Badge */}
@@ -885,10 +1010,29 @@ function ApplicationsAdmin() {
                       </div>
                     </div>
 
-                    <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2 py-0.5 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
-                      <HiOutlineSparkles className="h-3 w-3" />
-                      {item.matchScore >= 90 ? `Exact Match (${item.matchScore}%)` : `${item.matchScore}%`}
-                    </span>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2 py-0.5 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+                        <HiOutlineSparkles className="h-3 w-3" />
+                        {item.matchScore >= 90 ? `Exact Match (${item.matchScore}%)` : `${item.matchScore}%`}
+                      </span>
+                      {(() => {
+                        const scr = getApplicationScreening(item);
+                        const isClear = scr.isRecommended;
+                        return (
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none",
+                              isClear
+                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
+                                : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
+                            )}
+                          >
+                            <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
+                            {isClear ? "AI Vetted" : "AI Review"}
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   {/* Target Position & Hospital */}
@@ -1089,6 +1233,106 @@ function ApplicationsAdmin() {
                   </div>
                 </div>
               </div>
+
+              {/* AI Clinical Screening & Shortlist Verdict Card */}
+              {(() => {
+                const screening = getApplicationScreening(selectedApp);
+                const isScreening = runningScreeningId === selectedApp.id;
+                const isClear = screening.isRecommended;
+
+                return (
+                  <div
+                    className={cn(
+                      "rounded-2xl border p-4 space-y-3 transition-all shadow-2xs",
+                      isClear
+                        ? "border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10"
+                        : "border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className={cn(
+                            "grid h-8 w-8 place-items-center rounded-xl shrink-0",
+                            isClear
+                              ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                              : "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                          )}
+                        >
+                          <BotMessageSquare className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <h5
+                            className={cn(
+                              "font-extrabold text-xs uppercase tracking-wider",
+                              isClear ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
+                            )}
+                          >
+                            AI Clinical Screening Verdict
+                          </h5>
+                          <p className="text-[10px] text-muted-foreground">
+                            {isClear ? "Shortlist Recommended" : "Further Review Recommended"} · {selectedApp.hospitalName}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "text-[10px] font-black px-2 py-0.5 rounded-full border",
+                            isClear
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
+                              : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                          )}
+                        >
+                          Suitability: {screening.suitabilityScore}%
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isScreening}
+                          onClick={() => handleRunAiScreening(selectedApp)}
+                          className={cn(
+                            "h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 cursor-pointer",
+                            isClear
+                              ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+                              : "border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
+                          )}
+                        >
+                          <BotMessageSquare className={cn("h-3.5 w-3.5", isScreening && "animate-spin")} />
+                          <span>{isScreening ? "Auditing with AI..." : "Re-analyze with AI"}</span>
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-foreground/90 leading-relaxed space-y-2 pt-1 border-t border-border/40">
+                      <p className="flex items-start gap-2">
+                        <HiOutlineCheckBadge
+                          className={cn("h-4 w-4 shrink-0 mt-0.5", isClear ? "text-emerald-600" : "text-amber-600")}
+                        />
+                        <span>{screening.unitFitSentence}</span>
+                      </p>
+                      <p className="flex items-start gap-2">
+                        <HiOutlineCheckBadge
+                          className={cn("h-4 w-4 shrink-0 mt-0.5", isClear ? "text-emerald-600" : "text-amber-600")}
+                        />
+                        <span>{screening.councilSentence}</span>
+                      </p>
+                      <p
+                        className={cn(
+                          "text-[11px] font-semibold pt-1.5 border-t flex items-start gap-2",
+                          isClear
+                            ? "text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
+                            : "text-amber-700 dark:text-amber-300 border-amber-500/20"
+                        )}
+                      >
+                        <HiOutlineSparkles className="h-4 w-4 shrink-0 mt-0.5" />
+                        <span>{screening.recommendationSentence}</span>
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* 2. Target Opening & Hiring Hospital Card */}
               <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-2xs">

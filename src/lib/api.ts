@@ -146,9 +146,13 @@ export async function apiFetch<T = unknown>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const url = endpoint.startsWith("http")
-    ? endpoint
-    : `${API_BASE_URL}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
+  let cleanEndpoint = endpoint;
+  if (cleanEndpoint.startsWith("/api/v1/")) {
+    cleanEndpoint = cleanEndpoint.replace(/^\/api\/v1/, "");
+  }
+  const url = cleanEndpoint.startsWith("http")
+    ? cleanEndpoint
+    : `${API_BASE_URL}${cleanEndpoint.startsWith("/") ? "" : "/"}${cleanEndpoint}`;
 
   const headers = new Headers(options.headers || {});
 

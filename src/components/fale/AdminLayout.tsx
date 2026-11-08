@@ -26,6 +26,7 @@ import {
 } from "react-icons/hi2";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
+import { FlowAIFloatingButton } from "./FlowAIFloatingButton";
 import { useApp, setState, Portal } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -372,6 +373,9 @@ export function AdminLayout({
           );
         })}
       </nav>
+
+      {/* Floating Flow AI Assistant */}
+      <FlowAIFloatingButton />
     </div>
   );
 }

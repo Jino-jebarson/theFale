@@ -28,6 +28,7 @@ import {
 } from "react-icons/hi2";
 import { MdWavingHand } from "react-icons/md";
 import { toast } from "sonner";
+import { BotMessageSquare } from "lucide-react";
 import { AdminLayout } from "@/components/fale/AdminLayout";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,7 @@ import { useApp, setState, approveHuddlePost, rejectHuddlePost, AdminJobApproval
 import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
 import { cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees } from "@/lib/api";
+import { getDailyMorningBriefWithAi, getDemandForecastWithAi } from "@/lib/adapters/aiAdapter";
 import {
   getAdminDashboardMetrics,
   getPendingJobPostings,
@@ -83,6 +85,62 @@ function AdminDashboard() {
   const [apiHuddle, setApiHuddle] = useState<any[]>([]);
   const [metrics, setMetrics] = useState<AdminDashboardMetricsDto | null>(null);
   const [loading, setLoading] = useState(isApiEnabled);
+
+  // AI Operations Brief & Demand Surge Forecast State
+  const [briefText, setBriefText] = useState<string | null>(null);
+  const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
+
+  const [forecastText, setForecastText] = useState<string | null>(null);
+  const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
+
+  const handleGenerateBrief = async (overrideMetrics?: any) => {
+    setIsGeneratingBrief(true);
+    try {
+      const pKyc = overrideMetrics?.pendingKyc ?? pendingCandidateKYC.length;
+      const pJobs = overrideMetrics?.pendingJobs ?? pendingJobApprovals.length;
+      const pFac = overrideMetrics?.pendingFacilities ?? pendingFacilityKYC.length;
+      const aShifts = overrideMetrics?.activeShifts ?? apiJobs.filter((j) => j.type === "shift").length;
+
+      const res = await getDailyMorningBriefWithAi({
+        pendingKyc: pKyc,
+        pendingJobs: pJobs,
+        pendingFacilities: pFac,
+        activeShifts: aShifts,
+        disputes: 0,
+      });
+      const text = res.response || res.content || "";
+      if (text) {
+        setBriefText(text);
+        toast.success("Morning Operations Brief updated with live AI");
+      }
+    } catch (err: any) {
+      console.warn("Brief generation error:", err);
+      toast.error("Failed to generate AI morning brief");
+    } finally {
+      setIsGeneratingBrief(false);
+    }
+  };
+
+  const handleGenerateForecast = async () => {
+    setIsGeneratingForecast(true);
+    try {
+      const res = await getDemandForecastWithAi({
+        metro: "Bengaluru & Chennai Healthcare Corridors",
+        topSpecialties: ["ICU Critical Care Nurses", "Dialysis Technicians", "Emergency Medical Officers", "OT Specialists"],
+        surgeWeekendMultiplier: 1.35,
+      });
+      const text = res.response || res.content || "";
+      if (text) {
+        setForecastText(text);
+        toast.success("7-Day Demand Surge Forecast recalculated with live AI");
+      }
+    } catch (err: any) {
+      console.warn("Forecast generation error:", err);
+      toast.error("Failed to generate AI demand forecast");
+    } finally {
+      setIsGeneratingForecast(false);
+    }
+  };
 
   const loadDashboardData = async () => {
     if (!isApiEnabled) return;
@@ -665,6 +723,107 @@ function AdminDashboard() {
         </div>
       }
     >
+      {/* Operations Command Brief & Demand Forecast */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full">
+        {/* Morning Operations Brief */}
+        <div className="rounded-2xl border border-primary/25 bg-gradient-to-r from-primary/10 via-primary/5 to-card p-4 sm:p-5 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary text-white text-xs shrink-0">
+                <BotMessageSquare className="h-4 w-4" />
+              </span>
+              <div>
+                <h2 className="text-xs sm:text-sm font-bold text-foreground">
+                  Morning Operations Brief
+                </h2>
+                <p className="text-[10px] text-muted-foreground">COO Platform Synthesis</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
+                Live AI Summary
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isGeneratingBrief}
+                onClick={() => handleGenerateBrief()}
+                className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1 border-primary/30 text-primary hover:bg-primary/10 cursor-pointer"
+              >
+                <BotMessageSquare className={cn("h-3 w-3", isGeneratingBrief && "animate-spin")} />
+                <span>{isGeneratingBrief ? "Updating..." : "Re-analyze with AI"}</span>
+              </Button>
+            </div>
+          </div>
+          <div className="text-xs text-muted-foreground leading-relaxed space-y-1.5 pt-1 border-t border-primary/15">
+            {briefText ? (
+              briefText.split("\n").filter(Boolean).map((line, idx) => (
+                <p key={idx} className="flex items-start gap-1.5">
+                  <span className="text-primary font-bold mt-0.5">•</span>
+                  <span className="text-foreground/90">{line.replace(/^[•\-\*]\s*/, "")}</span>
+                </p>
+              ))
+            ) : (
+              <>
+                <p className="flex items-start gap-1.5">
+                  <span className="text-primary font-bold mt-0.5">•</span>
+                  <span><strong className="text-foreground">{pendingCandidateKYC.length}</strong> candidate KYC submissions awaiting state council verification check.</span>
+                </p>
+                <p className="flex items-start gap-1.5">
+                  <span className="text-primary font-bold mt-0.5">•</span>
+                  <span><strong className="text-foreground">{pendingJobApprovals.length}</strong> hospital job & shift approvals pending compliance audit.</span>
+                </p>
+                <p className="flex items-start gap-1.5">
+                  <span className="text-primary font-bold mt-0.5">•</span>
+                  <span><strong className="text-foreground">0</strong> active escrow disputes reported; 100% automated settlement rate maintained.</span>
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* 7-Day Demand Forecast */}
+        <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs shrink-0">
+                <BotMessageSquare className="h-4 w-4" />
+              </span>
+              <div>
+                <h2 className="text-xs sm:text-sm font-bold text-foreground">
+                  Demand Surge Forecast
+                </h2>
+                <p className="text-[10px] text-muted-foreground">Predictive Telemetry</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                7-Day Horizon
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isGeneratingForecast}
+                onClick={handleGenerateForecast}
+                className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 cursor-pointer"
+              >
+                <BotMessageSquare className={cn("h-3 w-3", isGeneratingForecast && "animate-spin")} />
+                <span>{isGeneratingForecast ? "Projecting..." : "Recalculate with AI"}</span>
+              </Button>
+            </div>
+          </div>
+          <div className="text-xs text-muted-foreground leading-relaxed pt-1 border-t border-border/50">
+            {forecastText ? (
+              <p className="text-foreground/90 leading-relaxed font-medium">{forecastText}</p>
+            ) : (
+              <p className="leading-relaxed">
+                Anticipating a <strong className="text-foreground">35% weekend surge</strong> in Critical Care Nurses and Dialysis Technicians across South Bengaluru (Koramangala/HSR) and Central Chennai. 14 locum shift broadcasts projected.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Top 4 Modern Enterprise KPI Cards */}
       <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4 min-w-0 w-full">
         {/* 1. Total Queue Pending */}

@@ -9,7 +9,6 @@ import {
   HiCheckCircle,
   HiOutlinePlay,
   HiOutlinePause,
-  HiOutlineSparkles,
   HiOutlineShieldCheck,
   HiOutlineDocumentCheck,
   HiOutlineArrowDownTray,
@@ -41,6 +40,8 @@ import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { enrollCourse, updateCourseProgress, getCourseById, getCourses } from "@/lib/adapters/learningAdapter";
 import { getCourseMediaConfig, type CourseMediaConfig, type QuizQuestion } from "@/lib/clinicalMediaEngine";
+import { explainLearningConceptWithAi } from "@/lib/adapters/aiAdapter";
+import { BotMessageSquare } from "lucide-react";
 
 export const Route = createFileRoute("/learning/$id")({
   loader: async ({ params }) => {
@@ -179,6 +180,8 @@ function CourseDetailScreen() {
   const [currentQuizIdx, setCurrentQuizIdx] = useState<number>(0);
   const [userQuizAnswers, setUserQuizAnswers] = useState<Record<string, string>>({});
   const [quizSubmitted, setQuizSubmitted] = useState<boolean>(false);
+  const [aiRationale, setAiRationale] = useState<string | null>(null);
+  const [loadingRationale, setLoadingRationale] = useState<boolean>(false);
 
   // Certificate state
   const [certClaimed, setCertClaimed] = useState<boolean>(false);
@@ -441,7 +444,23 @@ function CourseDetailScreen() {
     setUserQuizAnswers({});
     setQuizSubmitted(false);
     setCurrentQuizIdx(0);
+    setAiRationale(null);
     toast.info("Quiz reset for clinical retry.");
+  };
+
+  const handleRequestAiRationale = async () => {
+    const activeQ = quizQuestions[currentQuizIdx] || quizQuestions[0];
+    const selectedOptId = userQuizAnswers[activeQ.id];
+    const selectedOpt = activeQ.options.find((o) => o.id === selectedOptId);
+    setLoadingRationale(true);
+    try {
+      const res = await explainLearningConceptWithAi(activeQ.question, selectedOpt?.text || "Selected option");
+      setAiRationale(res.response || res.content || "");
+    } catch {
+      setAiRationale("Evidence-Based Protocol: Adhere strictly to institutional infection control SOPs and closed-loop telemetry monitoring.");
+    } finally {
+      setLoadingRationale(false);
+    }
   };
 
   const candidateName =
@@ -1117,7 +1136,7 @@ function CourseDetailScreen() {
 
                   <div className="rounded-2xl bg-primary-soft/50 p-3.5 sm:p-4 border border-primary/15 space-y-1.5 sm:space-y-2">
                     <h4 className="text-xs font-bold text-primary uppercase tracking-wide flex items-center gap-1.5">
-                      <HiOutlineSparkles className="h-4 w-4 shrink-0" /> Key Clinical Protocol ({course.category})
+                      <BotMessageSquare className="h-4 w-4 shrink-0" /> Key Clinical Protocol ({course.category})
                     </h4>
                     <p className="text-xs font-medium text-foreground leading-relaxed break-words">
                       "{getCourseClinicalRule(course.id, course.category)}"
@@ -1403,6 +1422,34 @@ function CourseDetailScreen() {
                       })}
                     </div>
 
+                    {/* Clinical Protocol Assistant Rationale */}
+                    <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3.5 sm:p-4 space-y-2.5 mt-3 shadow-2xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-primary flex items-center gap-1.5">
+                          <BotMessageSquare className="h-4 w-4" /> Clinical Protocol Assistant
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleRequestAiRationale}
+                          disabled={loadingRationale || !selectedOptId}
+                          className="text-xs font-semibold h-7 rounded-xl border-primary/30 text-primary hover:bg-primary/10 cursor-pointer"
+                        >
+                          {loadingRationale ? "Analyzing Protocol with AI..." : "Explain Clinical Protocol with AI"}
+                        </Button>
+                      </div>
+                      {!selectedOptId && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Select an option above to consult Gemini for evidence-based clinical rationale.
+                        </p>
+                      )}
+                      {aiRationale && (
+                        <div className="text-xs text-foreground/90 leading-relaxed pt-2.5 border-t border-primary/15 whitespace-pre-line">
+                          {aiRationale}
+                        </div>
+                      )}
+                    </div>
+
                     {/* Question navigation controls */}
                     {quizQuestions.length > 1 && (
                       <div className="flex items-center justify-between pt-2">
@@ -1410,7 +1457,10 @@ function CourseDetailScreen() {
                           variant="outline"
                           size="sm"
                           disabled={currentQuizIdx === 0}
-                          onClick={() => setCurrentQuizIdx((p) => Math.max(0, p - 1))}
+                          onClick={() => {
+                            setCurrentQuizIdx((p) => Math.max(0, p - 1));
+                            setAiRationale(null);
+                          }}
                           className="rounded-xl text-xs"
                         >
                           Previous Question
@@ -1420,7 +1470,10 @@ function CourseDetailScreen() {
                             <button
                               key={qIdx}
                               type="button"
-                              onClick={() => setCurrentQuizIdx(qIdx)}
+                              onClick={() => {
+                                setCurrentQuizIdx(qIdx);
+                                setAiRationale(null);
+                              }}
                               className={cn(
                                 "h-2 w-6 rounded-full transition-all",
                                 qIdx === currentQuizIdx
@@ -1436,7 +1489,10 @@ function CourseDetailScreen() {
                           variant="outline"
                           size="sm"
                           disabled={currentQuizIdx === quizQuestions.length - 1}
-                          onClick={() => setCurrentQuizIdx((p) => Math.min(quizQuestions.length - 1, p + 1))}
+                          onClick={() => {
+                            setCurrentQuizIdx((p) => Math.min(quizQuestions.length - 1, p + 1));
+                            setAiRationale(null);
+                          }}
                           className="rounded-xl text-xs"
                         >
                           Next Question

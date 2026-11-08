@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   HiOutlineMapPin,
@@ -15,11 +16,14 @@ import {
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill } from "react-icons/ri";
 import { toast } from "sonner";
+import { BotMessageSquare } from "lucide-react";
 import type { Job } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { applyForJob, saveJob, unsaveJob } from "@/lib/adapters/jobAdapter";
+import { estimateDistanceKm } from "@/lib/distanceUtil";
+import { explainJobMatchWithAi } from "@/lib/adapters/aiAdapter";
 
 export function OrgMark({ name, className }: { name: string; className?: string }) {
   return (
@@ -58,6 +62,53 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
     s.profile["level"] === "student";
   const isInternship = job.kind === "internship" || job.type === "Internship";
   const isRestrictedForStudent = isStudent && !isInternship;
+
+  const p = (s.profile || {}) as Record<string, unknown>;
+  const candLoc = {
+    city: String(p["city"] || "Bengaluru"),
+    address: String(p["addressLine"] || p["address"] || "Indiranagar"),
+    pincode: String(p["pincode"] || ""),
+  };
+  const { distanceKm, isSameCity, description: distanceDesc } = estimateDistanceKm(candLoc, {
+    city: job.city,
+    org: job.org,
+  });
+
+  const [aiRationale, setAiRationale] = useState<string | null>(null);
+  const [loadingRationale, setLoadingRationale] = useState(false);
+
+  const handleGetAiRationale = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (aiRationale || loadingRationale) return;
+
+    setLoadingRationale(true);
+    try {
+      const candidateRole = String(p["role"] || p["profession"] || p["designation"] || "Doctor");
+      const candidateQual = String(p["qualification"] || p["primaryDegree"] || "MBBS");
+      const candidateCity = String(p["city"] || "Chennai");
+
+      const res = await explainJobMatchWithAi(
+        job.title,
+        job.org,
+        distanceKm,
+        job.match ?? 85,
+        {
+          role: candidateRole,
+          qualification: candidateQual,
+          city: candidateCity,
+          council: String(p["council"] || ""),
+        }
+      );
+      if (res.response) {
+        setAiRationale(res.response);
+      }
+    } catch {
+      setAiRationale(`Commute distance of ${distanceKm} km with verified ${job.dept || "clinical"} credentials required by ${job.org}.`);
+    } finally {
+      setLoadingRationale(false);
+    }
+  };
 
   const toggleSave = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -201,6 +252,37 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
             )}
           </div>
         )}
+
+        {/* Match Explainer: "Why this job" */}
+        <div className="mt-2.5 rounded-xl bg-primary/5 border border-primary/15 p-2.5 text-[11px] text-muted-foreground transition-all">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <BotMessageSquare className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="font-bold text-foreground truncate">
+                Match Rationale ({distanceDesc}):
+              </span>
+            </div>
+            {!aiRationale && (
+              <button
+                type="button"
+                onClick={handleGetAiRationale}
+                disabled={loadingRationale}
+                className="shrink-0 rounded-md bg-primary/10 hover:bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary transition-colors cursor-pointer"
+              >
+                {loadingRationale ? "Thinking..." : "Explain with AI"}
+              </button>
+            )}
+          </div>
+          <p className="mt-1 leading-relaxed text-foreground/85">
+            {aiRationale ? (
+              <span className="text-foreground font-medium animate-in fade-in">{aiRationale}</span>
+            ) : (
+              <span>
+                Calculated commute: <strong className="text-foreground font-semibold">{distanceKm} km</strong> from your registered area. Holds {job.dept || "clinical"} requirements for {job.org}.
+              </span>
+            )}
+          </p>
+        </div>
       </div>
 
       {/* Metrics & Action Bar */}

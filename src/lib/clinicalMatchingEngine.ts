@@ -317,6 +317,7 @@ export function calculateClinicalMatch(
   const cCity = (candidate.city || "").trim().toLowerCase();
   const jCity = (job.city || "").trim().toLowerCase();
   const preferred = (candidate.preferredCities || []).map((c) => c.toLowerCase());
+  const isPermanentJob = job.kind !== "internship" && job.type !== "Internship";
 
   if (cCity && jCity && (cCity.includes(jCity) || jCity.includes(cCity))) {
     locationScore = 10;
@@ -324,13 +325,14 @@ export function calculateClinicalMatch(
   } else if (preferred.some((p) => jCity.includes(p) || p.includes(jCity))) {
     locationScore = 10;
     reasons.push(`Matches your preferred practice city (${job.city})`);
-  } else if (candidate.relocate) {
-    locationScore = 7;
-    reasons.push("Open to relocation for this hospital");
+  } else if (candidate.relocate || isPermanentJob) {
+    // For full-time hospital positions, candidates regularly relocate across Indian states
+    locationScore = 8;
+    reasons.push("Pan-India mobility & inter-city relocation viable");
   } else if (!cCity || !jCity) {
-    locationScore = 5;
+    locationScore = 6;
   } else {
-    locationScore = 0;
+    locationScore = 3;
   }
 
   // ── FACTOR 5: REGULATORY & COUNCIL VERIFICATION (Max: 10 points) ─────────

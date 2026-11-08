@@ -7,7 +7,6 @@ import {
   HiOutlineMagnifyingGlass,
   HiStar,
   HiOutlineShieldCheck,
-  HiOutlineSparkles,
   HiOutlineArrowRight,
   HiOutlineBookOpen,
   HiOutlineUserGroup,
@@ -16,6 +15,7 @@ import {
   HiOutlineXMark,
 } from "react-icons/hi2";
 import { toast } from "sonner";
+import { BotMessageSquare } from "lucide-react";
 import { AppShell } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -25,6 +25,15 @@ import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { getCourses, enrollCourse, mapCourseDtoToCourse } from "@/lib/adapters/learningAdapter";
 import { getAllRegistryCourses } from "@/lib/courseCurriculumRegistry";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { getInterviewPracticeWithAi, evaluateInterviewAnswerWithAi } from "@/lib/adapters/aiAdapter";
 
 export const Route = createFileRoute("/learning/")({
   head: () => ({
@@ -69,6 +78,74 @@ function Learning() {
   const [apiCourses, setApiCourses] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(isApiEnabled);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // AI Interview Practice Simulator State (#6)
+  const [interviewModalOpen, setInterviewModalOpen] = useState(false);
+  const [interviewQuestions, setInterviewQuestions] = useState<string[]>([]);
+  const [activeQuestionIdx, setActiveQuestionIdx] = useState(0);
+  const [interviewAnswer, setInterviewAnswer] = useState("");
+  const [interviewFeedback, setInterviewFeedback] = useState<string | null>(null);
+  const [evaluatingInterview, setEvaluatingInterview] = useState(false);
+  const [loadingQuestions, setLoadingQuestions] = useState(false);
+
+  const handleStartInterviewPractice = async () => {
+    setInterviewModalOpen(true);
+    setInterviewFeedback(null);
+    setInterviewAnswer("");
+    setActiveQuestionIdx(0);
+    setLoadingQuestions(true);
+    try {
+      const role = s.profile?.role || "Healthcare Professional";
+      const res = await getInterviewPracticeWithAi(role);
+      const text = res.response || res.content || "";
+      if (text) {
+        const parsed = text
+          .split(/\n+/)
+          .map((line) => line.replace(/^[\d+*#\.\-\)]+\s*/, "").trim())
+          .filter((line) => line.length > 25);
+        if (parsed.length >= 2) {
+          setInterviewQuestions(parsed.slice(0, 3));
+          return;
+        }
+      }
+      setInterviewQuestions([
+        "A patient on mechanical ventilation triggers a sudden high-peak pressure alarm. What are your immediate assessment steps?",
+        "How do you prioritize patient handovers when admitting a post-cardiac arrest patient while managing two ongoing ICU infusions?",
+        "Explain the central line maintenance protocol to prevent CLABSI bloodstream infections under NABH guidelines.",
+      ]);
+    } catch {
+      setInterviewQuestions([
+        "A patient on mechanical ventilation triggers a sudden high-peak pressure alarm. What are your immediate assessment steps?",
+        "How do you prioritize patient handovers when admitting an acute patient?",
+        "Explain the central line maintenance protocol to prevent CLABSI bloodstream infections.",
+      ]);
+    } finally {
+      setLoadingQuestions(false);
+    }
+  };
+
+  const handleEvaluateAnswer = async () => {
+    if (!interviewAnswer.trim()) {
+      toast.error("Please type your response first.");
+      return;
+    }
+    setEvaluatingInterview(true);
+    try {
+      const activeQ = interviewQuestions[activeQuestionIdx] || "Emergency Clinical Scenario";
+      const res = await evaluateInterviewAnswerWithAi(
+        activeQ,
+        interviewAnswer.trim(),
+        s.profile?.role || "Healthcare Professional"
+      );
+      const feedbackText = res.response || res.content || "";
+      setInterviewFeedback(feedbackText);
+    } catch (err) {
+      console.error("Failed to evaluate clinical viva answer:", err);
+      toast.error("Unable to evaluate with AI. Please try again.");
+    } finally {
+      setEvaluatingInterview(false);
+    }
+  };
 
   useEffect(() => {
     if (!isApiEnabled) return;
@@ -147,7 +224,7 @@ function Learning() {
                 Learning &amp; CME Academy
               </h1>
               <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 bg-primary/10 text-primary border border-primary/20">
-                <HiOutlineSparkles className="h-3.5 w-3.5" />
+                <HiOutlineShieldCheck className="h-3.5 w-3.5" />
                 <span>Accredited CME</span>
               </span>
             </div>
@@ -169,6 +246,35 @@ function Learning() {
               <span>{viewMode === "catalog" ? `My Courses (${enrolledCourses.length})` : "Browse Catalog"}</span>
             </Button>
           </div>
+        </div>
+
+        {/* AI Clinical Interview Practice Spotlight */}
+        <div className="rounded-3xl border border-primary/25 bg-gradient-to-r from-primary/10 via-primary/5 to-card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+          <div className="flex items-start gap-3.5">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary text-white shadow-xs">
+              <BotMessageSquare className="h-5 w-5" />
+            </span>
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-foreground">
+                  Clinical Viva &amp; Interview Practice
+                </h3>
+                <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.2 text-[9px] font-bold text-primary">
+                  Interactive Simulator
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Practice hospital triage scenarios, answer acute clinical questions, and receive instant feedback before your interviews.
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            onClick={handleStartInterviewPractice}
+            className="bg-primary text-white text-xs font-bold shrink-0 hover:bg-primary-hover rounded-xl px-4 h-9 shadow-xs cursor-pointer"
+          >
+            Start Practice
+          </Button>
         </div>
 
         {/* Student Mentorship Notice Banner (Matching Huddle) */}
@@ -314,6 +420,8 @@ function Learning() {
             )}
           </div>
         </div>
+
+
 
         {/* ================= CONTENT: MY LEARNING VIEW ================= */}
         {viewMode === "my-learning" && (
@@ -541,6 +649,89 @@ function Learning() {
           </div>
         )}
       </div>
+
+      {/* AI Clinical Interview Practice Simulator Dialog (#6) */}
+      <Dialog open={interviewModalOpen} onOpenChange={setInterviewModalOpen}>
+        <DialogContent className="max-w-lg rounded-3xl p-6">
+          <DialogHeader>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary">
+                <BotMessageSquare className="h-4.5 w-4.5 text-primary" />
+              </span>
+              <div>
+                <DialogTitle className="text-base font-bold text-foreground">
+                  Clinical Viva &amp; Interview Practice
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Question {activeQuestionIdx + 1} of {interviewQuestions.length || 3} · Clinical Emergency Simulation
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {loadingQuestions ? (
+              <div className="py-8 flex flex-col items-center justify-center space-y-3 text-center">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <p className="text-xs text-muted-foreground font-medium">
+                  Consulting AI Medical Examiner for realistic clinical scenarios...
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-xs font-semibold text-foreground leading-relaxed">
+                  {interviewQuestions[activeQuestionIdx] || "A patient on mechanical ventilation triggers a sudden high-peak pressure alarm. What are your immediate assessment steps?"}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground block">
+                    Your Spoken / Typed Clinical Response:
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={interviewAnswer}
+                    onChange={(e) => setInterviewAnswer(e.target.value)}
+                    placeholder="Explain your clinical steps (e.g. check airway, inspect circuit, assess bilateral chest rise)..."
+                    className="w-full rounded-2xl border border-border/80 bg-background p-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                  />
+                </div>
+
+                {interviewFeedback && (
+                  <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-800 dark:text-emerald-300 leading-relaxed animate-in fade-in whitespace-pre-line">
+                    {interviewFeedback}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between gap-2 mt-2">
+            <Button
+              variant="outline"
+              disabled={loadingQuestions}
+              onClick={() => {
+                if (activeQuestionIdx < interviewQuestions.length - 1) {
+                  setActiveQuestionIdx((i) => i + 1);
+                  setInterviewAnswer("");
+                  setInterviewFeedback(null);
+                } else {
+                  setInterviewModalOpen(false);
+                }
+              }}
+              className="rounded-xl text-xs font-bold"
+            >
+              {activeQuestionIdx < interviewQuestions.length - 1 ? "Next Scenario" : "Finish Practice"}
+            </Button>
+            <Button
+              onClick={handleEvaluateAnswer}
+              disabled={evaluatingInterview || loadingQuestions || !interviewAnswer.trim()}
+              className="rounded-xl text-xs font-bold bg-primary text-white hover:bg-primary-hover shadow-xs cursor-pointer"
+            >
+              {evaluatingInterview ? "Evaluating with AI..." : "Submit for Evaluation"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

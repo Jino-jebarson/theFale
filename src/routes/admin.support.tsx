@@ -13,8 +13,10 @@ import {
   HiOutlineCheck,
   HiOutlineXMark,
   HiOutlineTag,
+  HiOutlineSparkles,
 } from "react-icons/hi2";
 import { toast } from "sonner";
+import { BotMessageSquare } from "lucide-react";
 import { AdminLayout } from "@/components/fale/AdminLayout";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +42,7 @@ import {
   updateAdminSupportTicketStatus,
   type AdminSupportTicketDto,
 } from "@/lib/adapters/adminAdapter";
+import { draftAllyHandoffWithAi } from "@/lib/adapters/aiAdapter";
 
 export const Route = createFileRoute("/admin/support")({
   head: () => ({
@@ -117,6 +120,8 @@ export function AdminSupportPage() {
   const [newStatus, setNewStatus] = useState<string>("OPEN");
   const [adminNotes, setAdminNotes] = useState<string>("");
   const [saving, setSaving] = useState(false);
+  const [handoffDraft, setHandoffDraft] = useState<string | null>(null);
+  const [draftingHandoff, setDraftingHandoff] = useState(false);
 
   const loadTickets = async () => {
     if (!isApiEnabled) return;
@@ -170,6 +175,24 @@ export function AdminSupportPage() {
     setSelectedTicket(ticket);
     setNewStatus(ticket.status || "OPEN");
     setAdminNotes(ticket.adminNotes || "");
+    setHandoffDraft(null);
+  };
+
+  const handleDraftWhatsApp = async () => {
+    if (!selectedTicket) return;
+    setDraftingHandoff(true);
+    try {
+      const res = await draftAllyHandoffWithAi(selectedTicket.subject || selectedTicket.description);
+      const draftText = res.response || res.content || "";
+      setHandoffDraft(draftText);
+      toast.success("Ally draft generated!");
+    } catch {
+      setHandoffDraft(
+        `Hi ${selectedTicket.userName || "Doctor/Nurse"},\n\nThis is the FALE Clinical Support desk following up on your inquiry regarding: "${selectedTicket.subject}". Our operations team is addressing your ticket #${selectedTicket.id.slice(0, 8).toUpperCase()}. How can we best assist you right now?`
+      );
+    } finally {
+      setDraftingHandoff(false);
+    }
   };
 
   const handleSaveStatus = async () => {
@@ -439,6 +462,54 @@ export function AdminSupportPage() {
                 <div className="rounded-2xl border border-border/80 bg-card p-3 text-foreground whitespace-pre-wrap leading-relaxed">
                   {selectedTicket.description}
                 </div>
+              </div>
+
+              {/* Support Handoff Summary & WhatsApp Draft */}
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3.5 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-primary text-xs flex items-center gap-1.5">
+                    <BotMessageSquare className="h-4 w-4" /> Support Handoff &amp; Response Draft
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDraftWhatsApp}
+                    disabled={draftingHandoff}
+                    className="text-xs font-semibold h-7 rounded-xl border-primary/30 text-primary hover:bg-primary/10"
+                  >
+                    {draftingHandoff ? "Drafting with AI..." : "Draft WhatsApp Reply"}
+                  </Button>
+                </div>
+
+                {handoffDraft && (
+                  <div className="space-y-2 pt-2 border-t border-primary/15">
+                    <div className="rounded-xl border border-border/80 bg-card p-3 text-[11px] leading-relaxed text-foreground whitespace-pre-wrap font-mono">
+                      {handoffDraft}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(handoffDraft);
+                          toast.success("WhatsApp draft copied to clipboard!");
+                        }}
+                        className="text-xs font-semibold h-7 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                      >
+                        Copy WhatsApp Draft
+                      </Button>
+                      <a
+                        href={`https://wa.me/?text=${encodeURIComponent(handoffDraft)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-semibold h-7 px-3 rounded-xl border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                      >
+                        Open in WhatsApp ↗
+                      </a>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Status Selector */}

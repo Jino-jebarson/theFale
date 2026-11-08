@@ -16,6 +16,7 @@ import {
 import { RiStethoscopeLine, RiVerifiedBadgeFill } from "react-icons/ri";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
+import { FlowAIFloatingButton } from "./FlowAIFloatingButton";
 import { useApp, setState, Portal, setUnreadNotificationCount } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -872,6 +873,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* Floating Flow AI Assistant */}
+      <FlowAIFloatingButton />
     </div>
   );
 }
