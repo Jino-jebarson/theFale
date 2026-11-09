@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
-import { HiCheck, HiLockClosed, HiXMark } from "react-icons/hi2";
+import { HiCheck, HiLockClosed, HiXMark, HiOutlineArrowPath } from "react-icons/hi2";
 import { RiShieldKeyholeFill } from "react-icons/ri";
-import { ImSpinner2 } from "react-icons/im";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
@@ -274,7 +273,7 @@ export function DigiLockerModal({
               <div className="relative mx-auto h-16 w-16">
                 <div className="absolute inset-0 rounded-full border-4 border-primary/20 animate-ping" />
                 <div className="grid h-16 w-16 place-items-center rounded-2xl bg-primary-soft text-primary dark:bg-primary-soft shadow-inner">
-                  <ImSpinner2 className="h-8 w-8 animate-spin" />
+                  <HiOutlineArrowPath className="h-8 w-8 animate-spin" />
                 </div>
               </div>
               <div>

@@ -105,7 +105,10 @@ export function mapJobPostingToUi(dto: JobPostingDto): Job {
     accredited: Boolean(dto.facilityAccreditation),
     kind: isIntern ? "internship" : "job",
     forStudents: isIntern,
-  };
+    postedAt: dto.postedAt || dto.createdAt,
+    salaryMinPaise: dto.salaryMinPaise,
+    salaryMaxPaise: dto.salaryMaxPaise,
+  } as Job;
 }
 
 /**

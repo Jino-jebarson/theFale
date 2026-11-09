@@ -105,10 +105,10 @@ export function estimateDistanceKm(
   const candCoord = resolveGeoCoordinate(`${candidateLoc.address || ""} ${candidateLoc.city || ""}`);
   const jobCoord = resolveGeoCoordinate(jobLoc.city, jobLoc.org);
 
-  const cCity = (candidateLoc.city || "bengaluru").toLowerCase();
-  const jCity = (jobLoc.city || "bengaluru").toLowerCase();
+  const cCity = (candidateLoc.city || "").toLowerCase();
+  const jCity = (jobLoc.city || "").toLowerCase();
 
-  const isSameCity = cCity.includes(jCity) || jCity.includes(cCity) || (cCity.includes("bangalore") && jCity.includes("bengaluru"));
+  const isSameCity = Boolean(cCity && jCity && (cCity.includes(jCity) || jCity.includes(cCity) || (cCity.includes("bangalore") && jCity.includes("bengaluru"))));
 
   let dist = calculateHaversineDistanceKm(candCoord.lat, candCoord.lng, jobCoord.lat, jobCoord.lng);
 

@@ -303,7 +303,9 @@ const initialMockState: AppState = {
   huddlePosts: [],
   huddleQuestions: [],
   huddleSessions: [],
-  profile: {},
+  profile: {
+    facilityType: "Multispecialty Hospital",
+  },
   docs: {},
   saved: [],
   applied: [
@@ -424,7 +426,7 @@ const initialMockState: AppState = {
       amount: 10200,
       payoutDate: "Releasing Tomorrow · 11:00 AM",
       status: "In Escrow (24h SLA)",
-      payoutMethodUsed: "Cashfree Instant UPI · jinovj250@oksbi",
+      payoutMethodUsed: "Cashfree Instant UPI · clinician@oksbi",
       slipRef: "FALE-ESC-9941",
     },
     {
@@ -439,7 +441,7 @@ const initialMockState: AppState = {
       amount: 9000,
       payoutDate: "29 Oct 2026 · 09:15 AM",
       status: "Disbursed",
-      payoutMethodUsed: "Cashfree Instant UPI · jinovj250@oksbi",
+      payoutMethodUsed: "Cashfree Instant UPI · clinician@oksbi",
       utr: "CFUPI2026102900918",
       slipRef: "FALE-DIS-8401",
     },
@@ -455,7 +457,7 @@ const initialMockState: AppState = {
       amount: 5200,
       payoutDate: "25 Oct 2026 · 10:00 AM",
       status: "Disbursed",
-      payoutMethodUsed: "Cashfree Instant UPI · jinovj250@oksbi",
+      payoutMethodUsed: "Cashfree Instant UPI · clinician@oksbi",
       utr: "CFUPI2026102500412",
       slipRef: "FALE-DIS-8129",
     },
@@ -471,7 +473,7 @@ const initialMockState: AppState = {
       amount: 5600,
       payoutDate: "20 Oct 2026 · 08:30 AM",
       status: "Disbursed",
-      payoutMethodUsed: "Cashfree Instant UPI · jinovj250@oksbi",
+      payoutMethodUsed: "Cashfree Instant UPI · clinician@oksbi",
       utr: "CFUPI2026102000109",
       slipRef: "FALE-DIS-7902",
     },
@@ -737,7 +739,9 @@ const initialEmptyState: AppState = {
   huddlePosts: [],
   huddleQuestions: [],
   huddleSessions: [],
-  profile: {},
+  profile: {
+    facilityType: "Multispecialty Hospital",
+  },
   docs: {},
   saved: [],
   applied: [],
@@ -764,7 +768,7 @@ const initial: AppState = isApiEnabled ? initialEmptyState : initialMockState;
 if (typeof window !== "undefined" && isApiEnabled) {
   try {
     localStorage.removeItem(KEY);
-  } catch {}
+  } catch { }
 }
 
 let state: AppState = initial;
@@ -783,7 +787,7 @@ function load() {
   if (isApiEnabled) {
     try {
       localStorage.removeItem(KEY);
-    } catch {}
+    } catch { }
     state = { ...initialEmptyState };
     return;
   }
@@ -972,10 +976,10 @@ export function reportHuddlePost(postId: string, reason?: string) {
     huddlePosts: prev.huddlePosts.map((p) =>
       p.id === postId
         ? {
-            ...p,
-            reports: [...p.reports, reason ? `current-user: ${reason}` : "current-user"],
-            status: "hidden" as const, // Automatically hidden from community view and flagged to admin
-          }
+          ...p,
+          reports: [...p.reports, reason ? `current-user: ${reason}` : "current-user"],
+          status: "hidden" as const, // Automatically hidden from community view and flagged to admin
+        }
         : p
     ),
   }));

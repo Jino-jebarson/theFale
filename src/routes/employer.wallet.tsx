@@ -169,7 +169,7 @@ function EmployerWalletPage() {
 
   const currentBank: HospitalBankAccount | null = isApiEnabled && apiBank && (apiBank.accountNumber || apiBank.accountNumberMasked || apiBank.accountNumberLast4) ? {
     bankName: apiBank.bankName || "Current Bank",
-    accountNumber: apiBank.accountNumberMasked || (apiBank.accountNumberLast4 ? `•••• •••• ${apiBank.accountNumberLast4}` : (apiBank.accountNumber || "")),
+    accountNumber: apiBank.accountNumber || apiBank.accountNumberMasked || (apiBank.accountNumberLast4 ? `•••• •••• ${apiBank.accountNumberLast4}` : ""),
     ifsc: apiBank.ifsc || apiBank.ifscCode || "",
     accountType: (apiBank.accountType as any) || "Current",
     accountHolderName: apiBank.accountHolderName || defaultHolder,
@@ -648,120 +648,120 @@ function EmployerWalletPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 w-full sm:w-auto">
             <Button
               variant="outline"
               size="sm"
               onClick={handleOpenBuyCredits}
-              className="rounded-xl text-xs font-semibold h-9 px-3.5 cursor-pointer gap-1.5"
+              className="rounded-xl text-xs font-semibold h-9 px-3.5 cursor-pointer gap-1.5 flex-1 sm:flex-initial justify-center"
             >
               <HiOutlineSparkles className="h-4 w-4 text-amber-500" />
               <span>Buy Credits</span>
-              
             </Button>
             <Button
               size="sm"
               onClick={handleOpenTopUp}
-              className="rounded-xl text-xs font-semibold h-9 px-4 cursor-pointer gap-1.5 bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs"
+              className="rounded-xl text-xs font-semibold h-9 px-4 cursor-pointer gap-1.5 bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs flex-1 sm:flex-initial justify-center"
             >
               <HiOutlinePlus className="h-4 w-4" />
               <span>Top Up Escrow</span>
-              
             </Button>
           </div>
         </div>
 
         {/* 4 Professional KPI Cards */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
           {/* Card 1: Available Escrow */}
-          <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <HiOutlineBanknotes className="h-4 w-4" />
+          <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md flex flex-col justify-between space-y-3 sm:space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-2xl bg-primary-soft text-primary shrink-0">
+                <HiOutlineBanknotes className="h-5 w-5" />
               </span>
-              <span className="h-2 w-2 rounded-full bg-emerald-500 ring-4 ring-emerald-500/10" title="Active & Ready" />
+              <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
+                Ready for shifts
+              </span>
             </div>
             <div>
-              <span className="text-xs font-semibold text-muted-foreground block truncate">
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
                 Available Escrow
               </span>
-              <div className="text-lg sm:text-2xl font-bold font-mono tracking-tight text-foreground mt-1">
+              <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
                 ₹{escrowBalance.toLocaleString("en-IN")}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                Ready for shifts
+              <p className="text-xs text-muted-foreground mt-1">
+                Hospital custody reserve
               </p>
             </div>
           </div>
 
           {/* Card 2: Locked in Escrow */}
-          <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <HiOutlineLockClosed className="h-4 w-4" />
+          <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md flex flex-col justify-between space-y-3 sm:space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-2xl bg-primary-soft text-primary shrink-0">
+                <HiOutlineLockClosed className="h-5 w-5" />
               </span>
-              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full whitespace-nowrap">
+              <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
                 {lockedShiftCount} {lockedShiftCount === 1 ? "shift" : "shifts"}
               </span>
             </div>
             <div>
-              <span className="text-xs font-semibold text-muted-foreground block truncate">
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
                 Locked in Shifts
               </span>
-              <div className="text-lg sm:text-2xl font-bold font-mono tracking-tight text-foreground mt-1">
+              <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
                 ₹{lockedEscrow.toLocaleString("en-IN")}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+              <p className="text-xs text-muted-foreground mt-1">
                 Disbursing &lt; 24h
               </p>
             </div>
           </div>
 
           {/* Card 3: Sourcing Credits */}
-          <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <HiOutlineSparkles className="h-4 w-4" />
+          <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md flex flex-col justify-between space-y-3 sm:space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-2xl bg-primary-soft text-primary shrink-0">
+                <HiOutlineSparkles className="h-5 w-5" />
               </span>
               <button
                 type="button"
                 onClick={handleOpenBuyCredits}
-                className="text-[10px] font-bold text-blue-700 dark:text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 cursor-pointer whitespace-nowrap px-2.5 py-0.5 rounded-full transition-colors"
+                className="rounded-md bg-primary hover:bg-primary-hover text-primary-foreground px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider shrink-0 transition-colors shadow-2xs cursor-pointer"
               >
                 + Recharge
               </button>
             </div>
             <div>
-              <span className="text-xs font-semibold text-muted-foreground block truncate">
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
                 Sourcing Credits
               </span>
-              <div className="text-lg sm:text-2xl font-bold font-mono tracking-tight text-foreground mt-1">
+              <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
                 {candidateCredits}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+              <p className="text-xs text-muted-foreground mt-1">
                 Contact unlocks
               </p>
             </div>
           </div>
 
           {/* Card 4: Lifetime Disbursed */}
-          <div className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-2">
-              <span className="grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <HiOutlineArrowTrendingUp className="h-4 w-4" />
+          <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md flex flex-col justify-between space-y-3 sm:space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-2xl bg-primary-soft text-primary shrink-0">
+                <HiOutlineArrowTrendingUp className="h-5 w-5" />
               </span>
-              <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full whitespace-nowrap">
+              <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
                 100% on-time
               </span>
             </div>
             <div>
-              <span className="text-xs font-semibold text-muted-foreground block truncate">
+              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
                 Total Disbursed
               </span>
-              <div className="text-lg sm:text-2xl font-bold font-mono tracking-tight text-foreground mt-1">
+              <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
                 ₹{totalDisbursed.toLocaleString("en-IN")}
               </div>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+              <p className="text-xs text-muted-foreground mt-1">
                 All-time payments
               </p>
             </div>
@@ -804,23 +804,23 @@ function EmployerWalletPage() {
           </section>
         ) : currentBank ? (
           <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div className="space-y-1">
                 <div className="flex items-center justify-between sm:justify-start gap-2 flex-wrap">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
-                      <HiOutlineBuildingLibrary className="h-4 w-4" />
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary-soft text-primary shrink-0">
+                      <HiOutlineBuildingLibrary className="h-4.5 w-4.5" />
                     </span>
                     <div>
                       <span className="text-xs sm:text-sm font-bold text-foreground block">
                         Hospital Linked Bank Account
                       </span>
-                      <span className="text-[10px] font-mono text-muted-foreground block">
+                      <span className="text-[10px] text-muted-foreground block font-medium">
                         {currentBank.accountType} Account
                       </span>
                     </div>
                   </div>
-                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap">
+                  <span className="text-[10px] text-primary bg-primary-soft border border-primary/25 px-2.5 py-0.5 rounded-full font-bold whitespace-nowrap">
                     {currentBank.verifiedAt || "Penny Drop Verified"}
                   </span>
                 </div>
@@ -829,60 +829,61 @@ function EmployerWalletPage() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
-                  <span className="text-[10px] text-muted-foreground block font-medium">Account No.</span>
-                  <div className="flex items-center justify-between gap-1 mt-0.5">
-                    <span className="font-mono font-bold text-foreground truncate">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 text-xs w-full lg:w-auto">
+                <div className="bg-muted/40 p-3 rounded-xl border border-border/50">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Account No.</span>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <span className="font-semibold text-sm tracking-tight text-foreground truncate">
                       {showFullAcc
                         ? currentBank.accountNumber
                         : `•••• •••• ${currentBank.accountNumber.slice(-4)}`}
                     </span>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
                         onClick={() => setShowFullAcc(!showFullAcc)}
-                        className="text-muted-foreground hover:text-foreground cursor-pointer"
+                        className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
                         title={showFullAcc ? "Hide Account" : "Show Account"}
                       >
-                        {showFullAcc ? <HiOutlineEyeSlash className="h-3.5 w-3.5" /> : <HiOutlineEye className="h-3.5 w-3.5" />}
+                        {showFullAcc ? <HiOutlineEyeSlash className="h-4 w-4" /> : <HiOutlineEye className="h-4 w-4" />}
                       </button>
                       <button
                         type="button"
                         onClick={() => handleCopy(currentBank.accountNumber, "bankacc", "Account number")}
-                        className="text-muted-foreground hover:text-foreground cursor-pointer"
+                        className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
                         title="Copy Account Number"
                       >
-                        {copiedKey === "bankacc" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
+                        {copiedKey === "bankacc" ? <HiOutlineCheck className="h-4 w-4 text-primary" /> : <HiOutlineDocumentDuplicate className="h-4 w-4" />}
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
-                  <span className="text-[10px] text-muted-foreground block font-medium">IFSC</span>
-                  <div className="flex items-center justify-between gap-1 mt-0.5">
-                    <span className="font-mono font-bold text-foreground">{currentBank.ifsc}</span>
+                <div className="bg-muted/40 p-3 rounded-xl border border-border/50">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">IFSC</span>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <span className="font-semibold text-sm tracking-tight text-foreground">{currentBank.ifsc}</span>
                     <button
                       type="button"
                       onClick={() => handleCopy(currentBank.ifsc, "ifsc", "IFSC code")}
-                      className="text-muted-foreground hover:text-foreground cursor-pointer"
+                      className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0 transition-colors"
+                      title="Copy IFSC"
                     >
-                      {copiedKey === "ifsc" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
+                      {copiedKey === "ifsc" ? <HiOutlineCheck className="h-4 w-4 text-primary" /> : <HiOutlineDocumentDuplicate className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
 
-                <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
-                  <span className="text-[10px] text-muted-foreground block font-medium">Bank Name</span>
-                  <span className="font-semibold text-foreground block mt-0.5 truncate">{currentBank.bankName}</span>
+                <div className="bg-muted/40 p-3 rounded-xl border border-border/50">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Bank Name</span>
+                  <span className="font-semibold text-sm tracking-tight text-foreground block mt-1 truncate">{currentBank.bankName}</span>
                 </div>
 
-                <div className="bg-muted/40 p-2.5 rounded-xl border border-border/50">
-                  <span className="text-[10px] text-muted-foreground block font-medium">Beneficiary</span>
-                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                <div className="bg-muted/40 p-3 rounded-xl border border-border/50">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Beneficiary</span>
+                  <div className="flex items-center justify-between gap-2 mt-1">
                     <span
-                      className="font-semibold text-foreground truncate"
+                      className="font-semibold text-sm tracking-tight text-foreground truncate"
                       title={currentBank.accountHolderName}
                     >
                       {currentBank.accountHolderName}
@@ -896,13 +897,13 @@ function EmployerWalletPage() {
                           "Beneficiary name"
                         )
                       }
-                      className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+                      className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0 transition-colors"
                       title="Copy Beneficiary Name"
                     >
                       {copiedKey === "bene" ? (
-                        <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" />
+                        <HiOutlineCheck className="h-4 w-4 text-primary" />
                       ) : (
-                        <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />
+                        <HiOutlineDocumentDuplicate className="h-4 w-4" />
                       )}
                     </button>
                   </div>
@@ -1775,20 +1776,12 @@ function EmployerWalletPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={isVerifyingPenny}
+                  isLoading={isVerifyingPenny}
+                  loadingText="Verifying Penny Drop..."
                   className="rounded-xl text-xs font-semibold h-9 px-4.5 cursor-pointer bg-primary hover:bg-primary-hover shadow-2xs gap-1.5"
                 >
-                  {isVerifyingPenny ? (
-                    <>
-                      <span className="h-3 w-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                      <span>Verifying Penny Drop...</span>
-                    </>
-                  ) : (
-                    <>
-                      <HiOutlineCheck className="h-4 w-4" />
-                      <span>Verify &amp; Save Bank</span>
-                    </>
-                  )}
+                  <HiOutlineCheck className="h-4 w-4" />
+                  <span>Verify &amp; Save Bank</span>
                 </Button>
               </div>
             </div>

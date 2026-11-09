@@ -31,6 +31,11 @@ export interface UiNotificationItem {
   statusText?: string;
 }
 
+function stripEmojis(text: string): string {
+  if (!text) return "";
+  return text.replace(/[\p{Extended_Pictographic}\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF]/gu, "").replace(/\s+/g, " ").trim();
+}
+
 export function mapNotificationToUi(dto: NotificationDto): UiNotificationItem {
   const isUnread = !(dto.isRead ?? dto.read);
   const typeLower = (dto.type || "system").toLowerCase();
@@ -50,11 +55,11 @@ export function mapNotificationToUi(dto: NotificationDto): UiNotificationItem {
   return {
     id: dto.id,
     category,
-    title: dto.title,
+    title: stripEmojis(dto.title),
     hospital: "FALE Healthcare Network",
     hospitalCode: "FL",
     hospitalGradient: "from-primary to-primary-hover",
-    message: dto.message,
+    message: stripEmojis(dto.message),
     time: timeStr,
     unread: isUnread,
     urgent: typeLower.includes("urgent") || typeLower.includes("alert"),

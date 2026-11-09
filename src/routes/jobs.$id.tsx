@@ -12,6 +12,7 @@ import {
   HiBookmark,
   HiOutlineArrowUturnLeft,
   HiOutlineArrowPath,
+  HiOutlineSparkles,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
@@ -157,7 +158,7 @@ function JobDetail() {
     }
     const candidateName = String(s.profile["name"] || "Candidate Professional");
     const candidateRole = String(s.profile["role"] || "Healthcare Professional");
-    const candidateCity = String(s.profile["city"] || "Bengaluru");
+    const candidateCity = String(s.profile["city"] || s.profile["area"] || "");
     const regNumber = String(s.profile["regNo"] || "KMC/DOC/89421");
 
     setState((x) => ({
@@ -213,45 +214,65 @@ function JobDetail() {
       </Link>
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <div className="space-y-5">
-          <div className="surface p-6">
-            <div className="flex flex-wrap items-start gap-4">
-              <OrgMark name={job.org} className="h-16 w-16 text-lg" />
-              <div className="flex-1">
-                <h1 className="text-2xl font-extrabold">{job.title}</h1>
-                <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  {job.org} <HiOutlineShieldCheck className="h-4 w-4 text-primary" /> Verified employer
-                </p>
+          <div className="surface p-4 sm:p-6 rounded-3xl border border-border/80">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
+              <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
+                <OrgMark name={job.org} className="h-12 w-12 sm:h-16 sm:w-16 text-sm sm:text-lg shrink-0 rounded-2xl" />
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-xl sm:text-2xl font-black text-foreground tracking-tight leading-tight break-words">
+                    {job.title}
+                  </h1>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-xs sm:text-sm text-muted-foreground">
+                    <span className="font-bold text-foreground">{job.org}</span>
+                    <span className="inline-flex items-center gap-1 font-semibold text-primary">
+                      <HiOutlineShieldCheck className="h-4 w-4 shrink-0" />
+                      <span>Verified employer</span>
+                    </span>
+                  </div>
+                </div>
               </div>
+
               <span
                 className={cn(
-                  "rounded-full px-3 py-1 text-xs font-bold border",
+                  "inline-flex items-center gap-1 self-start sm:self-auto rounded-full px-2.5 sm:px-3 py-1 text-[11px] sm:text-xs font-black shrink-0 border shadow-2xs",
                   matchScore >= 70
-                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                    ? "bg-primary-soft border-primary/25 text-primary"
                     : matchScore >= 40
-                    ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                    ? "bg-primary-soft/60 border-primary/15 text-primary/80"
                     : "bg-muted border-border text-muted-foreground"
                 )}
               >
+                <HiOutlineSparkles className="h-3.5 w-3.5 text-primary shrink-0" />
                 {matchScore >= 90 ? `Exact Match (${matchScore}%)` : `${matchScore}% Match`}
               </span>
             </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-4">
-              {[[HiOutlineCurrencyRupee, isStudent ? "Stipend / month" : "Salary / month", job.salary], [HiOutlineBriefcase, "Experience", job.exp], [HiOutlineMapPin, "Location", job.city], [HiOutlineClock, "Shift", job.shift]].map(([I, l, v]) => {
+
+            {/* Key Job Info Metrics */}
+            <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+              {[
+                [HiOutlineCurrencyRupee, isStudent ? "Stipend / month" : "Salary / month", job.salary, "col-span-2 sm:col-span-1"],
+                [HiOutlineBriefcase, "Experience", job.exp, "col-span-1"],
+                [HiOutlineMapPin, "Location", job.city, "col-span-1"],
+                [HiOutlineClock, "Shift", job.shift, "col-span-2 sm:col-span-1"],
+              ].map(([I, l, v, spanClass]) => {
                 const Icon = I as typeof HiOutlineClock;
                 return (
-                  <div key={l as string} className="rounded-xl bg-muted p-3">
-                    <Icon className="h-5 w-5 text-primary" />
-                    <p className="mt-1 text-[11px] text-muted-foreground">{l as string}</p>
-                    <p className="text-sm font-semibold">{v as string}</p>
+                  <div key={l as string} className={cn("rounded-2xl bg-muted/50 p-3 sm:p-3.5 border border-border/40", spanClass as string)}>
+                    <div className="flex items-center gap-1.5">
+                      <Icon className="h-4 w-4 text-primary shrink-0" />
+                      <p className="text-[11px] font-semibold text-muted-foreground">{l as string}</p>
+                    </div>
+                    <p className="mt-1 text-sm font-bold text-foreground truncate">{v as string}</p>
                   </div>
                 );
               })}
             </div>
-            <div className="mt-5 flex flex-wrap items-center gap-3">
+
+            <div className="mt-5 flex flex-wrap items-center gap-2.5 sm:gap-3">
               {isApplied && app ? (
                 <>
-                  <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-2.5 text-sm font-bold text-emerald-700 dark:text-emerald-300">
-                    <HiCheckCircle className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                  <div className="inline-flex items-center gap-2 rounded-xl bg-primary-soft border border-primary/25 px-4 py-2.5 text-sm font-bold text-primary">
+                    <HiCheckCircle className="h-5 w-5 text-primary shrink-0" />
                     <span>{formatApplicationStatus(app.status)}</span>
                   </div>
                   <Button
@@ -274,11 +295,12 @@ function JobDetail() {
                   </Button>
                 </>
               ) : (
-                <Button size="lg" onClick={apply}>{isStudent ? "Apply for Internship" : "Easy apply"}</Button>
+                <Button size="lg" onClick={apply} className="flex-1 sm:flex-initial">{isStudent ? "Apply for Internship" : "Easy apply"}</Button>
               )}
               <Button
                 variant="outline"
                 size="lg"
+                className="flex-1 sm:flex-initial"
                 onClick={() => {
                   if (isApiEnabled) {
                     if (saved) {
@@ -301,7 +323,7 @@ function JobDetail() {
               </Button>
             </div>
           </div>
-          <div className="surface space-y-5 p-6 text-sm leading-relaxed">
+          <div className="surface space-y-5 p-4 sm:p-6 rounded-3xl border border-border/80 text-sm leading-relaxed">
             <section>
               <h2 className="mb-2 text-base font-bold">About the role</h2>
               <p className="text-muted-foreground">Join a collaborative healthcare team committed to thoughtful, high-quality care. Bring your expertise to a setting that supports professional growth.</p>

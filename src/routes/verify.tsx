@@ -7,6 +7,7 @@ import {
   HiOutlineXCircle,
   HiOutlinePencilSquare,
   HiOutlineQrCode,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill } from "react-icons/ri";
 import { toast } from "sonner";
@@ -249,13 +250,6 @@ function Verify() {
         </InputOTP>
       </div>
 
-      {isSubmitting && (
-        <div className="mt-3 flex items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/10 py-2.5 px-4 text-xs font-semibold text-primary animate-in fade-in duration-200">
-          <div className="h-4 w-4 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-          <span>Verifying OTP, please wait…</span>
-        </div>
-      )}
-
       {!isApiEnabled && (
         <p className="mt-3 text-xs text-muted-foreground">
           Preview code: <b className="text-primary">123456</b>
@@ -268,8 +262,8 @@ function Verify() {
         disabled={code.length < 6 || isSubmitting}
       >
         {isSubmitting ? (
-          <span className="inline-flex items-center gap-2">
-            <div className="h-4 w-4 rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground animate-spin" />
+          <span className="inline-flex items-center justify-center gap-2">
+            <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
             <span>Verifying code…</span>
           </span>
         ) : (

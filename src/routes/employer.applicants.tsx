@@ -18,9 +18,10 @@ import {
   HiOutlineBriefcase,
   HiOutlineBolt,
   HiOutlineClock,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
 import { toast } from "sonner";
-import { BotMessageSquare } from "lucide-react";
+import { BotMessageSquare, RotateCcw, Copy, Check } from "lucide-react";
 import { AppShell, StatusBadge, initials } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
 import {
@@ -368,6 +369,30 @@ function Applicants() {
     [allApplicants]
   );
 
+  // Automatically release/clear the Shortlisted badge once applicants have been seen
+  useEffect(() => {
+    if (allApplicants.length > 0) {
+      try {
+        const stored = localStorage.getItem("fale_seen_applicant_ids");
+        const seenSet = stored ? new Set(JSON.parse(stored)) : new Set<string>();
+        let changed = false;
+        allApplicants.forEach((a) => {
+          const strId = String(a.id);
+          if (!seenSet.has(strId)) {
+            seenSet.add(strId);
+            changed = true;
+          }
+        });
+        if (changed) {
+          localStorage.setItem("fale_seen_applicant_ids", JSON.stringify([...seenSet]));
+          window.dispatchEvent(new CustomEvent("fale:applications-updated"));
+        }
+      } catch (err) {
+        console.error("Failed to mark applicants as seen", err);
+      }
+    }
+  }, [allApplicants]);
+
   // Applicants scoped to active Role Type ("all" | "jobs" | "shifts")
   const applicantsInRoleType = useMemo(() => {
     return allApplicants.filter((a) => {
@@ -524,6 +549,7 @@ function Applicants() {
   // AI Candidate Summary State (#11)
   const [aiSummaries, setAiSummaries] = useState<Record<string, string>>({});
   const [loadingSummaryId, setLoadingSummaryId] = useState<string | null>(null);
+  const [copiedSummaryId, setCopiedSummaryId] = useState<string | null>(null);
 
   const handleGenerateSummary = async (app: Applicant) => {
     setLoadingSummaryId(app.id);
@@ -538,6 +564,7 @@ function Applicants() {
           skills: app.skills,
           city: app.city,
           verified: app.verified,
+          matchScore: app.match,
         }
       );
       const text = res.response || res.content || "";
@@ -732,7 +759,7 @@ function Applicants() {
         </div>
 
         {/* Role Type Switcher: All Candidates vs Permanent Roles vs Locum Shifts */}
-        <div className="inline-flex items-center gap-1.5 p-1 rounded-2xl bg-muted/60 border border-border/60 shadow-2xs overflow-x-auto max-w-full">
+        <div className="inline-flex items-center gap-1.5 p-1 rounded-2xl bg-muted/60 border border-border/60 shadow-2xs overflow-x-auto max-w-full no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <button
             type="button"
             onClick={() => {
@@ -812,7 +839,7 @@ function Applicants() {
         <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2.5 pb-2.5 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
           <div className="surface rounded-2xl border border-border bg-card p-3 sm:p-3.5 shadow-xs flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             {/* Status Tabs */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               {filterTabs.map((f) => {
                 const active = filter === f;
                 const count = counts[f as keyof typeof counts] || 0;
@@ -845,7 +872,7 @@ function Applicants() {
             </div>
 
             {/* Search + Custom Select */}
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
               <div className="relative flex-1 sm:w-64">
                 <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input
@@ -867,9 +894,9 @@ function Applicants() {
               </div>
 
               {/* Custom Select Component */}
-              <div className="w-44 sm:w-48 shrink-0">
+              <div className="w-full sm:w-48 shrink-0">
                 <Select value={selectedRole} onValueChange={setSelectedRole}>
-                  <SelectTrigger className="h-9 rounded-xl border-input bg-card text-xs font-medium">
+                  <SelectTrigger className="h-9 w-full rounded-xl border-input bg-card text-xs font-medium">
                     <SelectValue placeholder="All Roles" />
                   </SelectTrigger>
                   <SelectContent align="end">
@@ -894,15 +921,15 @@ function Applicants() {
             >
               <div>
                 {/* Top Row: Avatar, Clinician Name & Details, and Status Badge */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-brand text-xs font-bold text-primary-foreground shadow-2xs">
+                <div className="flex items-start justify-between gap-2.5 sm:gap-3">
+                  <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+                    <span className="grid h-10 w-10 sm:h-12 sm:w-12 shrink-0 place-items-center rounded-full bg-gradient-brand text-xs font-bold text-primary-foreground shadow-2xs">
                       {initials(a.name)}
                     </span>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <h2 className="text-base font-bold text-foreground leading-snug">
+                        <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug break-normal">
                           {a.name}
                         </h2>
                         {a.verified && (
@@ -986,29 +1013,239 @@ function Applicants() {
                 )}
 
                 {/* Clinical Candidate Summary (#11) */}
-                <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-2.5 text-[11px] space-y-1">
-                  <div className="flex items-center justify-between font-bold text-primary text-[10px] uppercase tracking-wider">
-                    <span className="flex items-center gap-1.5">
-                      <BotMessageSquare className="h-3 w-3 text-primary" /> Clinical Profile Summary
-                    </span>
+                <div className="mt-3.5 rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/[0.04] via-primary/[0.01] to-card/40 p-3 sm:p-3.5 space-y-2.5 shadow-2xs">
+                  {/* Top Bar: Header & Action Pill */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="w-5 h-5 rounded-md bg-primary/15 text-primary flex items-center justify-center shrink-0">
+                        <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
+                      </div>
+                      <span className="text-[10px] sm:text-[10.5px] font-bold text-primary tracking-wider uppercase whitespace-nowrap">
+                        Clinical Profile Summary
+                      </span>
+                    </div>
+
                     <button
                       type="button"
                       disabled={loadingSummaryId === a.id}
                       onClick={() => handleGenerateSummary(a)}
-                      className="text-[9.5px] font-bold text-primary hover:underline cursor-pointer lowercase"
+                      className={cn(
+                        "inline-flex items-center justify-center gap-1.5 px-3 py-1.5 sm:py-1 rounded-lg text-[10.5px] font-bold transition-all w-full sm:w-auto shrink-0 cursor-pointer shadow-2xs border",
+                        loadingSummaryId === a.id
+                          ? "bg-primary/10 text-primary border-primary/20 cursor-wait"
+                          : "bg-primary/10 hover:bg-primary/20 text-primary border-primary/25 active:scale-98"
+                      )}
                     >
-                      {loadingSummaryId === a.id ? "Analyzing..." : aiSummaries[a.id] ? "Regenerate AI" : "Summarize with AI"}
+                      {loadingSummaryId === a.id ? (
+                        <>
+                          <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin text-primary" />
+                          <span>{aiSummaries[a.id] ? "Regenerating..." : "Analyzing..."}</span>
+                        </>
+                      ) : aiSummaries[a.id] ? (
+                        <>
+                          <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
+                          <span>Regenerate with Ally</span>
+                        </>
+                      ) : (
+                        <>
+                          <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
+                          <span>Summarize with Ally</span>
+                        </>
+                      )}
                     </button>
                   </div>
-                  {aiSummaries[a.id] ? (
-                    <div className="text-foreground/90 leading-relaxed text-[11px] whitespace-pre-line pt-0.5">
-                      {aiSummaries[a.id]}
+
+                  {loadingSummaryId === a.id ? (
+                    <div className="py-5 sm:py-6 flex flex-col items-center justify-center gap-2 text-center rounded-xl border border-primary/20 bg-primary/[0.03] animate-pulse">
+                      <div className="relative flex items-center justify-center">
+                        <HiOutlineArrowPath className="h-6 w-6 animate-spin text-primary" />
+                        <BotMessageSquare className="h-3 w-3 text-primary absolute" />
+                      </div>
+                      <div className="space-y-0.5 px-3">
+                        <p className="text-[11px] font-bold text-foreground">
+                          {aiSummaries[a.id] ? "Regenerating Clinical Appraisal..." : "Ally is analyzing clinical credentials..."}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Evaluating statutory council registration, procedure competencies, and match rationale
+                        </p>
+                      </div>
+                    </div>
+                  ) : aiSummaries[a.id] ? (
+                    <div className="space-y-2 pt-0.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                          <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
+                          <span>Ally Live Assessment</span>
+                          <span className="rounded-full bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 text-[8.5px] font-bold lowercase tracking-normal">
+                            verified
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (aiSummaries[a.id]) {
+                              navigator.clipboard.writeText(aiSummaries[a.id]);
+                              setCopiedSummaryId(a.id);
+                              toast.success("Clinical summary copied to clipboard");
+                              setTimeout(() => setCopiedSummaryId(null), 2000);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded-md hover:bg-muted border border-transparent hover:border-border"
+                          title="Copy clinical appraisal"
+                        >
+                          {copiedSummaryId === a.id ? (
+                            <>
+                              <Check className="h-3 w-3 text-success" />
+                              <span className="text-success font-medium">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3 w-3" />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Scrollable Container with Fixed Controlled Height */}
+                      <div className="max-h-[145px] sm:max-h-[155px] overflow-y-auto pr-1 space-y-1.5 scrollbar-thin scrollbar-thumb-primary/25 hover:scrollbar-thumb-primary/40 scrollbar-track-transparent">
+                        {aiSummaries[a.id].split("\n").filter(Boolean).map((line, idx) => {
+                          const cleanLine = line.replace(/^[•\s*-]+/, "").trim();
+                          if (!cleanLine) return null;
+
+                          // Categorize clinical insights
+                          const isReg = idx === 1 || /council|registered|verification|statutory|licens|standing/i.test(cleanLine);
+                          const isMatch = idx === 2 || /match score|percent|suitability|discrepancy|alignment/i.test(cleanLine);
+
+                          const label = isMatch
+                            ? (a.match ?? 0) >= 70 ? "Roster Fit & Match Rationale" : "Supervisory Review & Cadre"
+                            : isReg
+                              ? "Statutory Council Standing"
+                              : "Unit Competence & Experience";
+
+                          return (
+                            <div
+                              key={idx}
+                              className={cn(
+                                "rounded-xl border p-2 sm:p-2.5 text-[11px] leading-relaxed transition-all shadow-2xs",
+                                isMatch && (a.match ?? 0) < 70
+                                  ? "bg-warning-soft/60 border-warning/40 text-amber-950 dark:bg-amber-500/10 dark:text-amber-200 dark:border-amber-500/20"
+                                  : isMatch && (a.match ?? 0) >= 70
+                                    ? "bg-success-soft/60 border-success/30 text-success-deep dark:bg-emerald-500/10 dark:text-emerald-200 dark:border-emerald-500/20"
+                                    : "bg-background/90 border-border/80 text-foreground/90"
+                              )}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1">
+                                {isMatch ? (
+                                  (a.match ?? 0) >= 70 ? (
+                                    <HiCheck className="h-3.5 w-3.5 text-success dark:text-emerald-400 shrink-0" />
+                                  ) : (
+                                    <HiOutlineBolt className="h-3.5 w-3.5 text-warning shrink-0" />
+                                  )
+                                ) : isReg ? (
+                                  <HiOutlineShieldCheck className="h-3.5 w-3.5 text-success dark:text-emerald-400 shrink-0" />
+                                ) : (
+                                  <HiOutlineBriefcase className="h-3.5 w-3.5 text-primary shrink-0" />
+                                )}
+                                <span className={cn(
+                                  "text-[9.5px] font-bold uppercase tracking-wider",
+                                  isMatch && (a.match ?? 0) < 70
+                                    ? "text-amber-800 dark:text-amber-300"
+                                    : isMatch && (a.match ?? 0) >= 70
+                                      ? "text-success dark:text-emerald-400"
+                                      : isReg
+                                        ? "text-success dark:text-emerald-400"
+                                        : "text-primary"
+                                )}>
+                                  {label}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-foreground/85 leading-normal pl-5">
+                                {cleanLine}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   ) : (
-                    <div className="text-muted-foreground leading-tight space-y-0.5">
-                      <p>• {a.name} · {a.exp || "Verified Clinician"} · {a.verified ? "State Council Verified" : "MCI/KMC Registered"}</p>
-                      <p>• Applied for: <span className="font-semibold text-foreground/80">{a.for}</span> · Skills: {a.skills && a.skills.length > 0 ? a.skills.join(", ") : "Core Clinical Protocols"}</p>
-                      <p>• {(a.match ?? 0) >= 70 ? "High clinical suitability for immediate roster allocation." : "Discrepancy detected with shift requirements; supervisory review recommended."} (Match Score: {a.match ?? 78}%)</p>
+                    <div className="space-y-2 pt-0.5">
+                      {/* Clinician Tags Row: Verification + Experience */}
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className="font-semibold text-foreground whitespace-nowrap">{a.name}</span>
+                        <span className="hidden sm:inline text-muted-foreground/40">·</span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-muted-foreground text-[10px] sm:text-[10.5px] font-medium border border-border whitespace-nowrap">
+                          <HiOutlineBriefcase className="h-3 w-3 text-muted-foreground shrink-0" />
+                          {a.exp || "Verified Clinician"}
+                        </span>
+                        <span className={cn(
+                          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] sm:text-[10.5px] font-medium border whitespace-nowrap",
+                          a.verified
+                            ? "bg-success-soft text-success border-success/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20"
+                            : "bg-muted text-muted-foreground border-border"
+                        )}>
+                          <HiOutlineShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                          {a.verified ? "State Council Verified" : "MCI/KMC Registered"}
+                        </span>
+                      </div>
+
+                      {/* Applied Role & Key Skills with Zero Misalignment */}
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-[11px] leading-snug">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-muted-foreground shrink-0">Applied for:</span>
+                          <span className="font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md text-[10.5px] break-words">
+                            {a.for}
+                          </span>
+                        </div>
+                        {a.skills && a.skills.length > 0 && (
+                          <div className="flex items-center gap-1.5 min-w-0 text-muted-foreground flex-wrap sm:flex-nowrap">
+                            <span className="hidden sm:inline text-muted-foreground/40">·</span>
+                            <span className="text-muted-foreground shrink-0">Skills:</span>
+                            <span className="text-foreground/85 font-medium truncate" title={a.skills.join(", ")}>
+                              {a.skills.slice(0, 3).join(", ")}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Dynamic Suitability & Match Score Banner */}
+                      <div
+                        className={cn(
+                          "rounded-xl border p-2.5 flex items-start sm:items-center justify-between gap-2.5 transition-all",
+                          (a.match ?? 0) >= 70
+                            ? "bg-success-soft border-success/30 text-success-deep dark:bg-emerald-500/10 dark:border-emerald-500/25 dark:text-emerald-300"
+                            : "bg-warning-soft border-warning/40 text-amber-950 dark:bg-amber-500/10 dark:border-amber-500/25 dark:text-amber-200"
+                        )}
+                      >
+                        <div className="flex items-start sm:items-center gap-2 min-w-0">
+                          {(a.match ?? 0) >= 70 ? (
+                            <div className="w-5 h-5 rounded-full bg-success/15 text-success dark:bg-emerald-500/20 dark:text-emerald-300 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                              <HiCheck className="h-3.5 w-3.5 stroke-2" />
+                            </div>
+                          ) : (
+                            <div className="w-5 h-5 rounded-full bg-warning/20 text-warning dark:bg-amber-500/20 dark:text-amber-300 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                              <HiOutlineBolt className="h-3.5 w-3.5" />
+                            </div>
+                          )}
+                          <span className="text-[11px] font-medium leading-snug">
+                            {(a.match ?? 0) >= 70
+                              ? "High clinical suitability for immediate roster allocation."
+                              : "Discrepancy detected with shift requirements; supervisory review recommended."}
+                          </span>
+                        </div>
+
+                        <div
+                          className={cn(
+                            "px-2.5 py-0.5 rounded-lg text-[10.5px] font-bold shrink-0 whitespace-nowrap shadow-2xs border self-center",
+                            (a.match ?? 0) >= 70
+                              ? "bg-success text-white dark:bg-emerald-500/25 dark:text-emerald-200 border-success/30"
+                              : "bg-warning text-white dark:bg-amber-500/25 dark:text-amber-200 border-warning/40"
+                          )}
+                        >
+                          {(a.match ?? 0) >= 70 ? "Match" : "Score"}: {a.match ?? 78}%
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1248,73 +1485,80 @@ function Applicants() {
         open={!!selectedResume}
         onOpenChange={(open) => !open && setSelectedResume(null)}
       >
-        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl p-0">
+        <DialogContent className="sm:max-w-4xl h-[90vh] max-h-[92vh] overflow-hidden flex flex-col sm:rounded-3xl rounded-t-[28px] border-t sm:border border-border bg-card shadow-2xl p-0">
           {selectedResume && (
-            <div className="flex flex-col">
+            <div className="flex flex-col h-full overflow-hidden">
               {/* Resume Header / Top Toolbar */}
-              <div className="border-b border-border bg-muted/30 p-6">
-                <DialogHeader className="text-left space-y-1">
-                  <div className="flex flex-wrap items-center justify-between gap-3 pr-6">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <DialogTitle className="text-xl font-bold text-foreground">
-                          {selectedResume.name}
-                        </DialogTitle>
-                        {selectedResume.verified && (
-                          <HiOutlineShieldCheck
-                            className="h-5 w-5 text-primary"
-                            title="Verified Clinical Candidate"
-                          />
-                        )}
-                        <span className="rounded-full bg-primary-soft text-primary px-2.5 py-0.5 text-xs font-bold">
-                          {selectedResume.role}
-                        </span>
-                        {selectedResume.isShiftClaim || selectedResume.for.toLowerCase().includes("shift") ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 text-xs font-bold text-amber-700 dark:text-amber-300">
-                            <HiOutlineBolt className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-                            Locum Shift
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/20 px-2.5 py-0.5 text-xs font-bold text-blue-700 dark:text-blue-300">
-                            <HiOutlineBriefcase className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                            Permanent Role
-                          </span>
-                        )}
-                        {selectedResume.match !== undefined && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
-                            <HiOutlineSparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                            <span>{(selectedResume.match ?? 0) >= 90 ? `Exact Match (${selectedResume.match}%)` : `${selectedResume.match}% Match`}</span>
-                          </span>
-                        )}
-                      </div>
-                      <DialogDescription className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
-                        <span className="flex items-center gap-1">
-                          <HiOutlineMapPin className="h-3.5 w-3.5" />
-                          {selectedResume.city}
-                        </span>
-                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
-                        <span>Applied for {selectedResume.for}</span>
-                      </DialogDescription>
+              <div className="border-b border-border bg-muted/30 p-4 sm:p-6 shrink-0 pr-10 sm:pr-12">
+                <DialogHeader className="text-left space-y-1.5">
+                  <div>
+                    {/* Candidate Name + Shield */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <DialogTitle className="text-lg sm:text-xl font-bold text-foreground break-normal">
+                        {selectedResume.name}
+                      </DialogTitle>
+                      {selectedResume.verified && (
+                        <HiOutlineShieldCheck
+                          className="h-5 w-5 text-primary shrink-0"
+                          title="Verified Clinical Candidate"
+                        />
+                      )}
                     </div>
+
+                    {/* Dynamic Clinical Badges Sub-row with natural wrapping */}
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                      <span className="rounded-full bg-primary-soft text-primary px-2.5 py-0.5 text-xs font-bold shrink-0">
+                        {selectedResume.role}
+                      </span>
+                      {selectedResume.isShiftClaim || selectedResume.for.toLowerCase().includes("shift") ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 text-xs font-bold text-amber-700 dark:text-amber-300 shrink-0">
+                          <HiOutlineBolt className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                          Locum Shift
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/20 px-2.5 py-0.5 text-xs font-bold text-blue-700 dark:text-blue-300 shrink-0">
+                          <HiOutlineBriefcase className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                          Permanent Role
+                        </span>
+                      )}
+                      {selectedResume.match !== undefined && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 shrink-0">
+                          <HiOutlineSparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span>{(selectedResume.match ?? 0) >= 90 ? `Exact Match (${selectedResume.match}%)` : `${selectedResume.match}% Match`}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Location & Applied For Meta */}
+                    <DialogDescription className="mt-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+                      <span className="flex items-center gap-1">
+                        <HiOutlineMapPin className="h-3.5 w-3.5" />
+                        {selectedResume.city}
+                      </span>
+                      <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <span>Applied for <strong className="font-semibold text-foreground/90">{selectedResume.for}</strong></span>
+                    </DialogDescription>
                   </div>
                 </DialogHeader>
 
                 {/* Council Verification Pill */}
-                <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-card border border-border p-3 text-xs">
-                  <span className="text-muted-foreground font-medium">Council Registration:</span>
-                  <span className="font-mono font-bold text-foreground">{selectedResume.regNumber}</span>
-                  <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                <div className="mt-3 sm:mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl bg-card border border-border p-3 text-xs shadow-2xs">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-muted-foreground font-medium">Council Registration:</span>
+                    <span className="font-mono font-bold text-foreground">{selectedResume.regNumber}</span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
                     <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> FALE Credential Verified
                   </span>
                 </div>
               </div>
 
               {/* Candidate Onboarding Resume Preview */}
-              <div className="w-full bg-muted/20 p-4 sm:p-5">
+              <div className="w-full flex-1 overflow-y-auto bg-muted/20 p-4 sm:p-5 custom-scrollbar">
                 {selectedResume.resumeUrl ? (
                   <iframe
                     src={`${selectedResume.resumeUrl}#toolbar=0&navpanes=0&scrollbar=1`}
-                    className="w-full h-[65vh] rounded-xl border border-border bg-white shadow-xs"
+                    className="w-full h-full min-h-[55vh] rounded-xl border border-border bg-white shadow-xs"
                     title={`${selectedResume.name} Resume`}
                   />
                 ) : (
@@ -1331,13 +1575,13 @@ function Applicants() {
               </div>
 
               {/* Resume Footer with Direct Stage Actions */}
-              <div className="border-t border-border bg-muted/20 p-4 flex items-center justify-between gap-3">
-                <div className="text-xs">
-                  <span className="text-muted-foreground text-[10px] block">Current Status</span>
+              <div className="border-t border-border bg-muted/20 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center justify-between sm:justify-start gap-2.5 text-xs w-full sm:w-auto">
+                  <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wider">Current Status</span>
                   <StatusBadge status={status[selectedResume.id] ?? selectedResume.status} />
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
                   {(selectedResume.isShiftClaim || selectedResume.for?.toLowerCase().includes("shift")) ? (
                     (status[selectedResume.id] ?? selectedResume.status) === "Timesheet Submitted" ? (
                       <Button
@@ -1347,7 +1591,7 @@ function Applicants() {
                           setSelectedResume(null);
                           openVerifyTimesheetModal(target);
                         }}
-                        className="rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+                        className="rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer w-full sm:w-auto"
                       >
                         Verify Timesheet ({selectedResume.actualHours || selectedResume.scheduledHours || 8}h)
                       </Button>
@@ -1370,7 +1614,7 @@ function Applicants() {
                         ● Capacity Filled
                       </span>
                     ) : (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
                         <Button
                           size="sm"
                           variant="outline"
@@ -1379,7 +1623,7 @@ function Applicants() {
                             setSelectedResume(null);
                             openRejectModal(target);
                           }}
-                          className="rounded-xl text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                          className="rounded-xl text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer flex-1 sm:flex-initial"
                         >
                           Decline Claim
                         </Button>
@@ -1389,7 +1633,7 @@ function Applicants() {
                             handleConfirmShift(selectedResume);
                             setSelectedResume(null);
                           }}
-                          className="rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+                          className="rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer flex-1 sm:flex-initial"
                         >
                           Confirm Shift
                         </Button>
@@ -1405,7 +1649,7 @@ function Applicants() {
                             size="sm"
                             variant="outline"
                             onClick={() => openRejectModal(selectedResume)}
-                            className="rounded-xl text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                            className="rounded-xl text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30 w-full sm:w-auto"
                           >
                             Decline
                           </Button>
@@ -1419,7 +1663,7 @@ function Applicants() {
                             handleInvite(selectedResume);
                             setSelectedResume(null);
                           }}
-                          className="rounded-xl text-xs font-semibold shadow-xs"
+                          className="rounded-xl text-xs font-semibold shadow-xs w-full sm:w-auto"
                         >
                           Invite to interview
                         </Button>
@@ -1432,7 +1676,7 @@ function Applicants() {
                             handleMakeOffer(selectedResume);
                             setSelectedResume(null);
                           }}
-                          className="rounded-xl text-xs font-semibold shadow-xs"
+                          className="rounded-xl text-xs font-semibold shadow-xs w-full sm:w-auto"
                         >
                           Extend offer
                         </Button>
@@ -1444,8 +1688,8 @@ function Applicants() {
                           onClick={() => {
                             handleHire(selectedResume);
                             setSelectedResume(null);
-                          }}
-                          className="rounded-xl text-xs font-semibold shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                            }}
+                          className="rounded-xl text-xs font-semibold shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto"
                         >
                           Confirm Hired
                         </Button>
@@ -1680,24 +1924,26 @@ function Applicants() {
           open={!!interviewQuestionsModalApp}
           onOpenChange={(open) => !open && setInterviewQuestionsModalApp(null)}
         >
-          <DialogContent className="max-w-lg rounded-3xl p-6">
-            <DialogHeader>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary">
-                  <BotMessageSquare className="h-4.5 w-4.5 text-primary" />
-                </span>
-                <div>
-                  <DialogTitle className="text-base font-bold text-foreground">
-                    Clinical Interview Questions
-                  </DialogTitle>
-                  <DialogDescription className="text-xs text-muted-foreground">
-                    Tailored for {interviewQuestionsModalApp.name} · {interviewQuestionsModalApp.for}
-                  </DialogDescription>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-hidden flex flex-col sm:rounded-3xl rounded-t-[28px] border-t sm:border border-border bg-card shadow-2xl p-0">
+            <div className="p-5 sm:p-6 border-b border-border bg-muted/30 shrink-0">
+              <DialogHeader>
+                <div className="flex items-center gap-2 mb-1 pr-6">
+                  <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
+                    <BotMessageSquare className="h-4.5 w-4.5 text-primary" />
+                  </span>
+                  <div className="min-w-0">
+                    <DialogTitle className="text-base font-bold text-foreground truncate">
+                      Clinical Interview Questions
+                    </DialogTitle>
+                    <DialogDescription className="text-xs text-muted-foreground truncate">
+                      Tailored for {interviewQuestionsModalApp.name} · {interviewQuestionsModalApp.for}
+                    </DialogDescription>
+                  </div>
                 </div>
-              </div>
-            </DialogHeader>
+              </DialogHeader>
+            </div>
 
-            <div className="space-y-3 py-2">
+            <div className="space-y-3 p-5 sm:p-6 overflow-y-auto flex-1 custom-scrollbar">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Recommended Clinical Screening Questions:
               </p>
@@ -1723,7 +1969,7 @@ function Applicants() {
               )}
             </div>
 
-            <DialogFooter className="mt-2">
+            <div className="p-4 border-t border-border bg-muted/20 shrink-0 flex items-center justify-end">
               <Button
                 variant="outline"
                 onClick={() => setInterviewQuestionsModalApp(null)}
@@ -1731,7 +1977,7 @@ function Applicants() {
               >
                 Close
               </Button>
-            </DialogFooter>
+            </div>
           </DialogContent>
         </Dialog>
       )}

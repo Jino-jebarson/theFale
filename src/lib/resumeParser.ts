@@ -410,8 +410,8 @@ function extractProfession(text: string): { role?: string; specialty?: string } 
     }
   }
 
-  const role = matchedRole || "Nurse";
-  const deptsForRole = departmentsByProfession[role] ?? [];
+  const role = matchedRole || undefined;
+  const deptsForRole = role ? (departmentsByProfession[role] ?? []) : [];
 
   // Detect Specialty / Department based on the selected profession
   for (const d of deptsForRole) {
@@ -422,11 +422,7 @@ function extractProfession(text: string): { role?: string; specialty?: string } 
     }
   }
 
-  if (!matchedSpecialty && deptsForRole.length > 0) {
-    matchedSpecialty = deptsForRole[0];
-  }
-
-  return { role, specialty: matchedSpecialty };
+  return { role, specialty: matchedSpecialty || undefined };
 }
 
 function extractRegistrationInfo(text: string): { regNo?: string; council?: string; regValid?: string } {
@@ -517,8 +513,6 @@ function extractExperience(text: string): { exp?: string; employer?: string; des
     else result.exp = "10+ yrs";
   } else if (/fresher|intern\b/i.test(text) && !/years\s*exp/i.test(text)) {
     result.exp = "Fresher";
-  } else {
-    result.exp = "2–5 yrs";
   }
 
   // Employer matching (Hospitals / Healthcare centers)
@@ -538,7 +532,6 @@ function extractExperience(text: string): { exp?: string; employer?: string; des
   if (/immediate|immediately/i.test(text)) result.notice = "Immediately";
   else if (/15 days/i.test(text)) result.notice = "15 days";
   else if (/30 days|1 month/i.test(text)) result.notice = "30 days";
-  else result.notice = "Immediately";
 
   return result;
 }

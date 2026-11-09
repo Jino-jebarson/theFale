@@ -6,6 +6,9 @@ import {
   HiOutlineClock,
   HiOutlineAcademicCap,
   HiOutlineEye,
+  HiOutlineEyeSlash,
+  HiOutlineCurrencyRupee,
+  HiOutlineBanknotes,
   HiOutlineBookmark,
   HiBookmark,
   HiOutlineDocumentCheck,
@@ -91,6 +94,26 @@ function Home() {
     hasIncreased: false,
   });
 
+  const [showEarnings, setShowEarnings] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("fale_candidate_show_earnings");
+      return saved !== null ? saved === "true" : false;
+    }
+    return false;
+  });
+
+  const toggleShowEarnings = () => {
+    setShowEarnings((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("fale_candidate_show_earnings", String(next));
+        } catch {}
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (!isApiEnabled) return;
     setLoading(true);
@@ -125,6 +148,8 @@ function Home() {
               email: profileData.email || prev.profile["email"],
               mobile: profileData.phone || prev.profile["mobile"],
               city: profileData.city || prev.profile["city"],
+              area: profileData.city || prev.profile["city"] || prev.profile["area"],
+              addressLine: profileData.addressLine || prev.profile["addressLine"],
               state: profileData.state || prev.profile["state"],
               role: profileData.profession || (profileData.isStudent ? profileData.course : "Doctor"),
               specialty: profileData.specialty || "General medicine",
@@ -163,7 +188,7 @@ function Home() {
   const courseName = String(s.profile["course"] || "Allied Health Sciences");
   const collegeName = String(s.profile["college"] || "Healthcare Academy");
   const studyYear = String(s.profile["studyYear"] || "Final Year");
-  const studentArea = String(s.profile["area"] || s.profile["city"] || "Chennai");
+  const candidateLocation = String(s.profile["city"] || s.profile["area"] || "").trim();
 
   const fullName = String(s.profile["name"] || (isStudent ? "Healthcare Student" : "Dr. Ananya Patel")).trim();
   const firstName = fullName.split(" ")[0]?.replace(",", "") || "there";
@@ -248,6 +273,30 @@ const claimedShiftIds = useMemo(() => {
   const fromLocal = Object.keys(claimedShifts).filter((k) => claimedShifts[k]);
   return new Set([...fromApiClaims, ...fromApiShifts, ...fromLocal, ...(s.shiftApps || [])]);
 }, [apiClaims, apiShifts, claimedShifts, s.shiftApps]);
+
+// Candidate Shift & Duty Realized / Confirmed Earnings
+const candidateTotalEarnings = useMemo(() => {
+  if (apiClaims && apiClaims.length > 0) {
+    const fromClaims = apiClaims.reduce((sum, c) => {
+      const amt = c.netAmountPaise
+        ? c.netAmountPaise / 100
+        : c.payoutPaise
+        ? c.payoutPaise / 100
+        : c.grossAmountPaise
+        ? c.grossAmountPaise / 100
+        : 0;
+      return sum + amt;
+    }, 0);
+    if (fromClaims > 0) return fromClaims;
+  }
+
+  const matchedShifts = effectiveShifts.filter((sh) => claimedShiftIds.has(sh.id));
+  return matchedShifts.reduce((sum, sh) => {
+    const r = typeof sh.rate === "number" ? sh.rate : (sh.rateNumber || 500);
+    const h = sh.hours || 8;
+    return sum + (sh.totalPayNumber || (r * h));
+  }, 0);
+}, [apiClaims, effectiveShifts, claimedShiftIds]);
 
 // Dynamic Top Metrics from PostgreSQL candidate_profile_views
 const profileViewsCount = viewStats.totalViews;
@@ -515,7 +564,7 @@ return (
         <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-primary/5 blur-3xl pointer-events-none" />
         <div className="absolute left-1/3 -bottom-20 h-40 w-40 rounded-full bg-primary/5 blur-3xl pointer-events-none" />
 
-        <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6">
+        <div className="relative flex flex-col xl:flex-row xl:items-center justify-between gap-4 sm:gap-6">
           {/* Left: Avatar + Identity + Clinical Status */}
           <div className="flex items-center gap-3.5 sm:gap-5 min-w-0">
             <div className="relative shrink-0">
@@ -543,7 +592,7 @@ return (
                 <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground leading-none">
                   Welcome back, {firstName}
                 </h1>
-                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-xs font-bold text-primary shrink-0">
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft border border-primary/20 px-2.5 py-0.5 text-xs font-bold text-primary shrink-0">
                   {isStudent ? (
                     <HiOutlineAcademicCap className="h-3.5 w-3.5 text-primary shrink-0" />
                   ) : (
@@ -555,11 +604,15 @@ return (
 
               <div className="flex flex-wrap items-center gap-x-2.5 sm:gap-x-3 gap-y-1.5 text-xs sm:text-sm text-muted-foreground">
                 <span className="font-semibold text-foreground">{specialty}</span>
-                <span className="hidden sm:inline-block h-1 w-1 rounded-full bg-muted-foreground/35 shrink-0" />
-                <span className="inline-flex items-center gap-1 text-muted-foreground">
-                  <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-                  <span>{studentArea}</span>
-                </span>
+                {candidateLocation && (
+                  <>
+                    <span className="hidden sm:inline-block h-1 w-1 rounded-full bg-muted-foreground/35 shrink-0" />
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+                      <span>{candidateLocation}</span>
+                    </span>
+                  </>
+                )}
                 <span className="hidden sm:inline-block h-1 w-1 rounded-full bg-muted-foreground/35 shrink-0" />
                 <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
                   <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
@@ -569,27 +622,67 @@ return (
             </div>
           </div>
 
-          {/* Right: Quick Action Controls */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 shrink-0 w-full md:w-auto pt-1 md:pt-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDownloadCV}
-              className="w-full sm:w-auto h-10 px-4 rounded-xl border-border/80 hover:bg-muted font-bold text-xs shadow-none gap-2 justify-center"
-            >
-              <HiOutlineArrowDownTray className="h-4 w-4 text-primary shrink-0" />
-              <span>{isStudent ? "Export Academic Portfolio" : "Export Clinical CV"}</span>
-            </Button>
-            <Button
-              size="sm"
-              asChild
-              className="w-full sm:w-auto h-10 px-5 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-white shadow-none gap-2 justify-center"
-            >
-              <Link to="/jobs" search={{ q: undefined }}>
-                <span>{isStudent ? "Explore Internships" : "Explore Matches"}</span>
-                <HiArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </Button>
+          {/* Right: Quick Action Controls + Candidate Earnings Placed Below */}
+          <div className="flex flex-col items-stretch sm:items-end gap-2.5 shrink-0 w-full md:w-auto pt-1 md:pt-0">
+            {/* Top Action Buttons Row */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadCV}
+                className="h-10 px-4 rounded-xl border-border/80 hover:bg-primary-soft hover:border-primary/40 font-bold text-xs shadow-none gap-2 justify-center transition-colors text-foreground w-full sm:w-auto"
+              >
+                <HiOutlineArrowDownTray className="h-4 w-4 text-primary shrink-0" />
+                <span>{isStudent ? "Export Academic Portfolio" : "Export Clinical CV"}</span>
+              </Button>
+              <Button
+                size="sm"
+                asChild
+                className="h-10 px-5 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-primary-foreground shadow-none gap-2 justify-center cursor-pointer transition-all w-full sm:w-auto"
+              >
+                <Link to="/jobs" search={{ q: undefined }}>
+                  <span>{isStudent ? "Explore Internships" : "Explore Matches"}</span>
+                  <HiArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </Button>
+            </div>
+
+            {/* Candidate Earnings Capsule Placed Below */}
+            <div className="flex items-center justify-between sm:justify-end gap-2.5 h-8.5 px-3 rounded-lg bg-primary-soft/70 hover:bg-primary-soft border border-primary/20 text-xs transition-all shadow-2xs w-full sm:w-auto">
+              <div className="flex items-center gap-2 min-w-0">
+                <HiOutlineCurrencyRupee className="h-4 w-4 text-primary shrink-0" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+                  {isStudent ? "Stipend:" : "Earnings:"}
+                </span>
+                <span className="font-extrabold font-mono text-foreground tracking-tight text-xs sm:text-sm whitespace-nowrap">
+                  {showEarnings ? `₹${candidateTotalEarnings.toLocaleString("en-IN")}` : "₹ ••••••"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={toggleShowEarnings}
+                  className="p-1 rounded-md text-primary hover:text-primary-hover hover:bg-primary/10 transition-colors cursor-pointer"
+                  title={showEarnings ? "Hide earnings" : "Click to view amount"}
+                  aria-label={showEarnings ? "Hide earnings" : "Click to view amount"}
+                >
+                  {showEarnings ? (
+                    <HiOutlineEyeSlash className="h-3.5 w-3.5" />
+                  ) : (
+                    <HiOutlineEye className="h-3.5 w-3.5" />
+                  )}
+                </button>
+                <span className="h-3.5 w-px bg-primary/20 shrink-0 mx-0.5" />
+                <Link
+                  to="/earnings"
+                  className="text-[11px] font-bold text-primary hover:text-primary-hover hover:underline inline-flex items-center gap-0.5"
+                  title="View full wallet & transaction ledger"
+                >
+                  <span>Wallet</span>
+                  <HiArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -612,7 +705,7 @@ return (
                 PROFILE VIEWS
               </span>
             </div>
-            <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
+            <span className="shrink-0 rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
               {viewStats.totalViews > 0
                 ? `${viewStats.weeklyGrowthPercent >= 0 ? `+${viewStats.weeklyGrowthPercent}%` : `${viewStats.weeklyGrowthPercent}%`} wk`
                 : "Live"}
@@ -649,7 +742,7 @@ return (
                 CURATED ROLES
               </span>
             </div>
-            <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
+            <span className="shrink-0 rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
               Top {topMatchScore}% Match
             </span>
           </div>
@@ -681,7 +774,7 @@ return (
                 INSTANT SHIFTS
               </span>
             </div>
-            <span className="shrink-0 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 text-[10px] font-extrabold px-2 py-0.5">
+            <span className="shrink-0 rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
               {urgentShiftsCount > 0 ? `${urgentShiftsCount} Urgent` : "Tonight"}
             </span>
           </div>
@@ -713,7 +806,7 @@ return (
                 APPLICATIONS
               </span>
             </div>
-            <span className="shrink-0 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-[10px] font-extrabold px-2 py-0.5">
+            <span className="shrink-0 rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
               {activeApplicationsCount} Active
             </span>
           </div>
@@ -742,21 +835,21 @@ return (
         {/* ======================================================================= */}
         <section className="lg:col-span-8 w-full min-w-0 space-y-5">
           {/* Feed Filter Header & Controls */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 p-1">
-            <div>
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
+            <div className="space-y-1.5 sm:space-y-2 min-w-0">
               <div className="flex items-center gap-2.5 flex-wrap">
-                <h2 className="text-lg sm:text-xl font-bold tracking-tight text-foreground">
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight text-foreground leading-snug">
                   {filter === "Other openings"
                     ? "Other Healthcare Openings"
                     : isStudent
                       ? "Recommended for You (Internships)"
                       : "Recommended Roles"}
                 </h2>
-                <span className="rounded-full bg-primary/10 border border-primary/20 text-primary px-2.5 py-0.5 text-xs font-bold shrink-0">
-                  {filteredJobs.length} {isStudent ? "openings available" : "roles available"}
+                <span className="rounded-full bg-primary-soft border border-primary/25 text-primary px-2.5 py-0.5 text-xs font-bold shrink-0">
+                  {filteredJobs.length} {filteredJobs.length === 1 ? (isStudent ? "opening available" : "role available") : (isStudent ? "openings available" : "roles available")}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-xl">
                 {filter === "Other openings"
                   ? "Explore additional hospital roles across different specialties, cities, or clinical cadres"
                   : isStudent
@@ -768,7 +861,7 @@ return (
             <Link
               to="/jobs"
               search={{ q: undefined }}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:underline self-start sm:self-auto shrink-0"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-hover hover:underline self-start sm:self-center shrink-0 pt-1 sm:pt-0"
             >
               <span>{isStudent ? `View all internships (${studentInternships.length})` : `View all jobs (${effectiveJobs.length})`}</span>
               <HiOutlineArrowTopRightOnSquare className="h-4 w-4" />
@@ -859,7 +952,7 @@ return (
             <div className="rounded-3xl border border-dashed border-border/80 bg-card/80 backdrop-blur-xs p-6 sm:p-10 text-center animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden shadow-xs">
               {/* Saffron ambient brand glow */}
               <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#FF5A1F]/10 dark:bg-[#FF5A1F]/15 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute -bottom-16 right-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-16 right-10 w-48 h-48 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
 
               <div className="relative z-10 max-w-lg mx-auto flex flex-col items-center">
                 {/* Empty State Animated Illustration (from earnings page) */}
@@ -994,7 +1087,7 @@ return (
                               (job.match ?? 0) >= 70
                                 ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
                                 : (job.match ?? 0) >= 40
-                                  ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                                  ? "bg-primary-soft border-primary/25 text-primary"
                                   : "bg-muted border-border text-muted-foreground"
                             )}
                           >
@@ -1004,7 +1097,7 @@ return (
                                 (job.match ?? 0) >= 70
                                   ? "bg-emerald-500 animate-pulse"
                                   : (job.match ?? 0) >= 40
-                                    ? "bg-amber-500"
+                                    ? "bg-primary"
                                     : "bg-muted-foreground"
                               )}
                             />
@@ -1298,7 +1391,7 @@ return (
               <>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="grid h-8 w-8 place-items-center rounded-xl bg-amber-500/10 text-amber-600 shrink-0">
+                    <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary-soft text-primary border border-primary/20 shrink-0">
                       <HiOutlineClock className="h-4 w-4" />
                     </span>
                     <div>

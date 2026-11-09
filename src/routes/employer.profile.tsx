@@ -502,24 +502,24 @@ function HospitalProfileScreen() {
               <div className="absolute left-1/3 -bottom-10 h-40 w-40 rounded-full bg-primary/10 blur-2xl pointer-events-none" />
 
               {/* Banner Top Row: Badges */}
-              <div className="relative z-10 flex items-center justify-between gap-2">
+              <div className="relative z-10 flex items-center justify-between gap-2 w-full">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-card/90 backdrop-blur-md px-3 py-1 text-xs font-bold text-primary border border-primary/25 shadow-xs">
                   <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
                   <span>Verified Healthcare Institution</span>
                 </span>
 
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 px-2.5 py-1 text-xs font-bold backdrop-blur-md">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 px-2.5 py-1 text-xs font-bold backdrop-blur-md">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                   <span>{isVerified ? "Regulatory Approved" : "State Health Authority Registered"}</span>
                 </span>
               </div>
             </div>
 
             {/* Identity Body Strip */}
-            <div className="px-5 sm:px-8 pb-7">
+            <div className="px-4 sm:px-8 pb-6 sm:pb-7">
               <div className="-mt-14 sm:-mt-16 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 {/* Logo with Circular Shield & Update Camera Option */}
-                <div className="relative shrink-0 group">
+                <div className="relative shrink-0 group w-fit self-start">
                   <input
                     ref={logoInputRef}
                     type="file"
@@ -550,32 +550,32 @@ function HospitalProfileScreen() {
                   <button
                     type="button"
                     onClick={() => logoInputRef.current?.click()}
-                    className="absolute bottom-1 right-1 p-2 rounded-full bg-primary text-white shadow-md hover:bg-primary-hover transition-transform active:scale-95 cursor-pointer z-10"
+                    className="absolute -bottom-1 -right-1 p-2 rounded-full bg-primary text-white shadow-md hover:bg-primary-hover transition-transform active:scale-95 cursor-pointer z-10"
                     title="Upload hospital brand logo"
                   >
                     <HiOutlineCamera className="h-4 w-4" />
                   </button>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex flex-wrap items-center gap-2.5 shrink-0 w-full sm:w-auto">
+                {/* Action Buttons: Equal 50/50 balance on mobile */}
+                <div className="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setEditSection("identity")}
-                    className="rounded-xl text-xs font-bold gap-1.5 border-border hover:border-primary text-foreground hover:text-primary h-9 px-3.5 cursor-pointer shadow-xs"
+                    className="flex-1 sm:flex-initial rounded-xl text-xs font-bold gap-1.5 border-border hover:border-primary text-foreground hover:text-primary h-10 sm:h-9 px-4 cursor-pointer shadow-xs justify-center"
                   >
-                    <HiOutlinePencilSquare className="h-3.5 w-3.5 text-primary" />
+                    <HiOutlinePencilSquare className="h-3.5 w-3.5 text-primary shrink-0" />
                     <span>Edit Profile</span>
                   </Button>
 
                   <Button
                     asChild
                     size="sm"
-                    className="rounded-xl text-xs font-bold h-9 px-4 gap-1.5 bg-primary hover:bg-primary-hover text-white shadow-xs cursor-pointer"
+                    className="flex-1 sm:flex-initial rounded-xl text-xs font-bold h-10 sm:h-9 px-4 gap-1.5 bg-primary hover:bg-primary-hover text-white shadow-xs cursor-pointer justify-center"
                   >
                     <Link to="/employer/post-shift">
-                      <HiOutlineBolt className="h-3.5 w-3.5" />
+                      <HiOutlineBolt className="h-3.5 w-3.5 shrink-0" />
                       <span>+ Post Shift</span>
                     </Link>
                   </Button>
@@ -585,11 +585,11 @@ function HospitalProfileScreen() {
               {/* Hospital Name & Verified Pills Beside It (Exact Candidate Match) */}
               <div className="mt-4 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-2xl sm:text-3xl font-black text-foreground tracking-tight">
+                  <h1 className="text-xl sm:text-3xl font-black text-foreground tracking-tight break-words">
                     {hospitalName}
                   </h1>
                   <RiVerifiedBadgeFill
-                    className="h-6 w-6 text-emerald-500 shrink-0"
+                    className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 shrink-0"
                     title="State Health Authority & FALE Council Verified"
                   />
 
@@ -605,18 +605,18 @@ function HospitalProfileScreen() {
                 </div>
 
                 {/* Sub-strip with Location, Beds, and Accreditation */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground pt-0.5">
+                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-muted-foreground pt-0.5">
                   <span className="inline-flex items-center gap-1 font-semibold text-foreground">
                     <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
                     {city}{stateName ? `, ${stateName}` : ""}, India
                   </span>
-                  <span>•</span>
+                  <span className="hidden sm:inline text-muted-foreground/40">•</span>
                   <span className="font-medium text-foreground">
                     {beds}+ Inpatient Beds{Number(icuBeds) > 0 ? ` (${icuBeds} ICU & Critical)` : ""}
                   </span>
-                  <span>•</span>
+                  <span className="hidden sm:inline text-muted-foreground/40">•</span>
                   <span className="text-primary font-bold flex items-center gap-1">
-                    <HiOutlineShieldCheck className="h-3.5 w-3.5" />
+                    <HiOutlineShieldCheck className="h-3.5 w-3.5 shrink-0" />
                     License: {licenseNumber || "CEA-VERIFIED"}
                   </span>
                 </div>
@@ -625,44 +625,44 @@ function HospitalProfileScreen() {
 
             {/* Quick Dynamic Metrics Bar (Clean 4-Card Token Layout) */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-border/70 border-t border-border text-center overflow-hidden">
-              <div className="p-3.5 bg-card">
-                <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+              <div className="p-3 sm:p-4 bg-card">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block">
                   Total Inpatient Beds
                 </span>
-                <span className="text-lg sm:text-xl font-black font-mono text-foreground mt-0.5 block">
+                <span className="text-xl sm:text-2xl font-black tracking-tight text-foreground mt-0.5 block">
                   {beds}+ Beds
                 </span>
-                <span className="text-[10px] text-muted-foreground block">Sanctioned &amp; Operational</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5 truncate">Sanctioned &amp; Operational</span>
               </div>
 
-              <div className="p-3.5 bg-card">
-                <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+              <div className="p-3 sm:p-4 bg-card">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block">
                   ICU &amp; Critical Care
                 </span>
-                <span className="text-lg sm:text-xl font-black font-mono text-foreground mt-0.5 block">
+                <span className="text-xl sm:text-2xl font-black tracking-tight text-foreground mt-0.5 block">
                   {icuBeds} Beds
                 </span>
-                <span className="text-[10px] text-muted-foreground block">Ventilator &amp; Monitored</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5 truncate">Ventilator &amp; Monitored</span>
               </div>
 
-              <div className="p-3.5 bg-card">
-                <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+              <div className="p-3 sm:p-4 bg-card">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block">
                   Clinical Specialties
                 </span>
-                <span className="text-lg sm:text-xl font-black font-mono text-foreground mt-0.5 block">
-                  {departments.length} Specialties
+                <span className="text-xl sm:text-2xl font-black tracking-tight text-foreground mt-0.5 block">
+                  {departments.length} Units
                 </span>
-                <span className="text-[10px] text-muted-foreground block">Active Departments</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5 truncate">Active Departments</span>
               </div>
 
-              <div className="p-3.5 bg-card">
-                <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+              <div className="p-3 sm:p-4 bg-card">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground block">
                   Accreditation Status
                 </span>
-                <span className="text-lg sm:text-xl font-black font-mono text-primary mt-0.5 block truncate px-1">
+                <span className="text-xl sm:text-2xl font-black tracking-tight text-primary mt-0.5 block truncate px-1">
                   {accreditationLevel.includes("NABH") ? "NABH Standard" : accreditationLevel.slice(0, 16)}
                 </span>
-                <span className="text-[10px] text-muted-foreground block">
+                <span className="text-[10px] text-muted-foreground block mt-0.5 truncate">
                   {isVerified ? "Audited & Verified" : "Council Registered"}
                 </span>
               </div>
@@ -681,22 +681,25 @@ function HospitalProfileScreen() {
             <div className="lg:col-span-5 space-y-6">
               {/* DOCUMENT VAULT */}
               <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-4">
-                <div className="flex items-center justify-between border-b border-border pb-3">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary-soft text-primary shrink-0">
                       <HiOutlineDocumentCheck className="h-4 w-4" />
                     </span>
-                    <div>
+                    <div className="min-w-0">
                       <h2 className="text-xs font-bold uppercase tracking-wider text-foreground">
                         Document Vault
                       </h2>
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-[11px] text-muted-foreground truncate">
                         Statutory Clinical Licensures &amp; Accreditations
                       </p>
                     </div>
                   </div>
 
-                  <Badge variant="outline" className="text-[10px] font-bold border-primary/20 bg-primary/5 text-primary">
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 whitespace-nowrap text-[10px] font-bold border-primary/20 bg-primary/5 text-primary px-2.5 py-1 rounded-full leading-none"
+                  >
                     {docVaultList.length} Attached
                   </Badge>
                 </div>
@@ -743,26 +746,17 @@ function HospitalProfileScreen() {
                           </span>
                         </div>
 
-                        <div className="pt-2 border-t border-border/60 flex items-center justify-between text-[11px]">
+                        <div className="pt-2 border-t border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
                           <span className="text-muted-foreground font-medium text-[10px]">
                             {doc.sizeText}
                           </span>
 
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handlePreviewDocument(doc)}
-                            className="h-7 px-2.5 text-xs font-bold text-primary border-primary/25 hover:bg-primary-soft cursor-pointer rounded-xl"
-                          >
-                            <HiOutlineEye className="h-3.5 w-3.5 mr-1" />
-                            <span>Preview</span>
-                          </Button>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => handleDocumentReplace(doc.type, doc.title)}
-                              className="h-7 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer rounded-xl"
+                              className="h-7 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer rounded-xl flex-1 sm:flex-initial"
                             >
                               <HiOutlineArrowUpTray className="h-3.5 w-3.5 mr-1" />
                               <span>Replace</span>
@@ -771,7 +765,7 @@ function HospitalProfileScreen() {
                               variant="outline"
                               size="sm"
                               onClick={() => handlePreviewDocument(doc)}
-                              className="h-7 px-2.5 text-xs font-bold text-primary border-primary/25 hover:bg-primary-soft cursor-pointer rounded-xl"
+                              className="h-7 px-2.5 text-xs font-bold text-primary border-primary/25 hover:bg-primary-soft cursor-pointer rounded-xl flex-1 sm:flex-initial"
                             >
                               <HiOutlineEye className="h-3.5 w-3.5 mr-1" />
                               <span>Preview</span>
@@ -911,26 +905,15 @@ function HospitalProfileScreen() {
                     </h3>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleCopyAddress}
-                      className="h-7.5 px-2 text-xs text-primary hover:bg-primary-soft cursor-pointer font-bold"
-                    >
-                      Copy Address
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setEditSection("address")}
-                      className="rounded-xl text-xs font-bold gap-1 border-border hover:border-primary text-foreground hover:text-primary h-7.5 px-2.5 cursor-pointer"
-                    >
-                      <HiOutlinePencilSquare className="h-3.5 w-3.5 text-primary" />
-                      <span>Edit</span>
-                    </Button>
-                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditSection("address")}
+                    className="rounded-xl text-xs font-bold gap-1 border-border hover:border-primary text-foreground hover:text-primary h-7.5 px-2.5 cursor-pointer"
+                  >
+                    <HiOutlinePencilSquare className="h-3.5 w-3.5 text-primary" />
+                    <span>Edit</span>
+                  </Button>
                 </div>
 
                 <div className="space-y-1.5 text-xs">
@@ -1076,7 +1059,7 @@ function HospitalProfileScreen() {
 
                 <div className="space-y-3 text-xs">
                   {/* Contact Person */}
-                  <div className="flex items-center justify-between py-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1.5 gap-1">
                     <span className="text-muted-foreground font-medium">Administrator / Lead:</span>
                     <span className="font-bold text-foreground">
                       {contactPerson} {designation ? `(${designation})` : ""}
@@ -1084,7 +1067,7 @@ function HospitalProfileScreen() {
                   </div>
 
                   {/* Phone */}
-                  <div className="flex items-center justify-between py-1 border-t border-border/60">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1.5 border-t border-border/60 gap-1">
                     <span className="text-muted-foreground font-medium">Official Phone:</span>
                     {contactPhone ? (
                       <a
@@ -1100,12 +1083,12 @@ function HospitalProfileScreen() {
                   </div>
 
                   {/* Email */}
-                  <div className="flex items-center justify-between py-1 border-t border-border/60">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1.5 border-t border-border/60 gap-1">
                     <span className="text-muted-foreground font-medium">Official Email:</span>
                     {contactEmail ? (
                       <a
                         href={`mailto:${contactEmail}`}
-                        className="font-medium text-primary hover:underline flex items-center gap-1.5 truncate max-w-[240px]"
+                        className="font-medium text-primary hover:underline flex items-center gap-1.5 truncate max-w-full sm:max-w-[240px]"
                       >
                         <HiOutlineEnvelope className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{contactEmail}</span>
@@ -1116,7 +1099,7 @@ function HospitalProfileScreen() {
                   </div>
 
                   {/* Website */}
-                  <div className="flex items-center justify-between py-1 border-t border-border/60">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1.5 border-t border-border/60 gap-1">
                     <span className="text-muted-foreground font-medium">Hospital Portal:</span>
                     {website ? (
                       <a

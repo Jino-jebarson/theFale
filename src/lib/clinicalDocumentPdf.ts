@@ -583,7 +583,8 @@ export function generateCandidateDossierBlob(c: CandidateDossierInfo): Blob {
   pdf.setFontSize(8);
   pdf.setFont("helvetica", "normal");
   pdf.text(`${c.council || "State Medical Council"}  •  Registration No: ${c.regNumber || "KAC456"}`, margin + 10, y + 24);
-  pdf.text(`Location: ${c.city || "Chennai"}, ${c.state || "Tamil Nadu"}  |  Email: ${c.email || "N/A"}  |  Phone: ${c.phone || "N/A"}`, margin + 10, y + 30);
+  const locParts = [c.city, c.state].filter(Boolean).join(", ");
+  pdf.text(`Location: ${locParts || "Not specified"}  |  Email: ${c.email || "N/A"}  |  Phone: ${c.phone || "N/A"}`, margin + 10, y + 30);
 
   y += 44;
 

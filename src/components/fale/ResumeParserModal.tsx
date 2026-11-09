@@ -2,7 +2,6 @@ import { useState, useRef, type DragEvent } from "react";
 import { BotMessageSquare } from "lucide-react";
 import {
   HiOutlineCloudArrowUp,
-  HiOutlineDocumentText,
   HiOutlineCheckBadge,
   HiCheck,
   HiOutlineUser,
@@ -18,7 +17,6 @@ import { toast } from "sonner";
 import {
   extractTextFromFile,
   parseResumeText,
-  SAMPLE_HEALTHCARE_RESUMES,
   type ParsedResumeData,
 } from "@/lib/resumeParser";
 import { cn } from "@/lib/utils";
@@ -49,7 +47,7 @@ function mapAiDataToParsedResume(aiData: Record<string, any>, rawText: string): 
     exp: aiData.totalExperienceYears !== undefined ? `${aiData.totalExperienceYears} Years` : undefined,
     employer: aiData.currentEmployer || undefined,
     designation: aiData.designation || undefined,
-    notice: aiData.noticePeriod || "Immediately",
+    notice: aiData.noticePeriod || undefined,
     skills: Array.isArray(aiData.skills) ? aiData.skills : [],
     confidenceScore: 98,
     rawText,
@@ -125,7 +123,7 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
 
       setParsedData(parsedResult);
       setStage("preview");
-      toast.success("Resume Parsed Successfully by AI", {
+      toast.success("Profile Extracted by Ally", {
         description: `Extracted credentials & experience with ${parsedResult.confidenceScore ?? 96}% confidence.`,
       });
     } catch (err) {
@@ -133,47 +131,6 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
       toast.error("Could not parse this resume format. Please try another file or enter details manually.");
       setStage("idle");
     }
-  };
-
-  const handleApplySample = async (sample: (typeof SAMPLE_HEALTHCARE_RESUMES)[number]) => {
-    setCurrentFile(sample.fileName);
-    setStage("reading");
-    setProgressStep(1);
-
-    await new Promise((r) => setTimeout(r, 350));
-    setProgressStep(2);
-    setStage("analyzing");
-
-    await new Promise((r) => setTimeout(r, 450));
-    setProgressStep(3);
-
-    let parsedResult: ParsedResumeData | null = null;
-    try {
-      const aiRes = await parseResumeWithAi(sample.rawText.slice(0, 4000));
-      let aiJson = aiRes.structuredData;
-      if (!aiJson && aiRes.response) {
-        try {
-          aiJson = JSON.parse(aiRes.response);
-        } catch {}
-      }
-      if (aiJson && (aiJson.fullName || aiJson.qualification || aiJson.skills)) {
-        parsedResult = mapAiDataToParsedResume(aiJson, sample.rawText);
-      }
-    } catch (aiErr) {
-      console.warn("AI sample extraction error:", aiErr);
-    }
-
-    if (!parsedResult) {
-      const parsed = parseResumeText(sample.rawText);
-      parsedResult = { ...parsed, ...sample.data, confidenceScore: 98 };
-    }
-
-    await new Promise((r) => setTimeout(r, 300));
-    setProgressStep(4);
-
-    setParsedData(parsedResult);
-    setStage("preview");
-    toast.success(`AI Extracted Profile: ${sample.title}`);
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -224,14 +181,14 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm sm:text-lg font-bold text-slate-900 truncate">
-                  AI Resume Auto-Fill
+                  Let Ally Auto-Fill Your Profile
                 </h3>
                 <span className="inline-flex items-center rounded-full bg-emerald-100 border border-emerald-300 px-2 py-0.5 text-[9px] sm:text-[10px] font-bold text-emerald-800 shrink-0">
                   Instant
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-500 truncate">
-                Upload your CV to automatically fetch and populate your profile details
+                Upload your CV — Ally will read and populate your clinical credentials in seconds
               </p>
             </div>
           </div>
@@ -307,45 +264,6 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
                   <span className="text-emerald-600 flex items-center gap-1">
                     <HiOutlineShieldCheck className="h-3.5 w-3.5" /> 100% Confidential
                   </span>
-                </div>
-              </div>
-
-              {/* Sample Healthcare Resumes Section for Fast Testing */}
-              <div className="rounded-2xl border border-slate-200/90 bg-white p-3.5 sm:p-5 shadow-xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 mb-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-600">
-                      <BotMessageSquare className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span>Quick Test with Samples</span>
-                    </span>
-                    <span className="inline-flex items-center rounded-full bg-primary-soft text-primary text-[10px] font-bold px-2.5 py-0.5 whitespace-nowrap shrink-0">
-                      1-Click Demo
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-400">Select a role to test auto-fill</span>
-                </div>
-
-                <div className="grid gap-2.5 sm:grid-cols-3">
-                  {SAMPLE_HEALTHCARE_RESUMES.map((sample) => (
-                    <button
-                      key={sample.id}
-                      type="button"
-                      onClick={() => handleApplySample(sample)}
-                      className="group flex flex-col items-start rounded-xl border border-slate-200/90 bg-slate-50/70 p-3 text-left transition-all hover:border-primary/40 hover:bg-primary-soft/40 hover:shadow-sm cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2 w-full">
-                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-white text-primary border border-slate-200/80 group-hover:bg-primary group-hover:text-white transition-colors">
-                          <HiOutlineDocumentText className="h-4 w-4" />
-                        </span>
-                        <span className="text-xs font-bold text-slate-900 group-hover:text-primary truncate">
-                          {sample.title}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-[11px] leading-snug text-slate-500 line-clamp-2">
-                        {sample.subtitle}
-                      </p>
-                    </button>
-                  ))}
                 </div>
               </div>
             </div>
@@ -486,11 +404,11 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
                   <div className="space-y-1.5 text-xs">
                     <div className="flex items-center justify-between gap-2 min-w-0">
                       <span className="text-slate-500 shrink-0">Profession:</span>
-                      <span className="font-bold text-primary truncate text-right">{parsedData.role || "Nurse"}</span>
+                      <span className="font-bold text-primary truncate text-right">{parsedData.role || "—"}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2 min-w-0">
                       <span className="text-slate-500 shrink-0">Specialty:</span>
-                      <span className="font-semibold text-slate-900 truncate text-right">{parsedData.specialty || "General"}</span>
+                      <span className="font-semibold text-slate-900 truncate text-right">{parsedData.specialty || "—"}</span>
                     </div>
                     <div className="flex items-center justify-between gap-2 min-w-0">
                       <span className="text-slate-500 shrink-0">Reg Council:</span>
@@ -546,7 +464,7 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
                     </div>
                     <div className="flex items-center justify-between gap-2 min-w-0">
                       <span className="text-slate-500 shrink-0">Notice Period:</span>
-                      <span className="font-semibold text-slate-900 truncate text-right">{parsedData.notice || "Immediately"}</span>
+                      <span className="font-semibold text-slate-900 truncate text-right">{parsedData.notice || "—"}</span>
                     </div>
                   </div>
                 </div>

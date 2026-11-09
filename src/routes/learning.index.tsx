@@ -13,6 +13,7 @@ import {
   HiOutlineCheckBadge,
   HiOutlinePlay,
   HiOutlineXMark,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { BotMessageSquare } from "lucide-react";
@@ -521,7 +522,7 @@ function Learning() {
 
             {loading ? (
               <div className="surface p-12 text-center rounded-3xl border border-border/80 text-muted-foreground">
-                <HiOutlineClock className="mx-auto h-8 w-8 text-primary animate-spin" />
+                <HiOutlineArrowPath className="mx-auto h-8 w-8 text-primary animate-spin" />
                 <p className="mt-3 text-sm font-semibold">Loading CME courses...</p>
               </div>
             ) : loadError ? (

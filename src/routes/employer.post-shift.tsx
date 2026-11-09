@@ -21,6 +21,7 @@ import {
   HiOutlineAcademicCap,
   HiOutlineFire,
   HiOutlineLockClosed,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill, RiHospitalLine } from "react-icons/ri";
 import { BotMessageSquare } from "lucide-react";
@@ -165,33 +166,27 @@ function PostShiftScreen() {
   }, [store.escrowBalance, store.hospitalBankAccount]);
 
   // Form State
-  const [roleTitle, setRoleTitle] = useState("ICU Staff Nurse");
-  const [dept, setDept] = useState("Critical care");
-  const [city, setCity] = useState("Bengaluru");
-  const [unitFloor, setUnitFloor] = useState("3rd Floor, Main ICU Block B");
+  const [roleTitle, setRoleTitle] = useState("");
+  const [dept, setDept] = useState("");
+  const [city, setCity] = useState("");
+  const [unitFloor, setUnitFloor] = useState("");
   const [dateOption, setDateOption] = useState("Today · Urgent");
   const [customDate, setCustomDate] = useState("2026-10-31");
   const [selectedSlot, setSelectedSlot] = useState("night");
   const [customStartTime, setCustomStartTime] = useState("20:00");
   const [customEndTime, setCustomEndTime] = useState("08:00");
   const [customHours, setCustomHours] = useState(12);
-  const [hourlyRate, setHourlyRate] = useState(450);
-  const [openings, setOpenings] = useState(2);
-  const [isUrgent, setIsUrgent] = useState(true);
-  const [surgeReason, setSurgeReason] = useState("+₹50/hr Night Surge");
+  const [hourlyRate, setHourlyRate] = useState(0);
+  const [openings, setOpenings] = useState(1);
+  const [isUrgent, setIsUrgent] = useState(false);
+  const [surgeReason, setSurgeReason] = useState("");
   const [requireCouncilReg, setRequireCouncilReg] = useState(true);
   const [requireBLS, setRequireBLS] = useState(true);
-  const [minExp, setMinExp] = useState("1–2 yrs");
-  const [selectedPerks, setSelectedPerks] = useState<string[]>([
-    "Dinner provided",
-    "Cab drop / Travel allowance",
-    "Scrub kit provided",
-  ]);
-  const [supervisorName, setSupervisorName] = useState("Sister Mary (DNS In-charge)");
-  const [supervisorPhone, setSupervisorPhone] = useState("+91 98450 12345");
-  const [dutyNotes, setDutyNotes] = useState(
-    "Report to Nursing Station 4 at least 15 minutes before shift start. Carry original State Nursing Council registration card and government photo ID."
-  );
+  const [minExp, setMinExp] = useState("");
+  const [selectedPerks, setSelectedPerks] = useState<string[]>([]);
+  const [supervisorName, setSupervisorName] = useState("");
+  const [supervisorPhone, setSupervisorPhone] = useState("");
+  const [dutyNotes, setDutyNotes] = useState("");
 
   // Success Modal State
   const [publishedShiftModalOpen, setPublishedShiftModalOpen] = useState(false);
@@ -206,31 +201,41 @@ function PostShiftScreen() {
   // AI Shift Pay Benchmark State (#13)
   const [aiRateSuggestion, setAiRateSuggestion] = useState<{
     recommendedHourlyRate: number;
+    minHourlyRate: number;
+    maxHourlyRate: number;
+    fillTimeEstimateMinutes?: number;
     explanation: string;
   } | null>(null);
   const [loadingAiRate, setLoadingAiRate] = useState(false);
 
-  const handleFetchAiRateSuggestion = async (targetRole?: string, targetDept?: string) => {
+  const handleFetchAiRateSuggestion = async (
+    targetRole?: string,
+    targetDept?: string,
+    targetSlot?: string,
+    targetCity?: string
+  ) => {
     const role = targetRole || roleTitle;
     if (!role.trim()) return;
     setLoadingAiRate(true);
     try {
+      const activeSlot = targetSlot || selectedSlot;
+      const activeCity = targetCity || city || "Bengaluru";
+      const activeDept = targetDept || dept || "General";
+
       const res = await suggestShiftPayWithAi(
-        `${role} in ${targetDept || dept || "General"} (${selectedSlot} shift)`,
-        city || "Bengaluru"
+        `${role} in ${activeDept} (${activeSlot} shift)`,
+        activeCity,
+        { roleTitle: role, dept: activeDept, slot: activeSlot }
       );
-      if (res.structuredData && res.structuredData.recommendedHourlyRate) {
+
+      const b = res.benchmark || (res.structuredData as any);
+      if (b && b.recommendedHourlyRate) {
         setAiRateSuggestion({
-          recommendedHourlyRate: Number(res.structuredData.recommendedHourlyRate),
-          explanation: res.structuredData.explanation || `Recommended market rate for ${role}.`
-        });
-      } else {
-        const text = res.response || res.content || "";
-        const match = text.match(/₹?\s*(\d{3,4})\s*(?:\/|\s*per|\s*hr|\s*hour)/i);
-        const rate = match ? Number(match[1]) : 480;
-        setAiRateSuggestion({
-          recommendedHourlyRate: rate,
-          explanation: text || `Market standard for ${role}.`
+          recommendedHourlyRate: Number(b.recommendedHourlyRate),
+          minHourlyRate: Number(b.minHourlyRate || Math.round((Number(b.recommendedHourlyRate) * 0.85) / 10) * 10),
+          maxHourlyRate: Number(b.maxHourlyRate || Math.round((Number(b.recommendedHourlyRate) * 1.25) / 10) * 10),
+          fillTimeEstimateMinutes: Number(b.fillTimeEstimateMinutes || 25),
+          explanation: b.explanation || `Recommended market rate for ${role} in ${activeCity}.`,
         });
       }
     } catch (err) {
@@ -241,8 +246,13 @@ function PostShiftScreen() {
   };
 
   useEffect(() => {
-    handleFetchAiRateSuggestion(roleTitle, dept);
-  }, []);
+    if (roleTitle.trim()) {
+      const t = setTimeout(() => {
+        handleFetchAiRateSuggestion(roleTitle, dept, selectedSlot, city);
+      }, 400);
+      return () => clearTimeout(t);
+    }
+  }, [roleTitle, dept, selectedSlot, city]);
 
   const handleAiMagicFill = async () => {
     if (!whatsAppPrompt.trim()) {
@@ -279,8 +289,44 @@ function PostShiftScreen() {
         if (d.location) setUnitFloor(d.location);
         if (d.notes) setDutyNotes(d.notes);
 
-        toast.success("Shift parameters extracted from message!", {
-          description: `Auto-filled: ${role || "Role"} · ${count || 1} staff · ${shiftType || "Shift"} · ₹${ratePerHour || hourlyRate}/hr`,
+        // Extended dynamically extracted fields
+        if (d.city) {
+          const matchedCity = availableCities.find((c) => c.toLowerCase() === String(d.city).toLowerCase());
+          if (matchedCity) setCity(matchedCity);
+        }
+
+        if (d.date) {
+          const dStr = String(d.date).toLowerCase();
+          if (dStr === "today") setDateOption("Today · Urgent");
+          else if (dStr === "tomorrow") setDateOption("Tomorrow");
+          else if (dStr === "weekend") setDateOption("Weekend");
+          else if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) {
+            setDateOption("Custom Date");
+            setCustomDate(dStr);
+          }
+        }
+
+        if (d.isUrgent !== undefined) {
+          setIsUrgent(Boolean(d.isUrgent));
+        }
+
+        if (d.supervisorName) setSupervisorName(String(d.supervisorName));
+        if (d.supervisorPhone) setSupervisorPhone(String(d.supervisorPhone));
+
+        if (d.perks && Array.isArray(d.perks) && d.perks.length > 0) {
+          setSelectedPerks((prev) => Array.from(new Set([...prev, ...d.perks])));
+        }
+
+        const summaryParts: string[] = [];
+        if (role) summaryParts.push(role);
+        if (count) summaryParts.push(`${count} staff`);
+        if (shiftType) summaryParts.push(shiftType);
+        if (ratePerHour) summaryParts.push(`₹${ratePerHour}/hr`);
+        if (d.location) summaryParts.push(String(d.location));
+        if (d.supervisorName) summaryParts.push(String(d.supervisorName));
+
+        toast.success("Ally extracted shift parameters!", {
+          description: summaryParts.join(" · ") || "Shift parameters auto-filled successfully.",
         });
 
         if (role) {
@@ -535,7 +581,7 @@ function PostShiftScreen() {
 
   return (
     <AppShell>
-      <div className="max-w-6xl mx-auto space-y-6 pb-16 min-w-0">
+      <div className="w-full min-w-0 space-y-6 pb-16">
         {/* ========================================================= */}
         {/* TOP HEADER & ROUTE TOGGLE SWITCHER */}
         {/* ========================================================= */}
@@ -573,23 +619,23 @@ function PostShiftScreen() {
           <div className="lg:col-span-7 xl:col-span-8 space-y-6">
             {/* AI WhatsApp Quick Shift Generator (#9) */}
             <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 sm:p-5 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary text-white text-xs">
-                    <BotMessageSquare className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <h3 className="text-xs sm:text-sm font-bold text-foreground">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary text-white text-xs shrink-0">
+                      <BotMessageSquare className="h-4 w-4" />
+                    </span>
+                    <h3 className="text-xs sm:text-sm font-bold text-foreground truncate">
                       Quick Shift Parser
                     </h3>
-                    <p className="text-[11px] text-muted-foreground">
-                      Paste shift notes or a WhatsApp request from your nursing department to auto-fill fields.
-                    </p>
                   </div>
+                  <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary shrink-0">
+                    Ally Assistant
+                  </span>
                 </div>
-                <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary shrink-0">
-                  AI Assistant
-                </span>
+                <p className="text-[11px] text-muted-foreground leading-relaxed pl-9 sm:pl-9">
+                  Paste shift notes or a WhatsApp request from your nursing department to auto-fill fields.
+                </p>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2">
@@ -597,16 +643,18 @@ function PostShiftScreen() {
                   type="text"
                   value={whatsAppPrompt}
                   onChange={(e) => setWhatsAppPrompt(e.target.value)}
-                  placeholder="e.g. Need 2 ICU sisters, nights, 3800/shift tomorrow at Koramangala"
+                  placeholder="Paste raw duty message (e.g. Urgent requirement for 2 ICU Nurses, Night shift, ₹450/hr)"
                   className="flex-1 rounded-xl border border-border/80 bg-background px-3.5 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                 />
                 <Button
                   type="button"
                   onClick={handleAiMagicFill}
+                  isLoading={aiParsing}
+                  loadingText="Parsing with Ally..."
                   disabled={aiParsing}
-                  className="bg-primary text-white text-xs font-bold shrink-0 hover:bg-primary-hover rounded-xl px-4"
+                  className="bg-primary text-white text-xs font-bold shrink-0 hover:bg-primary-hover rounded-xl px-4 h-9 cursor-pointer"
                 >
-                  {aiParsing ? "Parsing..." : "Auto-Fill Form"}
+                  Auto-Fill with Ally
                 </Button>
               </div>
             </div>
@@ -614,7 +662,7 @@ function PostShiftScreen() {
             {/* ----------------------------------------------------- */}
             {/* 01 · ROLE & DEPARTMENT */}
             {/* ----------------------------------------------------- */}
-            <section className="rounded-2xl border border-border/80 bg-card p-6 shadow-2xs space-y-5">
+            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-5">
               <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
                 01 · Role &amp; Location
               </p>
@@ -630,7 +678,7 @@ function PostShiftScreen() {
                   required
                   value={roleTitle}
                   onChange={(e) => setRoleTitle(e.target.value)}
-                  placeholder="e.g. ICU Staff Nurse (Ventilator Care)"
+                  placeholder="e.g. ICU Staff Nurse, Duty Medical Officer, Emergency Physician"
                   className="w-full h-11 px-3.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-medium"
                 />
               </div>
@@ -653,7 +701,7 @@ function PostShiftScreen() {
                   options={availableCities}
                   value={city}
                   onChange={setCity}
-                  placeholder="Select City"
+                  placeholder="Select hospital city / hub"
                 />
               </div>
 
@@ -669,7 +717,7 @@ function PostShiftScreen() {
                     type="text"
                     value={unitFloor}
                     onChange={(e) => setUnitFloor(e.target.value)}
-                    placeholder="e.g. 3rd Floor, Main ICU Block B"
+                    placeholder="e.g. 3rd Floor, Medical ICU, Block B"
                     className="w-full h-11 pl-10 pr-3.5 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-muted-foreground/60 font-medium"
                   />
                 </div>
@@ -679,12 +727,12 @@ function PostShiftScreen() {
             {/* ----------------------------------------------------- */}
             {/* 02 · SCHEDULE & TIMING */}
             {/* ----------------------------------------------------- */}
-            <section className="rounded-2xl border border-border/80 bg-card p-6 shadow-2xs space-y-5">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
+            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-primary whitespace-nowrap">
                   02 · Schedule &amp; Timing
                 </p>
-                <span className="text-xs font-semibold text-primary font-mono bg-primary/10 px-2.5 py-0.5 rounded-md">
+                <span className="text-[11px] sm:text-xs font-semibold text-primary font-mono bg-primary/10 px-2 sm:px-2.5 py-0.5 rounded-md whitespace-nowrap shrink-0">
                   {activeHours}h shift duration
                 </span>
               </div>
@@ -852,24 +900,24 @@ function PostShiftScreen() {
             {/* ----------------------------------------------------- */}
             {/* 03 · REMUNERATION & ESCROW ECONOMICS */}
             {/* ----------------------------------------------------- */}
-            <section className="rounded-2xl border border-border/80 bg-card p-6 shadow-2xs space-y-5">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
+            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-primary whitespace-nowrap">
                   03 · Remuneration &amp; Escrow
                 </p>
-                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                  <HiOutlineLockClosed className="h-3 w-3" />
+                <span className="text-[11px] sm:text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 sm:px-2.5 py-0.5 rounded-full flex items-center gap-1 whitespace-nowrap shrink-0">
+                  <HiOutlineLockClosed className="h-3 w-3 shrink-0" />
                   24h Escrow Guarantee
                 </span>
               </div>
 
               {/* Hourly Rate Input */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="hourly-rate" className="text-xs font-semibold text-foreground block">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2">
+                  <label htmlFor="hourly-rate" className="text-xs font-semibold text-foreground">
                     Hourly Pay Rate (₹ / hour) <span className="text-destructive">*</span>
                   </label>
-                  <span className="text-xs font-mono text-muted-foreground">
+                  <span className="text-xs font-mono text-muted-foreground self-start sm:self-auto">
                     Net per clinician: <strong className="text-foreground font-bold">₹{payPerWorker.toLocaleString("en-IN")}</strong>
                   </span>
                 </div>
@@ -884,7 +932,8 @@ function PostShiftScreen() {
                     min={150}
                     max={5000}
                     step={10}
-                    value={hourlyRate}
+                    placeholder="450"
+                    value={hourlyRate || ""}
                     onChange={(e) => setHourlyRate(Math.max(0, Number(e.target.value)))}
                     className="h-11 w-full rounded-xl border border-input bg-background pl-9 pr-20 text-base font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono"
                   />
@@ -894,65 +943,163 @@ function PostShiftScreen() {
                 </div>
 
                 {/* AI Shift Pay Market Rate Suggestion (#13) */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20 text-xs gap-2">
-                  <div className="flex items-start gap-2.5 min-w-0">
-                    <BotMessageSquare className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                    <div className="text-[11px] text-muted-foreground leading-relaxed">
-                      {loadingAiRate ? (
-                        <span className="font-semibold text-primary animate-pulse">
-                          Analyzing prevailing hospital rate benchmarks with Gemini...
-                        </span>
-                      ) : aiRateSuggestion ? (
-                        <span>
-                          <strong className="text-foreground">AI Benchmark:</strong> Recommended <strong className="text-primary font-bold">₹{aiRateSuggestion.recommendedHourlyRate}/hr</strong>. {aiRateSuggestion.explanation}
-                        </span>
-                      ) : (
-                        <span>
-                          <strong className="text-foreground">Market Benchmark:</strong> AI recommended rates available for {roleTitle || "this role"} in {city}.
-                        </span>
-                      )}
+                <div className="rounded-xl bg-primary/5 border border-primary/25 p-3.5 space-y-3">
+                  {/* Top Header: Ally Badge + Recalculate button */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="grid h-6 w-6 place-items-center rounded-lg bg-primary text-white text-[11px] shrink-0">
+                        <BotMessageSquare className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="text-xs font-bold text-foreground truncate">
+                        Ally Market Rate Benchmark
+                      </span>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+
                     <button
                       type="button"
                       disabled={loadingAiRate}
                       onClick={() => handleFetchAiRateSuggestion()}
-                      className="text-[10px] font-bold text-muted-foreground hover:text-foreground cursor-pointer px-2 py-1 rounded-lg border border-border/80 bg-background hover:bg-muted"
+                      className="text-[10px] font-semibold text-muted-foreground hover:text-foreground cursor-pointer px-2 py-0.5 rounded-lg border border-border/80 bg-background hover:bg-muted inline-flex items-center gap-1 shrink-0"
                     >
-                      {loadingAiRate ? "Calculating..." : "Recalculate with AI"}
+                      {loadingAiRate ? (
+                        <>
+                          <HiOutlineArrowPath className="h-3 w-3 animate-spin text-primary" />
+                          <span>Calculating...</span>
+                        </>
+                      ) : (
+                        "Recalculate with Ally"
+                      )}
                     </button>
-                    {aiRateSuggestion && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setHourlyRate(aiRateSuggestion.recommendedHourlyRate);
-                          toast.success(`Applied AI market rate: ₹${aiRateSuggestion.recommendedHourlyRate}/hr`);
-                        }}
-                        className="text-[10px] font-bold bg-primary text-white hover:bg-primary-hover px-2.5 py-1 rounded-lg shadow-xs cursor-pointer"
-                      >
-                        Apply ₹{aiRateSuggestion.recommendedHourlyRate}/hr
-                      </button>
+                  </div>
+
+                  {/* AI Explanation / Status */}
+                  <div className="text-[11px] text-muted-foreground leading-relaxed pl-8">
+                    {loadingAiRate ? (
+                      <span className="font-semibold text-primary animate-pulse">
+                        Analyzing prevailing hospital rate benchmarks in {city || "Bengaluru"} with Ally...
+                      </span>
+                    ) : aiRateSuggestion ? (
+                      <span>
+                        <strong className="text-foreground">Recommended:</strong> <strong className="text-primary font-bold">₹{aiRateSuggestion.recommendedHourlyRate}/hr</strong>. {aiRateSuggestion.explanation}
+                      </span>
+                    ) : (
+                      <span>
+                        <strong className="text-foreground">Benchmark:</strong> Real-time rate intelligence available for {roleTitle || "this role"} in {city || "Bengaluru"}.
+                      </span>
                     )}
                   </div>
+
+                  {/* 3-Tier Rate Spectrum Selector & Fill Estimates */}
+                  {aiRateSuggestion && (
+                    <div className="pt-2 border-t border-primary/15 space-y-2">
+                      <div className="flex items-center justify-between text-[10px] font-semibold text-muted-foreground px-0.5">
+                        <span>Select Rate Strategy:</span>
+                        <span className="text-primary font-medium flex items-center gap-1">
+                          <HiOutlineSparkles className="h-3 w-3" />
+                          ~{aiRateSuggestion.fillTimeEstimateMinutes || 25}m estimated fill
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                        {/* 1. Standard Economy Tier */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHourlyRate(aiRateSuggestion.minHourlyRate);
+                            toast.success(`Applied Economy benchmark rate: ₹${aiRateSuggestion.minHourlyRate}/hr`);
+                          }}
+                          className={cn(
+                            "flex flex-col items-center justify-center py-2 px-1 rounded-xl border text-center transition-all cursor-pointer min-w-0",
+                            hourlyRate === aiRateSuggestion.minHourlyRate
+                              ? "bg-card border-primary text-primary font-bold shadow-2xs ring-1 ring-primary/40"
+                              : "bg-background/80 border-border/70 hover:border-primary/40 text-foreground"
+                          )}
+                        >
+                          <span className="text-[10px] sm:text-[11px] text-muted-foreground font-medium truncate max-w-full">
+                            Standard
+                          </span>
+                          <span className="text-xs sm:text-[13px] font-bold font-mono text-foreground mt-0.5 whitespace-nowrap">
+                            ₹{aiRateSuggestion.minHourlyRate}/hr
+                          </span>
+                          <span className="text-[9px] sm:text-[10px] text-muted-foreground/80 mt-0.5 whitespace-nowrap">
+                            ~1–2h fill
+                          </span>
+                        </button>
+
+                        {/* 2. Target Recommended Tier */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHourlyRate(aiRateSuggestion.recommendedHourlyRate);
+                            toast.success(`Applied Ally recommended rate: ₹${aiRateSuggestion.recommendedHourlyRate}/hr`);
+                          }}
+                          className={cn(
+                            "flex flex-col items-center justify-center py-2 px-1 rounded-xl border text-center transition-all cursor-pointer relative min-w-0",
+                            hourlyRate === aiRateSuggestion.recommendedHourlyRate
+                              ? "bg-primary text-white border-primary font-bold shadow-xs"
+                              : "bg-primary/10 border-primary/40 hover:bg-primary/20 text-primary font-semibold"
+                          )}
+                        >
+                          <span className="text-[9.5px] sm:text-[11px] font-bold whitespace-nowrap truncate max-w-full">
+                            ★ Ally Target
+                          </span>
+                          <span className="text-xs sm:text-[13px] font-bold font-mono mt-0.5 whitespace-nowrap">
+                            ₹{aiRateSuggestion.recommendedHourlyRate}/hr
+                          </span>
+                          <span className="text-[9px] sm:text-[10px] opacity-90 mt-0.5 whitespace-nowrap">
+                            ~{aiRateSuggestion.fillTimeEstimateMinutes || 25}m fill
+                          </span>
+                        </button>
+
+                        {/* 3. Fast Urgent Fill Tier */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHourlyRate(aiRateSuggestion.maxHourlyRate);
+                            toast.success(`Applied Fast-Fill urgent rate: ₹${aiRateSuggestion.maxHourlyRate}/hr`);
+                          }}
+                          className={cn(
+                            "flex flex-col items-center justify-center py-2 px-1 rounded-xl border text-center transition-all cursor-pointer min-w-0",
+                            hourlyRate === aiRateSuggestion.maxHourlyRate
+                              ? "bg-card border-emerald-600 text-emerald-600 font-bold shadow-2xs ring-1 ring-emerald-500/40"
+                              : "bg-background/80 border-border/70 hover:border-emerald-500/40 text-foreground"
+                          )}
+                        >
+                          <span className="text-[10px] sm:text-[11px] text-emerald-700 dark:text-emerald-400 font-semibold truncate max-w-full">
+                            Fast Fill
+                          </span>
+                          <span className="text-xs sm:text-[13px] font-bold font-mono text-foreground mt-0.5 whitespace-nowrap">
+                            ₹{aiRateSuggestion.maxHourlyRate}/hr
+                          </span>
+                          <span className="text-[9px] sm:text-[10px] text-muted-foreground/80 mt-0.5 whitespace-nowrap">
+                            &lt; 15m fill
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Benchmark Summary Chip */}
-              <div className={cn("p-3 rounded-xl border text-xs flex items-center justify-between gap-3", benchmarkAnalysis.color)}>
-                <div className="flex items-center gap-2">
-                  <HiOutlineSparkles className="h-4 w-4 shrink-0" />
-                  <span className="font-bold">{benchmarkAnalysis.label}:</span>
-                  <span className="opacity-90">{benchmarkAnalysis.message}</span>
+              <div className={cn("p-3 sm:p-3.5 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3", benchmarkAnalysis.color)}>
+                <div className="flex items-start gap-2 min-w-0">
+                  <HiOutlineSparkles className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div className="leading-relaxed">
+                    <span className="font-bold mr-1">{benchmarkAnalysis.label}:</span>
+                    <span className="opacity-90">{benchmarkAnalysis.message}</span>
+                  </div>
                 </div>
-                <span className="font-semibold text-[11px] shrink-0 font-mono">{benchmarkAnalysis.multiplier}</span>
+                <span className="font-semibold text-[11px] shrink-0 font-mono self-start sm:self-center px-2 py-0.5 rounded-md bg-background/50 border border-current/20">
+                  {benchmarkAnalysis.multiplier}
+                </span>
               </div>
 
               {/* Escrow Commitment Breakdown */}
               <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 text-xs space-y-1.5">
-                <div className="flex justify-between items-center text-emerald-900 dark:text-emerald-200">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-emerald-900 dark:text-emerald-200">
                   <span className="font-semibold">Nodal Escrow Allocation ({openings} {openings === 1 ? "opening" : "openings"} × {activeHours}h @ ₹{hourlyRate}/h):</span>
-                  <span className="font-mono font-bold text-sm">₹{totalEscrowAmount.toLocaleString("en-IN")}</span>
+                  <span className="font-mono font-bold text-sm self-start sm:self-auto">₹{totalEscrowAmount.toLocaleString("en-IN")}</span>
                 </div>
                 <p className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 leading-relaxed">
                   Funds remain safely held in Reserve Bank of India regulated Cashfree Nodal Escrow and are only transferred upon your supervisor's timesheet approval.
@@ -998,7 +1145,7 @@ function PostShiftScreen() {
             {/* ----------------------------------------------------- */}
             {/* 04 · COMPLIANCE & AMENITIES */}
             {/* ----------------------------------------------------- */}
-            <section className="rounded-2xl border border-border/80 bg-card p-6 shadow-2xs space-y-5">
+            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-5">
               <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
                 04 · Screening &amp; Amenities
               </p>
@@ -1097,7 +1244,7 @@ function PostShiftScreen() {
             {/* ----------------------------------------------------- */}
             {/* 05 · REPORTING & SUPERVISOR IN-CHARGE */}
             {/* ----------------------------------------------------- */}
-            <section className="rounded-2xl border border-border/80 bg-card p-6 shadow-2xs space-y-5">
+            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-5">
               <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
                 05 · Supervisor &amp; Duty Instructions
               </p>
@@ -1112,7 +1259,7 @@ function PostShiftScreen() {
                     type="text"
                     value={supervisorName}
                     onChange={(e) => setSupervisorName(e.target.value)}
-                    placeholder="e.g. Sister Mary (DNS In-charge)"
+                    placeholder="e.g. Nursing Superintendent / Duty In-Charge"
                     className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-xs sm:text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   />
                 </div>
@@ -1128,7 +1275,7 @@ function PostShiftScreen() {
                       type="text"
                       value={supervisorPhone}
                       onChange={(e) => setSupervisorPhone(e.target.value)}
-                      placeholder="+91 98450 12345"
+                      placeholder="Enter 10 digit number"
                       className="h-11 w-full rounded-xl border border-input bg-background pl-10 pr-3.5 text-xs sm:text-sm font-mono font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                     />
                   </div>
@@ -1144,7 +1291,7 @@ function PostShiftScreen() {
                   rows={3}
                   value={dutyNotes}
                   onChange={(e) => setDutyNotes(e.target.value)}
-                  placeholder="Where to report, dress code, security pass entry, department contact details..."
+                  placeholder="Specify reporting station, uniform/scrubs, security badge entry, and direct contact..."
                   className="w-full rounded-xl border border-input bg-background p-3.5 text-xs sm:text-sm font-normal text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none leading-relaxed"
                 />
               </div>
@@ -1163,7 +1310,8 @@ function PostShiftScreen() {
               <Button
                 type="button"
                 onClick={() => handlePublishShift("Open")}
-                disabled={submitting}
+                isLoading={submitting}
+                loadingText="Publishing shift..."
                 className="flex-2 rounded-xl font-bold text-xs h-11 gap-1.5 shadow-sm bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer"
               >
                 <HiOutlineBolt className="h-4 w-4" />
@@ -1315,7 +1463,8 @@ function PostShiftScreen() {
                 type="button"
                 size="lg"
                 onClick={() => handlePublishShift("Open")}
-                disabled={submitting}
+                isLoading={submitting}
+                loadingText="Publishing & Dispatching..."
                 className="w-full rounded-xl h-11 text-sm font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer flex items-center justify-center gap-2"
               >
                 <HiOutlineBolt className="h-4.5 w-4.5" />

@@ -15,12 +15,14 @@ interface VoiceNoteRecorderProps {
   onRecorded: (audioData: { audioUrl: string; duration: number }) => void;
   onDiscard: () => void;
   existingAudio?: { audioUrl: string; duration: number } | null;
+  autoStart?: boolean;
 }
 
 export function VoiceNoteRecorder({
   onRecorded,
   onDiscard,
   existingAudio,
+  autoStart = false,
 }: VoiceNoteRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -39,6 +41,8 @@ export function VoiceNoteRecorder({
   const streamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const startTimeRef = useRef<number>(0);
+  const isStartingRef = useRef<boolean>(false);
 
   const MAX_SECONDS = 60; // 1-Minute Hard Limit
 
@@ -72,9 +76,12 @@ export function VoiceNoteRecorder({
   }, [seconds, isRecording, stopRecording]);
 
   const startRecording = async () => {
+    if (isStartingRef.current || isRecording) return;
+    isStartingRef.current = true;
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         toast.error("Audio recording is not supported in this browser.");
+        onDiscard();
         return;
       }
 
@@ -109,7 +116,8 @@ export function VoiceNoteRecorder({
         const audioBlob = new Blob(audioChunksRef.current, {
           type: mimeType || "audio/webm",
         });
-        const duration = Math.min(seconds || 1, MAX_SECONDS);
+        const elapsedSecs = Math.floor((Date.now() - (startTimeRef.current || Date.now())) / 1000);
+        const duration = Math.min(Math.max(elapsedSecs, 1), MAX_SECONDS);
 
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -123,20 +131,44 @@ export function VoiceNoteRecorder({
 
       mediaRecorder.start(250); // Emit chunk every 250ms
       setIsRecording(true);
-      setSeconds(0);
       setRecordedAudioUrl(null);
 
+      // Real wall-clock timestamp based timer (immune to render loops / double intervals)
+      startTimeRef.current = Date.now();
+      setSeconds(0);
+
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+
       timerRef.current = setInterval(() => {
-        setSeconds((prev) => prev + 1);
-      }, 1000);
+        if (!startTimeRef.current) return;
+        const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        setSeconds(elapsed);
+        if (elapsed >= MAX_SECONDS) {
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
+        }
+      }, 250);
     } catch (err: any) {
       console.error("Microphone access error:", err);
       toast.error("Microphone permission denied", {
         description:
           "Please allow microphone access in your browser settings to record voice notes.",
       });
+      onDiscard();
+    } finally {
+      isStartingRef.current = false;
     }
   };
+
+  useEffect(() => {
+    if (autoStart && !isRecording && !recordedAudioUrl) {
+      startRecording();
+    }
+  }, [autoStart]);
 
   const handleDiscard = () => {
     if (isRecording) {
@@ -178,57 +210,72 @@ export function VoiceNoteRecorder({
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  // State 1: Active recording UI
+  // State 1: Active recording UI (Project Primary Orange theme, balanced alignment)
   if (isRecording) {
     const remaining = MAX_SECONDS - seconds;
     return (
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 dark:bg-rose-950/20 my-2 animate-in fade-in duration-200">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span className="relative flex h-3 w-3">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75" />
-            <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600" />
-          </span>
-          <span className="text-xs font-bold text-foreground">
-            Recording Clinical Voice Note...
-          </span>
-          <span className="font-mono text-xs font-extrabold text-rose-600 dark:text-rose-400 bg-background/80 px-2 py-0.5 rounded-lg border border-rose-200 dark:border-rose-900/60 shadow-2xs">
+      <div className="rounded-2xl border border-primary/25 bg-primary-soft/30 p-3 sm:p-3.5 my-2 animate-in fade-in duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+        {/* Style tag for dynamic beat waves */}
+        <style>{`
+          @keyframes recorderBeatWave {
+            0% { transform: scaleY(0.25); }
+            50% { transform: scaleY(1.2); }
+            100% { transform: scaleY(0.35); }
+          }
+        `}</style>
+
+        {/* Left: Recording Indicator & Sound Waves */}
+        <div className="flex items-center justify-between sm:justify-start gap-3 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="relative flex h-3 w-3 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-primary" />
+            </span>
+            <span className="text-xs font-bold text-foreground truncate">
+              Recording Clinical Voice Note...
+            </span>
+          </div>
+
+          {/* Dynamic dancing beat waves animation */}
+          <div className="flex items-center gap-1 h-5 shrink-0 px-1">
+            {[45, 85, 55, 100, 65, 90, 75, 40, 80, 60].map((h, i) => (
+              <span
+                key={i}
+                className="w-1 rounded-full bg-primary origin-bottom"
+                style={{
+                  height: `${h}%`,
+                  animation: `recorderBeatWave ${0.45 + (i % 3) * 0.12}s ease-in-out infinite alternate`,
+                  animationDelay: `${i * 75}ms`,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Right: Timer & Actions */}
+        <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2 sm:pt-0 border-t border-primary/15 sm:border-0">
+          <span className="font-mono text-xs font-black text-primary bg-background/90 px-2.5 py-1 rounded-xl border border-primary/20 shadow-2xs shrink-0">
             {formatTimer(seconds)} / 01:00
           </span>
-        </div>
-
-        {/* Dynamic sound bars animation */}
-        <div className="flex items-center gap-1 h-4">
-          {[60, 100, 40, 80, 50, 90, 70, 30].map((h, i) => (
-            <span
-              key={i}
-              className="w-1 rounded-full bg-rose-500/70 animate-pulse"
-              style={{
-                height: `${h}%`,
-                animationDelay: `${i * 120}ms`,
-                animationDuration: "0.8s",
-              }}
-            />
-          ))}
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={handleDiscard}
-            className="h-8 px-2.5 text-xs text-muted-foreground hover:text-rose-600 cursor-pointer"
-          >
-            <HiOutlineTrash className="h-4 w-4 mr-1" /> Cancel
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={stopRecording}
-            className="h-8 px-3.5 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer gap-1.5"
-          >
-            <HiOutlineStop className="h-4 w-4" /> Stop ({remaining}s left)
-          </Button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={handleDiscard}
+              className="h-8 px-2.5 text-xs font-semibold text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-xl cursor-pointer"
+            >
+              <HiOutlineTrash className="h-4 w-4 mr-1 text-muted-foreground" /> Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={stopRecording}
+              className="h-8 px-3.5 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-white shadow-xs cursor-pointer gap-1.5 transition-all"
+            >
+              <HiOutlineStop className="h-4 w-4" /> Stop ({remaining}s left)
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -237,17 +284,17 @@ export function VoiceNoteRecorder({
   // State 2: Recorded audio preview UI
   if (recordedAudioUrl) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl border border-primary/25 bg-primary/5 my-2 animate-in fade-in duration-200">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl border border-primary/25 bg-primary-soft/20 my-2 animate-in fade-in duration-200">
         <audio
           ref={previewAudioRef}
           src={recordedAudioUrl}
           onEnded={() => setIsPlayingPreview(false)}
         />
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={togglePreviewPlay}
-            className="grid h-8 w-8 place-items-center rounded-xl bg-primary text-white shadow-2xs hover:bg-primary-hover transition-transform active:scale-95 cursor-pointer shrink-0"
+            className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-white shadow-2xs hover:bg-primary-hover transition-transform active:scale-95 cursor-pointer shrink-0"
           >
             {isPlayingPreview ? (
               <HiPause className="h-4 w-4 fill-current" />
@@ -258,13 +305,32 @@ export function VoiceNoteRecorder({
           <div>
             <p className="text-xs font-bold text-foreground flex items-center gap-1.5">
               <span>Voice Note Recorded</span>
-              <span className="font-mono text-[11px] text-primary font-extrabold bg-primary/10 px-1.5 py-0.2 rounded-md">
+              <span className="font-mono text-[11px] text-primary font-black bg-primary-soft border border-primary/20 px-2 py-0.5 rounded-md">
                 {formatTimer(recordedDuration)}
               </span>
             </p>
-            <p className="text-[10px] text-muted-foreground">
-              {isPlayingPreview ? "Playing back preview..." : "Ready to attach to your Huddle discussion"}
-            </p>
+            {isPlayingPreview ? (
+              <div className="flex items-center gap-2 text-[11px] text-primary font-bold mt-1">
+                <div className="flex items-center gap-0.5 h-3.5">
+                  {[40, 90, 60, 100, 75, 45, 80, 50].map((h, i) => (
+                    <span
+                      key={i}
+                      className="w-1 rounded-full bg-primary origin-bottom"
+                      style={{
+                        height: `${h}%`,
+                        animation: `recorderBeatWave 0.5s ease-in-out infinite alternate`,
+                        animationDelay: `${i * 70}ms`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <span>Playing voice note preview...</span>
+              </div>
+            ) : (
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Ready to attach to your Huddle discussion
+              </p>
+            )}
           </div>
         </div>
 
@@ -283,7 +349,7 @@ export function VoiceNoteRecorder({
             size="sm"
             variant="ghost"
             onClick={handleDiscard}
-            className="h-8 px-2.5 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+            className="h-8 px-2.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-xl cursor-pointer"
           >
             <HiOutlineTrash className="h-4 w-4" />
           </Button>

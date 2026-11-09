@@ -121,6 +121,21 @@ export function VoiceNotePlayer({
         </button>
       </div>
 
+      {/* Dynamic Keyframes for Beat Waves */}
+      <style>{`
+        @keyframes beatBarWave {
+          0% {
+            transform: scaleY(0.25);
+          }
+          50% {
+            transform: scaleY(1.15);
+          }
+          100% {
+            transform: scaleY(0.4);
+          }
+        }
+      `}</style>
+
       {/* Main player controls + waveform scrubber */}
       <div className="flex items-center gap-3">
         {/* Play / Pause button */}
@@ -139,26 +154,32 @@ export function VoiceNotePlayer({
         {/* Waveform / Scrubber & Time */}
         <div className="flex-1 min-w-0 space-y-1.5">
           {/* Animated sound wave bars or scrubber */}
-          <div className="relative flex items-center h-5">
-            {/* Visual audio bars */}
-            <div className="absolute inset-0 flex items-center justify-between gap-0.5 px-0.5 pointer-events-none opacity-40">
-              {[40, 75, 55, 90, 60, 30, 85, 100, 70, 45, 95, 60, 40, 80, 50, 70, 90, 65, 45, 85, 60, 35, 75, 95, 50].map(
-                (h, idx) => (
+          <div className="relative flex items-center h-7 sm:h-8">
+            {/* Visual audio bars dancing to the beat */}
+            <div className="absolute inset-0 flex items-center justify-between gap-0.5 px-0.5 pointer-events-none">
+              {[
+                35, 65, 85, 45, 95, 60, 40, 75, 100, 70, 50, 90, 65, 40, 80, 55, 70, 95, 65, 45, 85, 60, 35, 75, 90, 50, 80, 60
+              ].map((h, idx, arr) => {
+                const isPlayed = (idx / arr.length) * 100 <= progressPercent;
+                return (
                   <span
                     key={idx}
                     className={cn(
-                      "w-1 rounded-full transition-all duration-300",
-                      (idx / 25) * 100 <= progressPercent
-                        ? "bg-primary"
-                        : "bg-muted-foreground/30",
-                      isPlaying && "animate-pulse"
+                      "w-1 rounded-full transition-colors duration-150 origin-bottom",
+                      isPlayed
+                        ? "bg-primary shadow-xs"
+                        : "bg-primary/20 dark:bg-primary/15"
                     )}
                     style={{
-                      height: `${isPlaying ? Math.max(20, (h * (idx % 2 === 0 ? 1 : 0.8))) : h * 0.7}%`,
+                      height: `${h}%`,
+                      animation: isPlaying
+                        ? `beatBarWave ${0.5 + (idx % 4) * 0.12}s ease-in-out infinite alternate`
+                        : "none",
+                      animationDelay: `${(idx * 65) % 400}ms`,
                     }}
                   />
-                )
-              )}
+                );
+              })}
             </div>
 
             {/* Range input for seeking */}

@@ -35,9 +35,14 @@ import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
 import { calculateClinicalMatch } from "@/lib/clinicalMatchingEngine";
 
 export const Route = createFileRoute("/jobs/")({
-  validateSearch: (s: Record<string, unknown>): { q?: string | undefined; scope?: "recommended" | "saved" | "other" | "all" | undefined } => ({
+  validateSearch: (s: Record<string, unknown>): {
+    q?: string | undefined;
+    scope?: "recommended" | "saved" | "other" | "all" | undefined;
+    sort?: "match" | "recent" | "salary" | undefined;
+  } => ({
     q: typeof s["q"] === "string" && s["q"] ? s["q"] : undefined,
     scope: typeof s["scope"] === "string" && ["recommended", "saved", "other", "all"].includes(s["scope"]) ? (s["scope"] as any) : undefined,
+    sort: typeof s["sort"] === "string" && ["match", "recent", "salary"].includes(s["sort"]) ? (s["sort"] as any) : undefined,
   }),
   head: () => ({
     meta: [
@@ -114,15 +119,7 @@ const perkOpts = [
   "Transport / Cab",
 ];
 
-const popularSearches = [
-  "Clinical Internships",
-  "ICU Nurse",
-  "Physiotherapy",
-  "Manipal Hospitals",
-  "Bengaluru",
-  "Chennai",
-  "Day shift",
-];
+
 
 function Jobs() {
   const s = useApp();
@@ -133,12 +130,14 @@ function Jobs() {
     (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
 
-  const { q: initialQ, scope: initialScope } = Route.useSearch();
+  const { q: initialQ, scope: initialScope, sort: initialSort } = Route.useSearch();
   const navigate = Route.useNavigate();
   const [q, setQ] = useState(initialQ ?? "");
   const [matchScope, setMatchScope] = useState<"recommended" | "saved" | "other" | "all">(
     initialScope ?? "recommended"
   );
+  const [sort, setSort] = useState<"match" | "recent" | "salary">(initialSort ?? "match");
+
   useEffect(() => {
     setQ(initialQ ?? "");
   }, [initialQ]);
@@ -147,6 +146,11 @@ function Jobs() {
       setMatchScope(initialScope);
     }
   }, [initialScope]);
+  useEffect(() => {
+    if (initialSort) {
+      setSort(initialSort);
+    }
+  }, [initialSort]);
 
   const [city, setCity] = useState("");
   const [deptF, setDeptF] = useState<string[]>([]);
@@ -158,7 +162,6 @@ function Jobs() {
   const [expF, setExpF] = useState<string[]>([]);
   const [orgF, setOrgF] = useState<string[]>([]);
   const [perkF, setPerkF] = useState<string[]>([]);
-  const [sort, setSort] = useState<"match" | "recent" | "salary">("match");
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const [apiJobs, setApiJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(isApiEnabled);
@@ -324,23 +327,86 @@ function Jobs() {
       return true;
     });
 
-    const parseSalary = (sal: string) => {
-      const match = sal.replace(/,/g, "").match(/\d+/g);
-      return match ? Number(match[match.length - 1] ?? 0) : 0;
+    const parseSalaryValue = (j: Job): number => {
+      const anyJ = j as any;
+      if (typeof anyJ.salaryMaxPaise === "number" && anyJ.salaryMaxPaise > 0) {
+        return anyJ.salaryMaxPaise / 100;
+      }
+      if (typeof anyJ.salaryMinPaise === "number" && anyJ.salaryMinPaise > 0) {
+        return anyJ.salaryMinPaise / 100;
+      }
+      const raw = j.salary || j.stipend || "";
+      // Strip decimals like .00 so "35,000.00" doesn't parse to "00"
+      const clean = raw.replace(/\.\d{2}/g, "").replace(/,/g, "");
+      // Match Lakhs / LPA
+      const lpaMatch = clean.match(/([\d.]+)\s*(?:lakh|lac|lpa)/i);
+      if (lpaMatch) {
+        return Number(lpaMatch[1]) * 100000;
+      }
+      const numbers = clean.match(/\d+/g);
+      if (numbers && numbers.length > 0) {
+        return Math.max(...numbers.map(Number));
+      }
+      return 0;
     };
 
-    const age = (posted: string) =>
-      posted === "Today" ? 0 : Number.parseInt(posted, 10) * (posted.includes("week") ? 7 : 1);
+    const parsePostedTimestamp = (j: Job): number => {
+      const anyJ = j as any;
+      if (anyJ.postedAt) {
+        const time = new Date(anyJ.postedAt).getTime();
+        if (!Number.isNaN(time)) return time;
+      }
+      const p = (j.posted || "").toLowerCase().trim();
+      const now = Date.now();
+      if (p === "today" || p === "just now") return now;
+      if (p === "yesterday" || p === "recently") return now - 24 * 3600 * 1000;
+
+      const hoursMatch = p.match(/(\d+)\s*h/);
+      if (hoursMatch) return now - Number(hoursMatch[1]) * 3600 * 1000;
+
+      const daysMatch = p.match(/(\d+)\s*d/);
+      if (daysMatch) return now - Number(daysMatch[1]) * 24 * 3600 * 1000;
+
+      const weeksMatch = p.match(/(\d+)\s*w/);
+      if (weeksMatch) return now - Number(weeksMatch[1]) * 7 * 24 * 3600 * 1000;
+
+      const num = Number.parseInt(p, 10);
+      if (!Number.isNaN(num)) {
+        return now - num * 24 * 3600 * 1000;
+      }
+      return 0;
+    };
 
     return [...r].sort((a, b) => {
-      if (sort === "salary") return parseSalary(b.salary) - parseSalary(a.salary);
-      if (sort === "recent") return age(a.posted) - age(b.posted);
-      return b.match - a.match;
+      if (sort === "salary") {
+        const diff = parseSalaryValue(b) - parseSalaryValue(a);
+        if (diff !== 0) return diff;
+        return (b.match ?? 0) - (a.match ?? 0);
+      }
+      if (sort === "recent") {
+        const diff = parsePostedTimestamp(b) - parsePostedTimestamp(a);
+        if (diff !== 0) return diff;
+        return (b.match ?? 0) - (a.match ?? 0);
+      }
+      // "match" - Best match
+      const diff = (b.match ?? 0) - (a.match ?? 0);
+      if (diff !== 0) return diff;
+      return parseSalaryValue(b) - parseSalaryValue(a);
     });
   }, [baseJobs, q, city, cityF, deptF, types, shiftF, salaryF, expF, orgF, qualF, perkF, sort, matchScope, s.saved]);
 
   const toggle = (arr: string[], set: (v: string[]) => void, v: string) =>
     set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+
+  const handleSortChange = (newSort: "match" | "recent" | "salary") => {
+    setSort(newSort);
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        sort: newSort,
+      }),
+    });
+  };
 
   const clearAll = () => {
     setTypes([]);
@@ -829,7 +895,7 @@ function Jobs() {
   return (
     <AppShell>
       {/* ================= SEARCH HERO DOCK ================= */}
-      <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-3 pb-3 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
+      <div className="relative sm:sticky sm:top-[var(--header-offset,4rem)] z-10 sm:z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2 sm:pt-3 pb-2 sm:pb-3 mb-3 sm:mb-6 bg-background/95 sm:backdrop-blur-md transition-all duration-300 ease-in-out">
         <div className="surface rounded-3xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm">
           <form
             onSubmit={(e) => {
@@ -885,23 +951,7 @@ function Jobs() {
             </Button>
           </form>
 
-          {/* Quick Keyword Chips */}
-          <div className="mt-3 flex flex-wrap items-center gap-1.5 px-1 pt-1 text-xs">
-            <span className="font-bold text-muted-foreground">Popular:</span>
-            {popularSearches.map((term) => (
-              <button
-                key={term}
-                type="button"
-                onClick={() => {
-                  setQ(term);
-                  navigate({ search: { q: term } });
-                }}
-                className="rounded-lg bg-muted/50 px-2 py-1 font-semibold text-muted-foreground hover:bg-primary-soft hover:text-primary transition-colors cursor-pointer"
-              >
-                {term}
-              </button>
-            ))}
-          </div>
+
         </div>
       </div>
 
@@ -1085,15 +1135,14 @@ function Jobs() {
           </div>
 
           {/* Header & Segmented Sort Controller */}
-          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border/60 pb-4">
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground flex items-center gap-2">
-                <span>{isStudent ? `${list.length} clinical internships for you` : `${list.length} jobs for you`}</span>
-                <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-                  Active
-                </span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-border/60 pb-4">
+            <div className="space-y-1">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground">
+                {isStudent
+                  ? `${list.length} ${list.length === 1 ? "clinical internship" : "clinical internships"} for you`
+                  : `${list.length} ${list.length === 1 ? "job" : "jobs"} for you`}
               </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-xs text-muted-foreground leading-relaxed">
                 {isStudent
                   ? "Students can apply to accredited clinical internships. Full-time positions unlock upon graduation."
                   : "Verified listings from accredited healthcare institutions across India"}
@@ -1101,24 +1150,27 @@ function Jobs() {
             </div>
 
             {/* Apple-style Segmented Sort */}
-            <div className="flex items-center rounded-2xl bg-muted/60 p-1 text-xs font-semibold border border-border/50">
+            <div className="grid grid-cols-3 w-full sm:w-auto sm:flex items-center rounded-2xl bg-muted/60 p-1 text-xs font-semibold border border-border/50 shrink-0">
               {(
                 [
-                  ["match", "Best match"],
-                  ["recent", "Most recent"],
-                  ["salary", "Highest pay"],
+                  ["match", "Best match", HiOutlineSparkles],
+                  ["recent", "Most recent", HiOutlineClock],
+                  ["salary", "Highest pay", HiOutlineCurrencyRupee],
                 ] as const
-              ).map(([k, l]) => (
+              ).map(([k, l, Icon]) => (
                 <button
                   key={k}
                   type="button"
-                  onClick={() => setSort(k)}
+                  onClick={() => handleSortChange(k)}
                   className={cn(
-                    "rounded-xl px-3 py-1.5 transition-all cursor-pointer font-bold",
-                    sort === k ? "bg-card text-primary shadow-xs" : "text-muted-foreground hover:text-foreground"
+                    "flex items-center justify-center gap-1.5 rounded-xl px-2 sm:px-3.5 py-1.5 text-xs font-bold text-center whitespace-nowrap transition-all cursor-pointer",
+                    sort === k
+                      ? "bg-card text-primary shadow-xs ring-1 ring-primary/20"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
                   )}
                 >
-                  {l}
+                  <Icon className={cn("h-3.5 w-3.5 shrink-0", sort === k ? "text-primary" : "text-muted-foreground")} />
+                  <span>{l}</span>
                 </button>
               ))}
             </div>

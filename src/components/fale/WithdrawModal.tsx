@@ -148,11 +148,12 @@ export function WithdrawModal({ isOpen, onClose, onConfirm, jobTitle, orgName }:
             <Button
               type="button"
               onClick={handleConfirm}
-              disabled={isSubmitting}
+              isLoading={isSubmitting}
+              loadingText="Withdrawing..."
               className="w-full sm:w-auto gap-2 rounded-xl bg-rose-600 font-semibold text-white hover:bg-rose-700 shadow-sm transition-colors active:scale-[0.98] h-10 text-xs sm:text-sm"
             >
               <HiOutlineArrowUturnLeft className="h-4 w-4" />
-              {isSubmitting ? "Withdrawing..." : "Confirm withdrawal"}
+              <span>Confirm withdrawal</span>
             </Button>
           </div>
         </div>

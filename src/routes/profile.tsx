@@ -26,12 +26,19 @@ import {
   HiOutlineCalendarDays,
   HiOutlineCamera,
 } from "react-icons/hi2";
-import { RiRobot2Line } from "react-icons/ri";
+import { RiRobot2Line, RiVerifiedBadgeFill } from "react-icons/ri";
 import { toast } from "sonner";
 import { AppShell, initials } from "@/components/fale/AppShell";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
@@ -93,6 +100,7 @@ function Profile() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [isUpdatingAvatar, setIsUpdatingAvatar] = useState(false);
+  const [isDownloadingDossier, setIsDownloadingDossier] = useState(false);
 
   const [viewStats, setViewStats] = useState<CandidateViewStats>({
     totalViews: 0,
@@ -105,6 +113,7 @@ function Profile() {
   type EditSectionType = "personal" | "summary" | "licensure" | "address" | "work" | "skills" | "openToWork" | null;
   const [activeEditSection, setActiveEditSection] = useState<EditSectionType>(null);
   const [isSavingSection, setIsSavingSection] = useState(false);
+  const [isEnhancingBio, setIsEnhancingBio] = useState(false);
 
   const [editForm, setEditForm] = useState({
     name: "",
@@ -191,28 +200,28 @@ function Profile() {
       });
   }, []);
 
-  // 100% Dynamic Onboarding Data Extraction
-  const name = candidateData?.name || String(p["name"] || (isApiEnabled ? s.contact || "Healthcare Professional" : "Jino Jebarson R"));
-  const role = candidateData?.profession || String(p["role"] || "Doctor");
-  const specialty = candidateData?.specialty || String(p["specialty"] || "General medicine");
-  const qual = candidateData?.qualification || String(p["qual"] || "MBBS");
-  const city = candidateData?.city || String(p["city"] || "Chennai");
-  const stateName = candidateData?.state || String(p["state"] || "Tamil Nadu");
+  // 100% Dynamic Onboarding & Profile Data Extraction
+  const name = candidateData?.name || String(p["name"] || s.contact || "Clinician");
+  const role = candidateData?.profession || String(p["role"] || p["profession"] || "Clinician");
+  const specialty = candidateData?.specialty || String(p["specialty"] || "General Practice");
+  const qual = candidateData?.qualification || String(p["qual"] || p["qualification"] || "");
+  const city = candidateData?.city || String(p["city"] || "");
+  const stateName = candidateData?.state || String(p["state"] || "");
   const addressLine = candidateData?.addressLine || String(p["addressLine"] || p["address"] || "");
   const pincode = candidateData?.pincode || String(p["pincode"] || "");
 
   // Full Address line with City, State, PIN
   const fullAddress = addressLine
-    ? `${addressLine}${pincode && !addressLine.includes(pincode) ? ` - ${pincode}` : ""}`
-    : `${city}, ${stateName}${pincode ? ` - ${pincode}` : ""}`;
+    ? `${addressLine}${city && !addressLine.includes(city) ? `, ${city}` : ""}${stateName && !addressLine.includes(stateName) ? `, ${stateName}` : ""}${pincode && !addressLine.includes(pincode) ? ` - ${pincode}` : ""}`
+    : [city, stateName].filter(Boolean).join(", ") + (pincode ? ` - ${pincode}` : "");
 
-  const email = candidateData?.email || String(p["email"] || (isApiEnabled ? "" : "jinovj250@gmail.com"));
-  const mobile = candidateData?.phone || String(p["mobile"] || (isApiEnabled ? s.contact || "" : "+91 6380102651"));
-  const council = candidateData?.council || String(p["council"] || "Tamil Nadu Medical Council");
-  const regNo = candidateData?.regNumber || String(p["regNo"] || (isApiEnabled ? "Pending Verification" : "TN6380"));
-  const regYear = candidateData?.regYear || String(p["regYear"] || p["year"] || "2024");
-  const exp = candidateData?.experienceYears || String(p["exp"] || (p["fresher"] ? "Fresher" : "1 Year"));
-  const collegeName = String(candidateData?.college || p["college"] || p["institution"] || "Madras Medical College");
+  const email = candidateData?.email || String(p["email"] || "");
+  const mobile = candidateData?.phone || String(p["mobile"] || s.contact || "");
+  const council = candidateData?.council || String(p["council"] || "");
+  const regNo = candidateData?.regNumber || String(p["regNo"] || "");
+  const regYear = candidateData?.regYear || String(p["regYear"] || p["year"] || "");
+  const exp = candidateData?.experienceYears || String(p["exp"] || (p["fresher"] ? "Fresher" : ""));
+  const collegeName = String(candidateData?.college || p["college"] || p["institution"] || "");
   const avatarUrl = String(p["avatar"] || candidateData?.documents?.find((d) => d.documentType === "PHOTO")?.fileUrl || "");
 
   const candidateLevel = String(candidateData?.candidateLevel?.toLowerCase() || p["level"] || p["cadreLevel"] || (exp === "Fresher" ? "fresher" : "professional"));
@@ -234,30 +243,30 @@ function Profile() {
   const preferredCities = (candidateData?.preferredCities && candidateData.preferredCities.length > 0)
     ? candidateData.preferredCities
     : Array.isArray(p["preferredCity"])
-    ? (p["preferredCity"] as string[])
-    : p["preferredCity"]
-    ? String(p["preferredCity"]).split(", ")
-    : [city || "Chennai", "Bengaluru", "Hyderabad"];
+      ? (p["preferredCity"] as string[])
+      : p["preferredCity"]
+        ? String(p["preferredCity"]).split(", ")
+        : city ? [city] : [];
 
   const skills = (candidateData?.skills && candidateData.skills.length > 0)
     ? candidateData.skills
     : Array.isArray(p["skills"]) && (p["skills"] as string[]).length > 0
-    ? (p["skills"] as string[])
-    : role.toLowerCase().includes("doctor")
-    ? ["Clinical Diagnosis", "Emergency Management", "Inpatient Protocol", "BLS / ACLS", "Pharmacotherapy"]
-    : ["Patient Vital Monitoring", "Wound Care", "Medication Administration", "Catheterization", "BLS Protocols"];
+      ? (p["skills"] as string[])
+      : role.toLowerCase().includes("doctor")
+        ? ["Clinical Diagnosis", "Emergency Management", "Inpatient Protocol", "BLS / ACLS", "Pharmacotherapy"]
+        : ["Patient Vital Monitoring", "Wound Care", "Medication Administration", "Catheterization", "BLS Protocols"];
 
   const languages = (candidateData?.languages && candidateData.languages.length > 0)
     ? candidateData.languages
     : Array.isArray(p["languages"]) && (p["languages"] as string[]).length > 0
-    ? (p["languages"] as string[])
-    : ["English", "Tamil", "Hindi"];
+      ? (p["languages"] as string[])
+      : ["English", "Tamil", "Hindi"];
 
   const exps: ExperienceItem[] = Array.isArray(p["exps"]) && (p["exps"] as ExperienceItem[]).length > 0
     ? (p["exps"] as ExperienceItem[])
     : isFresher || isStudent
-    ? []
-    : [
+      ? []
+      : [
         {
           org: String(p["employer"] || `${city} Medical Center`),
           role: String(p["designation"] || `${role} - ${specialty}`),
@@ -365,6 +374,7 @@ function Profile() {
   };
 
   const handleDownloadDossier = () => {
+    setIsDownloadingDossier(true);
     try {
       const blob = generateCandidateDossierBlob({
         name,
@@ -397,6 +407,8 @@ function Profile() {
       toast.success("Profile CV & Dossier Downloaded!");
     } catch (err: any) {
       toast.error("Could not generate PDF: " + (err?.message || "Error"));
+    } finally {
+      setIsDownloadingDossier(false);
     }
   };
 
@@ -410,10 +422,10 @@ function Profile() {
         const docType = file.name.toLowerCase().includes("degree")
           ? "DEGREE_CERTIFICATE"
           : file.name.toLowerCase().includes("council") || file.name.toLowerCase().includes("license")
-          ? "REGISTRATION_CERTIFICATE"
-          : file.name.toLowerCase().includes("resume") || file.name.toLowerCase().includes("cv")
-          ? "RESUME"
-          : "EXPERIENCE_CERTIFICATE";
+            ? "REGISTRATION_CERTIFICATE"
+            : file.name.toLowerCase().includes("resume") || file.name.toLowerCase().includes("cv")
+              ? "RESUME"
+              : "EXPERIENCE_CERTIFICATE";
 
         const reader = new FileReader();
         reader.onload = async () => {
@@ -486,6 +498,26 @@ function Profile() {
     }
   };
 
+  const normalizeEmploymentType = (val?: string): string => {
+    if (!val) return "Full-time";
+    const clean = val.trim().toLowerCase();
+    if (clean.includes("part")) return "Part-time";
+    if (clean.includes("locum") || clean.includes("shift") || clean.includes("per-shift")) return "Locum / Duty shifts";
+    if (clean.includes("contract")) return "Contractual";
+    if (clean.includes("intern")) return "Internship";
+    return "Full-time";
+  };
+
+  const normalizeAvailability = (val?: string): string => {
+    if (!val) return "Immediately";
+    const clean = val.trim().toLowerCase();
+    if (clean.includes("immed") || clean.includes("now")) return "Immediately";
+    if (clean.includes("15") || clean.includes("two week") || clean.includes("2 week")) return "Within 15 days";
+    if (clean.includes("1 month") || clean.includes("30") || clean.includes("one month")) return "1 month";
+    if (clean.includes("2") || clean.includes("60") || clean.includes("two month")) return "2+ months";
+    return "Immediately";
+  };
+
   const openEditSection = (section: EditSectionType) => {
     setEditForm({
       name,
@@ -506,8 +538,8 @@ function Profile() {
       experienceYears: exp,
       employer: exps[0]?.org || "",
       skillsText: skills.join(", "),
-      availability,
-      employmentType,
+      availability: normalizeAvailability(availability),
+      employmentType: normalizeEmploymentType(employmentType),
       preferredCitiesText: preferredCities.join(", "),
       salaryText: salary,
     });
@@ -639,10 +671,10 @@ function Profile() {
           const mimeType = mimeMatch
             ? mimeMatch[1]
             : isImg
-            ? lowerName.endsWith(".png")
-              ? "image/png"
-              : "image/jpeg"
-            : "application/pdf";
+              ? lowerName.endsWith(".png")
+                ? "image/png"
+                : "image/jpeg"
+              : "application/pdf";
           const base64Data = rawUrl.substring(commaIdx + 1);
           const byteCharacters = atob(base64Data);
           const byteNumbers = new Array(byteCharacters.length);
@@ -722,8 +754,8 @@ function Profile() {
           {/* Identity Body Strip */}
           <div className="px-5 sm:px-8 pb-7">
             <div className="-mt-14 sm:-mt-16 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-              {/* Avatar with Circular Verified Shield & Camera Update Option */}
-              <div className="relative shrink-0 group">
+              {/* Avatar with Camera Update Option (Bottom-Right badge + Hover Overlay) */}
+              <div className="relative w-fit shrink-0 group">
                 <input
                   ref={avatarInputRef}
                   type="file"
@@ -732,64 +764,70 @@ function Profile() {
                   className="hidden"
                 />
 
-                {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt={name}
-                    onClick={() => avatarInputRef.current?.click()}
-                    title="Click to update profile photo"
-                    className="h-24 w-24 sm:h-32 sm:w-32 rounded-3xl object-cover border-4 border-card shadow-md bg-card cursor-pointer hover:opacity-95 transition-opacity"
-                  />
-                ) : (
-                  <div
-                    onClick={() => avatarInputRef.current?.click()}
-                    title="Click to upload profile photo"
-                    className="grid h-24 w-24 sm:h-32 sm:w-32 place-items-center rounded-3xl border-4 border-card bg-primary-soft text-2xl sm:text-4xl font-black text-primary shadow-md cursor-pointer hover:bg-primary-soft/80 transition-colors"
-                  >
-                    {initials(name)}
-                  </div>
-                )}
-
-                {/* Verified Professional Shield (Bottom-Right) */}
-                <span
-                  className="absolute -bottom-1 -right-1 grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-full bg-success text-white border-2 border-card shadow-xs"
-                  title="Council Verified Clinician"
+                <div
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="relative h-24 w-24 sm:h-32 sm:w-32 rounded-3xl overflow-hidden border-4 border-card shadow-md bg-card cursor-pointer group/avatar"
+                  title="Click to update profile photo"
                 >
-                  <HiCheckCircle className="h-5 w-5 sm:h-6 sm:w-6" />
-                </span>
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={name}
+                      className="h-full w-full object-cover transition-transform duration-200 group-hover/avatar:scale-105"
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center bg-primary-soft text-2xl sm:text-4xl font-black text-primary">
+                      {initials(name)}
+                    </div>
+                  )}
 
-                {/* Camera Update Button (Top-Right) */}
+                  {/* Hover Backdrop Overlay */}
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[11px] font-bold gap-1 pointer-events-none">
+                    <HiOutlineCamera className="h-5 w-5" />
+                    <span>Change</span>
+                  </div>
+                </div>
+
+                {/* Camera Update Button (Cleanly docked at Bottom-Right of the Avatar) */}
                 <button
                   type="button"
                   onClick={() => avatarInputRef.current?.click()}
                   disabled={isUpdatingAvatar}
                   title="Update profile photo"
                   aria-label="Update profile photo"
-                  className="absolute -top-1.5 -right-1.5 grid h-8 w-8 place-items-center rounded-full bg-card text-foreground hover:bg-primary-soft hover:text-primary border-2 border-card shadow-md cursor-pointer transition-colors z-10"
+                  className="absolute -bottom-1 -right-1 grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-full bg-primary text-primary-foreground hover:bg-primary-hover border-2 border-card shadow-md cursor-pointer active:scale-95 transition-all z-10"
                 >
-                  <HiOutlineCamera className="h-4 w-4" />
+                  {isUpdatingAvatar ? (
+                    <ButtonSpinner className="h-4 w-4 text-white" />
+                  ) : (
+                    <HiOutlineCamera className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
+                  )}
                 </button>
               </div>
 
-              {/* Primary Action Buttons */}
-              <div className="flex items-center gap-2">
+              {/* Primary Action Buttons (Responsive 2-col Grid on mobile, Flex on desktop) */}
+              <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto mt-2 sm:mt-0">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => openEditSection("personal")}
-                  className="rounded-xl font-bold text-xs gap-1.5 border-border bg-card hover:bg-primary-soft hover:text-primary text-foreground h-9.5 px-3.5 cursor-pointer shadow-xs"
+                  className="rounded-xl font-bold text-xs gap-1.5 border-border bg-card hover:bg-primary-soft hover:text-primary text-foreground h-9.5 px-3 cursor-pointer shadow-xs justify-center"
                 >
-                  <HiOutlinePencilSquare className="h-4 w-4 text-primary" />
+                  <HiOutlinePencilSquare className="h-4 w-4 text-primary shrink-0" />
                   <span>Edit Info</span>
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled={isDownloadingDossier}
+                  isLoading={isDownloadingDossier}
+                  loadingText="Generating..."
                   onClick={handleDownloadDossier}
-                  className="rounded-xl font-bold text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary-soft h-9.5 px-4 cursor-pointer shadow-xs"
+                  className="rounded-xl font-bold text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary-soft h-9.5 px-3 sm:px-4 cursor-pointer shadow-xs justify-center"
                 >
-                  <HiOutlineArrowDownTray className="h-4 w-4" />
-                  <span>Download Verified CV</span>
+                  <HiOutlineArrowDownTray className="h-4 w-4 shrink-0" />
+                  <span className="sm:hidden">Download CV</span>
+                  <span className="hidden sm:inline">Download Verified CV</span>
                 </Button>
               </div>
             </div>
@@ -797,42 +835,61 @@ function Profile() {
             {/* Clinician Headline & Verification Badges */}
             <div className="mt-4 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black text-foreground tracking-tight">
-                  {name}
-                </h1>
-                <span className="inline-flex items-center rounded-full bg-primary-soft text-primary font-bold border border-primary/25 text-xs px-2.5 py-0.5 select-none transition-none pointer-events-none">
-                  {qual}
-                </span>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-success-soft text-success font-bold border border-success/25 text-xs px-2.5 py-0.5 select-none transition-none pointer-events-none">
-                  <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                <div className="inline-flex items-center gap-1.5 min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-black text-foreground tracking-tight">
+                    {name}
+                  </h1>
+                  <RiVerifiedBadgeFill
+                    className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 shrink-0"
+                    title="Council Verified Clinician"
+                  />
+                </div>
+                {qual && (
+                  <span className="inline-flex items-center rounded-full bg-primary-soft text-primary font-bold border border-primary/25 text-xs px-2.5 py-0.5 select-none">
+                    {qual}
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-success-soft text-success font-bold border border-success/25 text-[11px] sm:text-xs px-2.5 py-0.5 select-none">
+                  <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
                   Council Verified
                 </span>
               </div>
 
               {/* Professional Title & Cadre */}
-              <p className="text-sm sm:text-base font-semibold text-foreground flex flex-wrap items-center gap-2">
-                <span>{role} • {specialty}</span>
-                <span className="text-muted-foreground/40">•</span>
-                <span className="text-xs font-bold text-primary bg-primary-soft px-2 py-0.5 rounded-md border border-primary/20">
-                  {isFresher ? "Fresher" : exp}
-                </span>
-              </p>
-
-              {/* Statutory Council Licensure Strip */}
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground pt-0.5">
-                <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                  <HiOutlineIdentification className="h-4 w-4 text-primary shrink-0" />
-                  <strong>{council}</strong>
-                </span>
-                <span className="text-muted-foreground/40">•</span>
-                <span>License / Reg No: <strong className="font-mono text-foreground">{regNo}</strong></span>
-                {regYear && (
-                  <>
-                    <span className="text-muted-foreground/40">•</span>
-                    <span>Registration Year: {regYear}</span>
-                  </>
+              <div className="text-sm sm:text-base font-semibold text-foreground flex flex-wrap items-center gap-2">
+                <span>{role}{specialty ? ` • ${specialty}` : ""}</span>
+                {exp && (
+                  <span className="text-xs font-bold text-primary bg-primary-soft px-2.5 py-0.5 rounded-full border border-primary/20 whitespace-nowrap">
+                    {isFresher ? "Fresher" : exp}
+                  </span>
                 )}
               </div>
+
+              {/* Statutory Council Licensure Strip */}
+              {(council || regNo) && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground pt-0.5">
+                  {council && (
+                    <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                      <HiOutlineIdentification className="h-4 w-4 text-primary shrink-0" />
+                      <span>{council}</span>
+                    </span>
+                  )}
+                  {regNo && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="hidden sm:inline text-muted-foreground/40">•</span>
+                      <span>
+                        Reg No: <strong className="font-mono text-foreground font-semibold">{regNo}</strong>
+                      </span>
+                    </span>
+                  )}
+                  {regYear && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="hidden sm:inline text-muted-foreground/40">•</span>
+                      <span>Year: <strong className="text-foreground font-semibold">{regYear}</strong></span>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Professional Contact & Full Address Strip */}
@@ -899,9 +956,9 @@ function Profile() {
               : "border-border bg-card"
           )}
         >
-          <div className="flex items-start sm:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+            <div className="space-y-1.5 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={cn(
                     "h-2.5 w-2.5 rounded-full shrink-0",
@@ -909,11 +966,11 @@ function Profile() {
                   )}
                 />
                 <h3 className="font-extrabold text-sm sm:text-base text-foreground">
-                  Open to Work & Clinical Placement
+                  Open to Work &amp; Clinical Placement
                 </h3>
                 <span
                   className={cn(
-                    "rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                    "rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 whitespace-nowrap",
                     openToWork
                       ? "bg-primary-soft text-primary border border-primary/25"
                       : "bg-muted text-muted-foreground border border-border"
@@ -929,21 +986,24 @@ function Profile() {
               </p>
             </div>
 
-            <div className="flex items-center gap-2.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => openEditSection("openToWork")}
-                className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-card/90 border border-primary/25 px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
-                title="Edit placement preferences"
-              >
-                <HiOutlinePencilSquare className="h-3.5 w-3.5" />
-                <span>Edit</span>
-              </button>
-              <Switch
-                checked={openToWork}
-                onCheckedChange={handleToggleOpenToWork}
-                className="data-[state=checked]:bg-primary"
-              />
+            <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2 sm:pt-0 border-t border-primary/15 sm:border-0">
+              <span className="text-xs font-semibold text-muted-foreground sm:hidden">Placement Status</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openEditSection("openToWork")}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-card/90 border border-primary/25 px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
+                  title="Edit placement preferences"
+                >
+                  <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                  <span>Edit</span>
+                </button>
+                <Switch
+                  checked={openToWork}
+                  onCheckedChange={handleToggleOpenToWork}
+                  className="data-[state=checked]:bg-primary"
+                />
+              </div>
             </div>
           </div>
 
@@ -1002,818 +1062,843 @@ function Profile() {
           <div className="lg:col-span-2 space-y-5">
             {/* 1. DOCUMENT VAULT (PLACED ON LEFT SIDE AS REQUESTED!) */}
             <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
                   <div className="h-9 w-9 rounded-xl bg-primary-soft flex items-center justify-center text-primary shrink-0 border border-primary/20">
                     <HiOutlineDocumentText className="h-5 w-5" />
                   </div>
-                  <div>
-                    <h3 className="text-sm sm:text-base font-extrabold text-foreground">
-                      Document Vault & Verification Files
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      Original files uploaded during onboarding. Click <strong>Preview</strong> to inspect.
-                    </p>
-                  </div>
+                  <h3 className="text-sm sm:text-base font-extrabold text-foreground leading-snug">
+                    Document Vault &amp; Verification Files
+                  </h3>
                 </div>
-                <span className="bg-success-soft text-success border border-success/25 text-[10px] font-bold rounded-full px-2.5 py-0.5 select-none pointer-events-none transition-none">
+                <span className="bg-success-soft text-success border border-success/25 text-[10px] sm:text-xs font-bold rounded-full px-2.5 py-0.5 select-none pointer-events-none whitespace-nowrap shrink-0">
                   {documentsList.length} Uploaded
                 </span>
               </div>
 
-              {/* Document Cards Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                {documentsList.map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="p-4 rounded-2xl border border-border hover:border-primary/40 transition-all bg-muted/30 space-y-2 flex flex-col justify-between"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <HiOutlineDocumentText className="h-4 w-4 text-primary shrink-0" />
-                          <span className="text-xs font-bold text-foreground truncate">
-                            {doc.title}
-                          </span>
-                        </div>
-                        <span className="h-2 w-2 rounded-full bg-success shrink-0 mt-1" title="Verified Document" />
+                      {/* Document Cards Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        {documentsList.map((doc) => (
+                          <div
+                            key={doc.id}
+                            className="p-4 rounded-2xl border border-border hover:border-primary/40 transition-all bg-muted/30 space-y-2 flex flex-col justify-between"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <HiOutlineDocumentText className="h-4 w-4 text-primary shrink-0" />
+                                  <span className="text-xs font-bold text-foreground truncate">
+                                    {doc.title}
+                                  </span>
+                                </div>
+                                <span className="h-2 w-2 rounded-full bg-success shrink-0 mt-1" title="Verified Document" />
+                              </div>
+
+                              <p className="text-[11px] font-mono text-muted-foreground truncate pl-6">
+                                {doc.fileName}
+                              </p>
+
+                              {/* Document Verification Pre-Check */}
+                              <div className="flex items-center gap-1.5 pl-6 pt-0.5 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                                <RiRobot2Line className="h-3 w-3 text-emerald-600" />
+                                <span>AI Pre-Check: Council Seal &amp; Registration Legible · Verified</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/50">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handlePreviewDocument(doc)}
+                                className="h-7.5 px-3 text-xs font-bold text-primary border-primary/25 hover:bg-primary-soft cursor-pointer rounded-xl"
+                              >
+                                <HiOutlineEye className="h-3.5 w-3.5 mr-1" />
+                                Preview
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
 
-                      <p className="text-[11px] font-mono text-muted-foreground truncate pl-6">
-                        {doc.fileName}
-                      </p>
-
-                      {/* Document Verification Pre-Check */}
-                      <div className="flex items-center gap-1.5 pl-6 pt-0.5 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
-                        <RiRobot2Line className="h-3 w-3 text-emerald-600" />
-                        <span>AI Pre-Check: Council Seal &amp; Registration Legible · Verified</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/50">
+                      {/* Upload Additional Document Trigger */}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                      />
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => handlePreviewDocument(doc)}
-                        className="h-7.5 px-3 text-xs font-bold text-primary border-primary/25 hover:bg-primary-soft cursor-pointer rounded-xl"
+                        disabled={isUploading}
+                        isLoading={isUploading}
+                        loadingText="Uploading Document..."
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full rounded-2xl text-xs font-bold border-dashed border-border hover:border-primary text-foreground hover:text-primary cursor-pointer h-9.5 gap-1.5"
                       >
-                        <HiOutlineEye className="h-3.5 w-3.5 mr-1" />
-                        Preview
+                        <HiOutlineArrowUpTray className="h-3.5 w-3.5" />
+                        <span>Upload Additional Document</span>
                       </Button>
                     </div>
-                  </div>
-                ))}
-              </div>
 
-              {/* Upload Additional Document Trigger */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isUploading}
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full rounded-2xl text-xs font-bold border-dashed border-border hover:border-primary text-foreground hover:text-primary cursor-pointer h-9.5 gap-1.5"
-              >
-                <HiOutlineArrowUpTray className="h-3.5 w-3.5" />
-                <span>{isUploading ? "Uploading..." : "Upload Additional Document"}</span>
-              </Button>
-            </div>
-
-            {/* 2. Scope of Practice / Professional Summary */}
-            <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm sm:text-base font-extrabold text-foreground flex items-center gap-2">
-                  <HiOutlineDocumentText className="h-4 w-4 text-primary shrink-0" />
-                  <span>Scope of Practice & Clinical Summary</span>
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => openEditSection("summary")}
-                  className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
-                  title="Edit clinical summary"
-                >
-                  <HiOutlinePencilSquare className="h-3.5 w-3.5" />
-                  <span>Edit</span>
-                </button>
-              </div>
-              <div className="border-l-2 border-primary/40 pl-3.5 py-0.5">
-                <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
-                  {bio || (isStudent
-                    ? `Enrolled clinical candidate studying ${qual} at ${collegeName}. Trained in foundational clinical competencies, hospital protocol, and patient care standards. Eager to take on clinical observerships and mentorship postings.`
-                    : isFresher
-                    ? `Registered healthcare professional qualified in ${qual} specializing in ${specialty}. Registered with ${council} under license ${regNo}. Trained in acute patient care, diagnostics, and protocol adherence. Actively seeking first hospital posting with commitment to clinical excellence.`
-                    : `Dedicated ${role} specializing in ${specialty} with ${exp} of clinical experience. Registered with ${council} under license ${regNo}. Experienced in clinical diagnostics, ward management, emergency protocol, and interdisciplinary patient stabilization according to NABH standards.`)}
-                </p>
-              </div>
-            </div>
-
-            {/* 3. Medical Licensure & Statutory Registration */}
-            <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm sm:text-base font-extrabold text-foreground flex items-center gap-2">
-                  <HiOutlineIdentification className="h-4 w-4 text-primary shrink-0" />
-                  <span>Statutory Licensure & Verification</span>
-                </h3>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-bold text-success bg-success-soft px-2.5 py-0.5 rounded-full border border-success/20">
-                    Active in Good Standing
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => openEditSection("licensure")}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
-                    title="Edit licensure details"
-                  >
-                    <HiOutlinePencilSquare className="h-3.5 w-3.5" />
-                    <span>Edit</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {/* Council Card */}
-                <div className="p-4 rounded-2xl border border-border bg-muted/40 space-y-1">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-success">
-                    <HiOutlineCheckBadge className="h-4 w-4" />
-                    <span>State Council Body</span>
-                  </div>
-                  <h4 className="font-bold text-sm text-foreground">{council}</h4>
-                  <p className="text-xs font-mono text-foreground font-semibold">License #{regNo}</p>
-                  <p className="text-[11px] text-muted-foreground pt-1">Council State: {stateName}</p>
-                </div>
-
-                {/* Academic Degree Card */}
-                <div className="p-4 rounded-2xl border border-border bg-muted/40 space-y-1">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
-                    <HiOutlineAcademicCap className="h-4 w-4" />
-                    <span>Primary Degree & Institution</span>
-                  </div>
-                  <h4 className="font-bold text-sm text-foreground">{qual}</h4>
-                  <p className="text-xs text-muted-foreground font-medium">{collegeName}</p>
-                  {regYear && (
-                    <p className="text-[11px] text-muted-foreground pt-1">Batch Year: {regYear}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          {/* -------------------------------------------------------- */}
-          {/* RIGHT 1 COLUMN: PROFILE VIEWS, CREDIBILITY, ADDRESS, WORK & SKILLS */}
-          {/* -------------------------------------------------------- */}
-          <div className="space-y-5">
-            {/* 1. DYNAMIC PROFILE VIEWS CARD (REAL-TIME FROM POSTGRESQL) */}
-            <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="h-7 w-7 rounded-lg bg-primary-soft text-primary flex items-center justify-center">
-                    <HiOutlineEye className="h-4 w-4" />
-                  </div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Profile Views
-                  </span>
-                </div>
-                <span className="rounded-full bg-primary-soft text-primary border border-primary/25 px-2.5 py-0.5 text-[11px] font-bold">
-                  {viewStats.totalViews > 0
-                    ? `${viewStats.weeklyGrowthPercent >= 0 ? `+${viewStats.weeklyGrowthPercent}%` : `${viewStats.weeklyGrowthPercent}%`} wk`
-                    : "Live"}
-                </span>
-              </div>
-
-              <div className="space-y-0.5">
-                <div className="text-3xl font-black text-foreground tracking-tight">
-                  {viewStats.totalViews}
-                </div>
-                <p className="text-xs text-muted-foreground font-medium">
-                  institutional views
-                </p>
-              </div>
-
-              <div className="pt-3 border-t border-border flex items-center gap-2 text-xs font-semibold text-primary">
-                <span className="h-2 w-2 rounded-full bg-primary" />
-                <span>
-                  {viewStats.totalViews > 0
-                    ? `${viewStats.hospitalsViewedToday} Hospital${viewStats.hospitalsViewedToday === 1 ? "" : "s"} viewed today`
-                    : "Profile active in recruiter searches"}
-                </span>
-              </div>
-            </div>
-
-            {/* 2. INSTITUTIONAL CREDIBILITY */}
-            <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
-                  <span>Institutional Credibility</span>
-                </span>
-                <span className="bg-success-soft text-success border border-success/25 text-[10px] font-bold rounded-full px-2.5 py-0.5 select-none pointer-events-none transition-none">
-                  Verified
-                </span>
-              </div>
-
-              <div className="space-y-2.5 pt-1 text-xs text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <HiCheckCircle className="h-4 w-4 text-success shrink-0" />
-                  <span className="text-foreground font-medium">State Council Licensure Validated</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <HiCheckCircle className="h-4 w-4 text-success shrink-0" />
-                  <span className="text-foreground font-medium">Government Identity Authenticated</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <HiCheckCircle className="h-4 w-4 text-success shrink-0" />
-                  <span className="text-foreground font-medium">Degree Certificate Uploaded</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <HiCheckCircle className="h-4 w-4 text-success shrink-0" />
-                  <span className="text-foreground font-medium">Direct Contact Verified</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. PROFESSIONAL ADDRESS (SHOWING FULL ADDRESS IN DETAIL) */}
-            <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0" />
-                  <span>Professional Address</span>
-                </h4>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-primary bg-primary-soft px-2 py-0.5 rounded-md border border-primary/20">
-                    {city}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => openEditSection("address")}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
-                    title="Edit address"
-                  >
-                    <HiOutlinePencilSquare className="h-3 w-3" />
-                    <span>Edit</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Full Address Card */}
-              <div className="p-3.5 rounded-2xl border border-border bg-muted/40 space-y-2.5 text-xs">
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Full Registered Address
-                  </span>
-                  <p className="font-semibold text-foreground leading-relaxed break-words text-xs">
-                    {fullAddress}
-                  </p>
-                </div>
-
-                <div className="pt-2 border-t border-border/60 grid grid-cols-2 gap-2 text-[11px]">
-                  <div>
-                    <span className="text-muted-foreground block text-[10px]">City</span>
-                    <strong className="text-foreground">{city}</strong>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block text-[10px]">State</span>
-                    <strong className="text-foreground">{stateName}</strong>
-                  </div>
-                  {pincode && (
-                    <div className="col-span-2 pt-1 border-t border-border/40">
-                      <span className="text-muted-foreground block text-[10px]">Postal PIN Code</span>
-                      <strong className="font-mono text-foreground">{pincode}</strong>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* 3. CLINICAL WORK HISTORY (MOVED TO RIGHT SIDE AS REQUESTED) */}
-            <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-extrabold text-foreground flex items-center gap-2">
-                  <HiOutlineBriefcase className="h-4 w-4 text-primary shrink-0" />
-                  <span>Clinical Work History</span>
-                </h3>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-primary bg-primary-soft px-2.5 py-0.5 rounded-full border border-primary/20">
-                    {isFresher ? "Fresher Candidate" : exp}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => openEditSection("work")}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
-                    title="Edit work history"
-                  >
-                    <HiOutlinePencilSquare className="h-3 w-3" />
-                    <span>Edit</span>
-                  </button>
-                </div>
-              </div>
-
-              {isFresher ? (
-                <div className="flex items-center gap-3.5 p-4 rounded-2xl bg-primary-soft/50 border border-primary/20 text-xs">
-                  <div className="h-10 w-10 rounded-2xl bg-primary-soft flex items-center justify-center text-primary shrink-0 border border-primary/20">
-                    <HiOutlineSparkles className="h-5 w-5" />
-                  </div>
-                  <div className="space-y-0.5">
-                    <h4 className="font-bold text-foreground">Fresher / Resident Practitioner</h4>
-                    <p className="text-muted-foreground text-[11px]">
-                      Completed qualification in {qual}. Ready for entry-level hospital placements, clinical training, or resident positions.
-                    </p>
-                  </div>
-                </div>
-              ) : exps.length > 0 ? (
-                <div className="space-y-3">
-                  {exps.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-start gap-3.5 p-4 rounded-2xl border border-border hover:border-primary/30 transition-colors bg-muted/30"
-                    >
-                      <div className="h-10 w-10 rounded-2xl bg-primary-soft flex items-center justify-center text-primary shrink-0 border border-primary/20">
-                        <HiOutlineBuildingOffice2 className="h-5 w-5" />
+                    {/* 2. Scope of Practice / Professional Summary */}
+                    <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="text-sm sm:text-base font-extrabold text-foreground flex items-center gap-2">
+                          <HiOutlineDocumentText className="h-4 w-4 text-primary shrink-0" />
+                          <span>Scope of Practice &amp; Clinical Summary</span>
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => openEditSection("summary")}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2.5 py-1 rounded-xl transition-colors cursor-pointer shrink-0 mt-0.5"
+                          title="Edit clinical summary"
+                        >
+                          <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                          <span>Edit</span>
+                        </button>
                       </div>
-                      <div className="space-y-0.5 min-w-0 flex-1">
-                        <h4 className="font-bold text-sm text-foreground leading-snug">
-                          {item.role}
-                        </h4>
-                        <p className="text-xs font-semibold text-foreground">
-                          {item.org}
+                      <div className="border-l-2 border-primary/40 pl-3.5 py-0.5">
+                        <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
+                          {bio || (isStudent
+                            ? `Enrolled clinical candidate studying ${qual} at ${collegeName}. Trained in foundational clinical competencies, hospital protocol, and patient care standards. Eager to take on clinical observerships and mentorship postings.`
+                            : isFresher
+                              ? `Registered healthcare professional qualified in ${qual} specializing in ${specialty}. Registered with ${council} under license ${regNo}. Trained in acute patient care, diagnostics, and protocol adherence. Actively seeking first hospital posting with commitment to clinical excellence.`
+                              : `Dedicated ${role} specializing in ${specialty} with ${exp} of clinical experience. Registered with ${council} under license ${regNo}. Experienced in clinical diagnostics, ward management, emergency protocol, and interdisciplinary patient stabilization according to NABH standards.`)}
                         </p>
-                        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 pt-0.5">
-                          <HiOutlineCalendarDays className="h-3.5 w-3.5 text-primary" />
-                          <span>
-                            {item.cur ? "Current Placement" : "Past Experience"}
-                            {item.fy ? ` • ${item.fy}` : ""}
+                      </div>
+                    </div>
+
+                    {/* 3. Medical Licensure & Statutory Registration */}
+                    <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1.5 min-w-0">
+                          <h3 className="text-sm sm:text-base font-extrabold text-foreground flex items-center gap-2">
+                            <HiOutlineIdentification className="h-4 w-4 text-primary shrink-0" />
+                            <span>Statutory Licensure &amp; Verification</span>
+                          </h3>
+                          <span className="inline-flex text-[11px] font-bold text-success bg-success-soft px-2.5 py-0.5 rounded-full border border-success/20">
+                            Active in Good Standing
                           </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openEditSection("licensure")}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2.5 py-1 rounded-xl transition-colors cursor-pointer shrink-0 mt-0.5"
+                          title="Edit licensure details"
+                        >
+                          <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                          <span>Edit</span>
+                        </button>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {/* Council Card */}
+                        <div className="p-4 rounded-2xl border border-border bg-muted/40 space-y-1">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-success">
+                            <HiOutlineCheckBadge className="h-4 w-4" />
+                            <span>State Council Body</span>
+                          </div>
+                          <h4 className="font-bold text-sm text-foreground">{council}</h4>
+                          <p className="text-xs font-mono text-foreground font-semibold">License #{regNo}</p>
+                          <p className="text-[11px] text-muted-foreground pt-1">Council State: {stateName}</p>
+                        </div>
+
+                        {/* Academic Degree Card */}
+                        <div className="p-4 rounded-2xl border border-border bg-muted/40 space-y-1">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
+                            <HiOutlineAcademicCap className="h-4 w-4" />
+                            <span>Primary Degree &amp; Institution</span>
+                          </div>
+                          <h4 className="font-bold text-sm text-foreground">{qual}</h4>
+                          <p className="text-xs text-muted-foreground font-medium">{collegeName}</p>
+                          {regYear && (
+                            <p className="text-[11px] text-muted-foreground pt-1">Batch Year: {regYear}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* -------------------------------------------------------- */}
+                  {/* RIGHT 1 COLUMN: PROFILE VIEWS, CREDIBILITY, ADDRESS, WORK & SKILLS */}
+                  {/* -------------------------------------------------------- */}
+                  <div className="space-y-5">
+                    {/* 1. DYNAMIC PROFILE VIEWS CARD (REAL-TIME FROM POSTGRESQL) */}
+                    <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="h-7 w-7 rounded-lg bg-primary-soft text-primary flex items-center justify-center shrink-0">
+                            <HiOutlineEye className="h-4 w-4" />
+                          </div>
+                          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
+                            Profile Views
+                          </span>
+                        </div>
+                        <span className="rounded-full bg-primary-soft text-primary border border-primary/25 px-2.5 py-0.5 text-[11px] font-bold whitespace-nowrap shrink-0">
+                          {viewStats.totalViews > 0
+                            ? `${viewStats.weeklyGrowthPercent >= 0 ? `+${viewStats.weeklyGrowthPercent}%` : `${viewStats.weeklyGrowthPercent}%`} wk`
+                            : "Live"}
+                        </span>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <div className="text-3xl font-black text-foreground tracking-tight">
+                          {viewStats.totalViews}
+                        </div>
+                        <p className="text-xs text-muted-foreground font-medium">
+                          institutional views
                         </p>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground italic">No experience records added.</p>
-              )}
-            </div>
 
-            {/* 4. CLINICAL SKILLS & COMPETENCIES (MOVED TO RIGHT SIDE AS REQUESTED) */}
-            <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-extrabold text-foreground flex items-center gap-2">
-                  <HiOutlineSparkles className="h-4 w-4 text-primary shrink-0" />
-                  <span>Verified Clinical Competencies</span>
-                </h3>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-muted-foreground">
-                    {skills.length} verified
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => openEditSection("skills")}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2 py-0.5 rounded-lg transition-colors cursor-pointer"
-                    title="Edit competencies"
-                  >
-                    <HiOutlinePencilSquare className="h-3 w-3" />
-                    <span>Edit</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2 pt-1">
-                {skills.map((skill) => (
-                  <span
-                    key={skill}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/25 px-3 py-1.5 text-xs font-bold"
-                  >
-                    <HiCheckCircle className="h-3.5 w-3.5 text-primary" />
-                    <span>{skill}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ========================================================= */}
-        {/* IN-PROFILE SECTION EDIT MODAL (No navigation, edit in-page) */}
-        {/* ========================================================= */}
-        {activeEditSection && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
-            <div className="relative w-full max-w-lg bg-card rounded-3xl border border-border shadow-2xl p-6 space-y-5 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-              {/* Modal Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-border">
-                <div className="flex items-center gap-2.5">
-                  <div className="h-8 w-8 rounded-xl bg-primary-soft text-primary flex items-center justify-center">
-                    <HiOutlinePencilSquare className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-extrabold text-foreground">
-                      {activeEditSection === "personal" && "Edit Personal & Professional Details"}
-                      {activeEditSection === "openToWork" && "Edit Placement Preferences"}
-                      {activeEditSection === "summary" && "Edit Clinical Summary"}
-                      {activeEditSection === "licensure" && "Edit Licensure & Degree"}
-                      {activeEditSection === "address" && "Edit Professional Address"}
-                      {activeEditSection === "work" && "Edit Clinical Work History"}
-                      {activeEditSection === "skills" && "Edit Clinical Competencies"}
-                    </h3>
-                    <p className="text-[11px] text-muted-foreground">
-                      Updates are saved directly to your profile.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActiveEditSection(null)}
-                  className="h-8 w-8 rounded-full border border-border hover:bg-muted text-muted-foreground flex items-center justify-center cursor-pointer transition-colors"
-                >
-                  <HiOutlineXMark className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Form Content by Section */}
-              <div className="space-y-4 text-xs">
-                {activeEditSection === "personal" && (
-                  <>
-                    <div className="space-y-1">
-                      <label className="font-bold text-foreground">Full Name</label>
-                      <input
-                        type="text"
-                        value={editForm.name}
-                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                        className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">Profession / Role</label>
-                        <input
-                          type="text"
-                          value={editForm.profession}
-                          onChange={(e) => setEditForm({ ...editForm, profession: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">Specialty</label>
-                        <input
-                          type="text"
-                          value={editForm.specialty}
-                          onChange={(e) => setEditForm({ ...editForm, specialty: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                        />
+                      <div className="pt-3 border-t border-border flex items-center gap-2 text-xs font-semibold text-primary">
+                        <span className="h-2 w-2 rounded-full bg-primary shrink-0" />
+                        <span className="truncate">
+                          {viewStats.totalViews > 0
+                            ? `${viewStats.hospitalsViewedToday} Hospital${viewStats.hospitalsViewedToday === 1 ? "" : "s"} viewed today`
+                            : "Profile active in recruiter searches"}
+                        </span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">Email Address</label>
-                        <input
-                          type="email"
-                          value={editForm.email}
-                          onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">Phone Number</label>
-                        <input
-                          type="text"
-                          value={editForm.phone}
-                          onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-bold text-foreground">Languages (comma separated)</label>
-                      <input
-                        type="text"
-                        value={editForm.languagesText}
-                        onChange={(e) => setEditForm({ ...editForm, languagesText: e.target.value })}
-                        placeholder="English, Tamil, Hindi"
-                        className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                      />
-                    </div>
-                  </>
-                )}
 
-                {activeEditSection === "openToWork" && (
-                  <>
-                    <div className="space-y-1">
-                      <label className="font-bold text-foreground">Preferred Locations (comma separated)</label>
-                      <input
-                        type="text"
-                        value={editForm.preferredCitiesText}
-                        onChange={(e) => setEditForm({ ...editForm, preferredCitiesText: e.target.value })}
-                        placeholder="Chennai, Bengaluru, Hyderabad"
-                        className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                      />
+                    {/* 2. INSTITUTIONAL CREDIBILITY */}
+                    <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 min-w-0">
+                          <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
+                          <span>Institutional Credibility</span>
+                        </span>
+                        <span className="bg-success-soft text-success border border-success/25 text-[10px] font-bold rounded-full px-2.5 py-0.5 select-none pointer-events-none whitespace-nowrap shrink-0">
+                          Verified
+                        </span>
+                      </div>
+
+                      <div className="space-y-2.5 pt-1 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <HiCheckCircle className="h-4 w-4 text-success shrink-0" />
+                          <span className="text-foreground font-medium">State Council Licensure Validated</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <HiCheckCircle className="h-4 w-4 text-success shrink-0" />
+                          <span className="text-foreground font-medium">Government Identity Authenticated</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <HiCheckCircle className="h-4 w-4 text-success shrink-0" />
+                          <span className="text-foreground font-medium">Degree Certificate Uploaded</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <HiCheckCircle className="h-4 w-4 text-success shrink-0" />
+                          <span className="text-foreground font-medium">Direct Contact Verified</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">Employment Type</label>
-                        <select
-                          value={editForm.employmentType}
-                          onChange={(e) => setEditForm({ ...editForm, employmentType: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+
+                    {/* 2. PROFESSIONAL ADDRESS (SHOWING FULL ADDRESS IN DETAIL) */}
+                    <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1.5 min-w-0">
+                          <h3 className="text-sm sm:text-base font-extrabold text-foreground flex items-center gap-2">
+                            <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0" />
+                            <span>Professional Address</span>
+                          </h3>
+                          <span className="inline-flex text-xs font-bold text-primary bg-primary-soft px-2.5 py-0.5 rounded-full border border-primary/20">
+                            {city}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openEditSection("address")}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2.5 py-1 rounded-xl transition-colors cursor-pointer shrink-0 mt-0.5"
+                          title="Edit address"
                         >
-                          <option value="Full-time">Full-time</option>
-                          <option value="Part-time">Part-time</option>
-                          <option value="Locum / Duty shifts">Locum / Duty shifts</option>
-                          <option value="Contractual">Contractual</option>
-                        </select>
+                          <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                          <span>Edit</span>
+                        </button>
                       </div>
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">Availability</label>
-                        <select
-                          value={editForm.availability}
-                          onChange={(e) => setEditForm({ ...editForm, availability: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+
+                      {/* Full Address Card (Styled in FALE Project Colors) */}
+                      <div className="p-4 rounded-2xl border border-primary/20 bg-primary-soft/30 space-y-3 text-xs">
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
+                            Full Registered Address
+                          </span>
+                          <p className="font-semibold text-foreground leading-relaxed break-words text-xs sm:text-[13px]">
+                            {fullAddress}
+                          </p>
+                        </div>
+
+                        <div className="pt-2.5 border-t border-primary/15 grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <span className="text-muted-foreground block text-[10px] font-medium uppercase tracking-wider">City</span>
+                            <strong className="text-foreground font-bold">{city}</strong>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground block text-[10px] font-medium uppercase tracking-wider">State</span>
+                            <strong className="text-foreground font-bold">{stateName}</strong>
+                          </div>
+                          {pincode && (
+                            <div className="col-span-2 pt-2 border-t border-primary/15 flex items-center justify-between">
+                              <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wider">Postal PIN Code</span>
+                              <span className="font-mono font-bold text-primary bg-card px-2.5 py-0.5 rounded-md border border-primary/25 text-xs shadow-2xs">
+                                {pincode}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 3. CLINICAL WORK HISTORY (MOVED TO RIGHT SIDE AS REQUESTED) */}
+                    <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1.5 min-w-0">
+                          <h3 className="text-sm sm:text-base font-extrabold text-foreground flex items-center gap-2">
+                            <HiOutlineBriefcase className="h-4 w-4 text-primary shrink-0" />
+                            <span>Clinical Work History</span>
+                          </h3>
+                          {isFresher && (
+                            <span className="inline-flex text-[11px] font-bold text-primary bg-primary-soft px-2.5 py-0.5 rounded-full border border-primary/20">
+                              Fresher Candidate
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openEditSection("work")}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2.5 py-1 rounded-xl transition-colors cursor-pointer shrink-0 mt-0.5"
+                          title="Edit work history"
                         >
-                          <option value="Immediately">Immediately</option>
-                          <option value="Within 15 days">Within 15 days</option>
-                          <option value="1 month">1 month</option>
-                          <option value="2+ months">2+ months</option>
-                        </select>
+                          <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                          <span>Edit</span>
+                        </button>
+                      </div>
+
+                      {isFresher ? (
+                        <div className="flex items-center gap-3.5 p-4 rounded-2xl bg-primary-soft/50 border border-primary/20 text-xs">
+                          <div className="h-10 w-10 rounded-2xl bg-primary-soft flex items-center justify-center text-primary shrink-0 border border-primary/20">
+                            <HiOutlineSparkles className="h-5 w-5" />
+                          </div>
+                          <div className="space-y-0.5">
+                            <h4 className="font-bold text-foreground">Fresher / Resident Practitioner</h4>
+                            <p className="text-muted-foreground text-[11px]">
+                              Completed qualification in {qual}. Ready for entry-level hospital placements, clinical training, or resident positions.
+                            </p>
+                          </div>
+                        </div>
+                      ) : exps.length > 0 ? (
+                        <div className="space-y-3">
+                          {exps.map((item, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-start gap-3.5 p-4 rounded-2xl border border-border hover:border-primary/30 transition-colors bg-muted/30"
+                            >
+                              <div className="h-10 w-10 rounded-2xl bg-primary-soft flex items-center justify-center text-primary shrink-0 border border-primary/20">
+                                <HiOutlineBuildingOffice2 className="h-5 w-5" />
+                              </div>
+                              <div className="space-y-0.5 min-w-0 flex-1">
+                                <h4 className="font-bold text-sm text-foreground leading-snug">
+                                  {item.role}
+                                </h4>
+                                <p className="text-xs font-semibold text-foreground">
+                                  {item.org}
+                                </p>
+                                <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 pt-0.5">
+                                  <HiOutlineCalendarDays className="h-3.5 w-3.5 text-primary" />
+                                  <span>
+                                    {item.cur ? "Current Placement" : "Past Experience"}
+                                    {item.fy ? ` • ${item.fy}` : ""}
+                                  </span>
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground italic">No experience records added.</p>
+                      )}
+                    </div>
+
+                    {/* 4. CLINICAL SKILLS & COMPETENCIES (MOVED TO RIGHT SIDE AS REQUESTED) */}
+                    <div className="bg-card rounded-3xl border border-border p-5 sm:p-6 shadow-xs space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1.5 min-w-0">
+                          <h3 className="text-sm sm:text-base font-extrabold text-foreground flex items-center gap-2">
+                            <HiOutlineSparkles className="h-4 w-4 text-primary shrink-0" />
+                            <span>Clinical Competencies</span>
+                          </h3>
+                          <span className="inline-flex text-[11px] font-bold text-primary bg-primary-soft px-2.5 py-0.5 rounded-full border border-primary/20">
+                            {skills.length} verified competencies
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openEditSection("skills")}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:text-primary-hover bg-primary-soft/60 hover:bg-primary-soft px-2.5 py-1 rounded-xl transition-colors cursor-pointer shrink-0 mt-0.5"
+                          title="Edit competencies"
+                        >
+                          <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                          <span>Edit</span>
+                        </button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {skills.map((skill) => (
+                          <span
+                            key={skill}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/25 px-3 py-1.5 text-xs font-bold"
+                          >
+                            <HiCheckCircle className="h-3.5 w-3.5 text-primary" />
+                            <span>{skill}</span>
+                          </span>
+                        ))}
                       </div>
                     </div>
-                    <div className="space-y-1">
-                      <label className="font-bold text-foreground">Expected Compensation</label>
-                      <input
-                        type="text"
-                        value={editForm.salaryText}
-                        onChange={(e) => setEditForm({ ...editForm, salaryText: e.target.value })}
-                        placeholder="₹60,000 – ₹90,000/mo"
-                        className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {activeEditSection === "summary" && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="font-bold text-foreground">Scope of Practice & Clinical Summary</label>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            const rawBio = editForm.bio?.trim();
-                            const safeBio = rawBio ? rawBio.slice(0, 4000) : "";
-                            const promptText = safeBio
-                              ? `Enhance, polish and condense this clinician biography: "${safeBio}"`
-                              : `Generate an executive profile summary for ${editForm.specialty || specialty || "General medicine"} practitioner with degree ${editForm.qualification || "MBBS"}, registered with ${editForm.council || "State Medical Council"} (${editForm.regNumber || ""}), with ${editForm.experienceYears || 4} years clinical experience.`;
-
-                            const res = await generateProfileBioWithAi(promptText, Number(editForm.experienceYears) || 4, {
-                              role: editForm.specialty || specialty || "General medicine",
-                              qualification: editForm.qualification,
-                              council: editForm.council,
-                              regNumber: editForm.regNumber,
-                              years: editForm.experienceYears || 4,
-                            });
-                            if (res.response) {
-                              setEditForm({ ...editForm, bio: res.response });
-                              toast.success("Professional bio enhanced successfully");
-                            }
-                          } catch {
-                            toast.error("Could not enhance bio at this moment.");
-                          }
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 border border-primary/25 px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/20 transition-all cursor-pointer"
-                      >
-                        <RiRobot2Line className="h-3.5 w-3.5 text-primary" />
-                        <span>Enhance Bio</span>
-                      </button>
-                    </div>
-                    <textarea
-                      rows={5}
-                      value={editForm.bio}
-                      onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
-                      placeholder="Write your clinical experience, specialties, procedures performed, or residency details..."
-                      className="w-full rounded-xl border border-border bg-muted/40 p-3 text-xs font-medium text-foreground focus:outline-none focus:border-primary leading-relaxed"
-                    />
-                  </div>
-                )}
-
-                {activeEditSection === "licensure" && (
-                  <>
-                    <div className="space-y-1">
-                      <label className="font-bold text-foreground">State Medical / Nursing Council</label>
-                      <input
-                        type="text"
-                        value={editForm.council}
-                        onChange={(e) => setEditForm({ ...editForm, council: e.target.value })}
-                        className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-bold text-foreground">License / Registration Number</label>
-                      <input
-                        type="text"
-                        value={editForm.regNumber}
-                        onChange={(e) => setEditForm({ ...editForm, regNumber: e.target.value })}
-                        className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">Primary Degree / Qualification</label>
-                        <input
-                          type="text"
-                          value={editForm.qualification}
-                          onChange={(e) => setEditForm({ ...editForm, qualification: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">Medical College / University</label>
-                        <input
-                          type="text"
-                          value={editForm.college}
-                          onChange={(e) => setEditForm({ ...editForm, college: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                        />
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {activeEditSection === "address" && (
-                  <>
-                    <div className="space-y-1">
-                      <label className="font-bold text-foreground">Full Registered Address</label>
-                      <textarea
-                        rows={3}
-                        value={editForm.addressLine}
-                        onChange={(e) => setEditForm({ ...editForm, addressLine: e.target.value })}
-                        placeholder="Street, locality, area details..."
-                        className="w-full rounded-xl border border-border bg-muted/40 p-3 text-xs font-medium text-foreground focus:outline-none focus:border-primary leading-relaxed"
-                      />
-                    </div>
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">City</label>
-                        <input
-                          type="text"
-                          value={editForm.city}
-                          onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">State</label>
-                        <input
-                          type="text"
-                          value={editForm.state}
-                          onChange={(e) => setEditForm({ ...editForm, state: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="font-bold text-foreground">PIN Code</label>
-                        <input
-                          type="text"
-                          value={editForm.pincode}
-                          onChange={(e) => setEditForm({ ...editForm, pincode: e.target.value })}
-                          className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                        />
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {activeEditSection === "work" && (
-                  <>
-                    <div className="space-y-1">
-                      <label className="font-bold text-foreground">Experience Level</label>
-                      <input
-                        type="text"
-                        value={editForm.experienceYears}
-                        onChange={(e) => setEditForm({ ...editForm, experienceYears: e.target.value })}
-                        placeholder="Fresher or e.g. 2 Years"
-                        className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="font-bold text-foreground">Current / Last Hospital or Clinic</label>
-                      <input
-                        type="text"
-                        value={editForm.employer}
-                        onChange={(e) => setEditForm({ ...editForm, employer: e.target.value })}
-                        placeholder="Hospital Name / Medical Center"
-                        className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {activeEditSection === "skills" && (
-                  <div className="space-y-1">
-                    <label className="font-bold text-foreground">Clinical Competencies (comma separated)</label>
-                    <textarea
-                      rows={4}
-                      value={editForm.skillsText}
-                      onChange={(e) => setEditForm({ ...editForm, skillsText: e.target.value })}
-                      placeholder="Clinical Diagnosis, Emergency Management, BLS / ACLS, Pharmacotherapy..."
-                      className="w-full rounded-xl border border-border bg-muted/40 p-3 text-xs font-medium text-foreground focus:outline-none focus:border-primary leading-relaxed"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Modal Actions */}
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setActiveEditSection(null)}
-                  className="rounded-xl text-xs font-bold border-border cursor-pointer"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={isSavingSection}
-                  onClick={handleSaveSection}
-                  className="rounded-xl text-xs font-bold bg-primary text-primary-foreground hover:bg-primary-hover shadow-brand px-4 cursor-pointer"
-                >
-                  {isSavingSection ? "Saving..." : "Save Changes"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================= */}
-        {/* REAL UPLOADED DOCUMENT PREVIEW MODAL (Image / PDF Viewer) */}
-        {/* ========================================================= */}
-        {previewDoc && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col bg-card rounded-3xl border border-border shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-              {/* Modal Header */}
-              <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-8 w-8 rounded-xl bg-primary-soft flex items-center justify-center text-primary shrink-0">
-                    <HiOutlineDocumentText className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="font-extrabold text-sm sm:text-base text-foreground truncate">
-                      {previewDoc.title}
-                    </h3>
-                    <p className="text-[11px] font-mono text-muted-foreground truncate">
-                      {previewDoc.fileName}
-                    </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => window.open(previewDoc.url, "_blank")}
-                    className="rounded-xl text-xs font-bold gap-1.5 border-border hover:border-primary text-foreground hover:text-primary h-8 px-3 cursor-pointer"
-                  >
-                    <HiOutlineArrowTopRightOnSquare className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Open in New Tab</span>
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewDoc(null)}
-                    className="rounded-xl p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-                    title="Close Preview"
-                  >
-                    <HiOutlineXMark className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
+                {/* ========================================================= */}
+                {/* IN-PROFILE SECTION EDIT MODAL (Bottom Drawer on Mobile, Centered Modal on Desktop) */}
+                {/* ========================================================= */}
+                {activeEditSection && (
+                  <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
+                    <div className="relative w-full max-w-lg bg-card rounded-t-3xl sm:rounded-3xl border border-border shadow-2xl p-5 sm:p-6 space-y-4 sm:space-y-5 animate-in slide-in-from-bottom-8 sm:slide-in-from-none sm:zoom-in-95 duration-200 max-h-[85vh] sm:max-h-[90vh] overflow-y-auto">
+                      {/* Mobile Drawer Pull Indicator */}
+                      <div className="w-12 h-1.5 bg-muted-foreground/20 rounded-full mx-auto -mt-1 mb-1 sm:hidden shrink-0" />
+                      {/* Modal Header */}
+                      <div className="flex items-center justify-between pb-3 border-b border-border">
+                        <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+                          <div className="h-8 w-8 rounded-xl bg-primary-soft text-primary flex items-center justify-center shrink-0">
+                            <HiOutlinePencilSquare className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="text-sm sm:text-base font-extrabold text-foreground truncate">
+                              {activeEditSection === "personal" && "Edit Personal Details"}
+                              {activeEditSection === "openToWork" && "Edit Placement Preferences"}
+                              {activeEditSection === "summary" && "Edit Clinical Summary"}
+                              {activeEditSection === "licensure" && "Edit Licensure & Degree"}
+                              {activeEditSection === "address" && "Edit Professional Address"}
+                              {activeEditSection === "work" && "Edit Clinical Work History"}
+                              {activeEditSection === "skills" && "Edit Clinical Competencies"}
+                            </h3>
+                            <p className="text-[11px] text-muted-foreground">
+                              Updates are saved directly to your profile.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setActiveEditSection(null)}
+                          className="h-8 w-8 rounded-full border border-border hover:bg-muted text-muted-foreground flex items-center justify-center cursor-pointer transition-colors shrink-0 ml-2"
+                        >
+                          <HiOutlineXMark className="h-4 w-4" />
+                        </button>
+                      </div>
 
-              {/* Modal Viewer Body */}
-              <div className="flex-1 overflow-auto p-4 sm:p-6 bg-muted/40 flex items-center justify-center min-h-[380px] max-h-[75vh]">
-                {previewDoc.isImage ? (
-                  <img
-                    src={previewDoc.url}
-                    alt={previewDoc.fileName}
-                    className="max-h-[70vh] max-w-full rounded-2xl object-contain shadow-md border border-border bg-white"
-                  />
-                ) : (
-                  <iframe
-                    src={previewDoc.url}
-                    title={previewDoc.fileName}
-                    className="w-full h-[70vh] rounded-2xl border border-border bg-white shadow-sm"
-                  />
+                      {/* Form Content by Section */}
+                      <div className="space-y-4 sm:space-y-5 text-xs">
+                        {activeEditSection === "personal" && (
+                          <>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-foreground">Full Name</label>
+                              <input
+                                type="text"
+                                value={editForm.name}
+                                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                                className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                              />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">Profession / Role</label>
+                                <input
+                                  type="text"
+                                  value={editForm.profession}
+                                  onChange={(e) => setEditForm({ ...editForm, profession: e.target.value })}
+                                  className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">Specialty</label>
+                                <input
+                                  type="text"
+                                  value={editForm.specialty}
+                                  onChange={(e) => setEditForm({ ...editForm, specialty: e.target.value })}
+                                  className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">Email Address</label>
+                                <input
+                                  type="email"
+                                  value={editForm.email}
+                                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                                  className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">Phone Number</label>
+                                <input
+                                  type="text"
+                                  value={editForm.phone}
+                                  onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                                  className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-foreground">Languages (comma separated)</label>
+                              <input
+                                type="text"
+                                value={editForm.languagesText}
+                                onChange={(e) => setEditForm({ ...editForm, languagesText: e.target.value })}
+                                placeholder="English, Tamil, Hindi"
+                                className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        {activeEditSection === "openToWork" && (
+                          <>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-foreground">Preferred Locations (comma separated)</label>
+                              <input
+                                type="text"
+                                value={editForm.preferredCitiesText}
+                                onChange={(e) => setEditForm({ ...editForm, preferredCitiesText: e.target.value })}
+                                placeholder="Chennai, Bengaluru, Hyderabad"
+                                className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                              />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">Employment Type</label>
+                                <Select
+                                  value={normalizeEmploymentType(editForm.employmentType)}
+                                  onValueChange={(val) => setEditForm({ ...editForm, employmentType: val })}
+                                >
+                                  <SelectTrigger className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:ring-1 focus:ring-primary h-10.5">
+                                    <SelectValue placeholder="Select type" />
+                                  </SelectTrigger>
+                                  <SelectContent className="z-[110]">
+                                    <SelectItem value="Full-time">Full-time</SelectItem>
+                                    <SelectItem value="Part-time">Part-time</SelectItem>
+                                    <SelectItem value="Locum / Duty shifts">Locum / Duty shifts</SelectItem>
+                                    <SelectItem value="Contractual">Contractual</SelectItem>
+                                    <SelectItem value="Internship">Internship</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">Availability</label>
+                                <Select
+                                  value={normalizeAvailability(editForm.availability)}
+                                  onValueChange={(val) => setEditForm({ ...editForm, availability: val })}
+                                >
+                                  <SelectTrigger className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:ring-1 focus:ring-primary h-10.5">
+                                    <SelectValue placeholder="Select availability" />
+                                  </SelectTrigger>
+                                  <SelectContent className="z-[110]">
+                                    <SelectItem value="Immediately">Immediately</SelectItem>
+                                    <SelectItem value="Within 15 days">Within 15 days</SelectItem>
+                                    <SelectItem value="1 month">1 month</SelectItem>
+                                    <SelectItem value="2+ months">2+ months</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-foreground">Expected Compensation</label>
+                              <input
+                                type="text"
+                                value={editForm.salaryText}
+                                onChange={(e) => setEditForm({ ...editForm, salaryText: e.target.value })}
+                                placeholder="₹60,000 – ₹90,000/mo"
+                                className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        {activeEditSection === "summary" && (
+                          <div className="space-y-2.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <label className="block text-xs font-bold text-foreground">Scope of Practice &amp; Clinical Summary</label>
+                              <button
+                                type="button"
+                                disabled={isEnhancingBio}
+                                onClick={async () => {
+                                  setIsEnhancingBio(true);
+                                  try {
+                                    const rawBio = editForm.bio?.trim();
+                                    const promptText = rawBio
+                                      ? rawBio
+                                      : `Professional clinical bio for ${editForm.name || name || "Clinician"}${editForm.profession || role ? `, role: ${editForm.profession || role}` : ""}${editForm.qualification || qual ? `, qualification: ${editForm.qualification || qual}` : ""}${editForm.experienceYears ? `, ${editForm.experienceYears} years experience` : ""}.`;
+
+                                    const res = await generateProfileBioWithAi(promptText, Number(editForm.experienceYears) || 0, {
+                                      role: editForm.profession || role,
+                                      specialty: editForm.specialty || specialty,
+                                      qualification: editForm.qualification || qual,
+                                      council: editForm.council || council,
+                                      regNumber: editForm.regNumber || regNo,
+                                      years: Number(editForm.experienceYears) || 0,
+                                    });
+                                    if (res.response) {
+                                      setEditForm({ ...editForm, bio: res.response });
+                                      toast.success("Ally enhanced your professional bio successfully!");
+                                    }
+                                  } catch {
+                                    toast.error("Could not enhance bio with Ally at this moment.");
+                                  } finally {
+                                    setIsEnhancingBio(false);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 border border-primary/25 px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/20 transition-all cursor-pointer disabled:opacity-60"
+                                title="Enhance biography with Ally AI"
+                              >
+                                {isEnhancingBio ? (
+                                  <ButtonSpinner className="h-3.5 w-3.5 text-primary" />
+                                ) : (
+                                  <RiRobot2Line className="h-3.5 w-3.5 text-primary" />
+                                )}
+                                <span>{isEnhancingBio ? "Enhancing..." : "Enhance with Ally"}</span>
+                              </button>
+                            </div>
+                            <textarea
+                              rows={5}
+                              value={editForm.bio}
+                              onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
+                              placeholder="Write your clinical experience, specialties, procedures performed, or residency details..."
+                              className="w-full rounded-xl border border-border bg-muted/40 p-3 text-xs font-medium text-foreground focus:outline-none focus:border-primary leading-relaxed"
+                            />
+                          </div>
+                        )}
+
+                        {activeEditSection === "licensure" && (
+                          <>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-foreground">State Medical / Nursing Council</label>
+                              <input
+                                type="text"
+                                value={editForm.council}
+                                onChange={(e) => setEditForm({ ...editForm, council: e.target.value })}
+                                className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-foreground">License / Registration Number</label>
+                              <input
+                                type="text"
+                                value={editForm.regNumber}
+                                onChange={(e) => setEditForm({ ...editForm, regNumber: e.target.value })}
+                                className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                              />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">Primary Degree / Qualification</label>
+                                <input
+                                  type="text"
+                                  value={editForm.qualification}
+                                  onChange={(e) => setEditForm({ ...editForm, qualification: e.target.value })}
+                                  className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">Medical College / University</label>
+                                <input
+                                  type="text"
+                                  value={editForm.college}
+                                  onChange={(e) => setEditForm({ ...editForm, college: e.target.value })}
+                                  className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                                />
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        {activeEditSection === "address" && (
+                          <>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-foreground">Full Registered Address</label>
+                              <textarea
+                                rows={3}
+                                value={editForm.addressLine}
+                                onChange={(e) => setEditForm({ ...editForm, addressLine: e.target.value })}
+                                placeholder="Street, locality, area details..."
+                                className="w-full rounded-xl border border-border bg-muted/40 p-3 text-xs font-medium text-foreground focus:outline-none focus:border-primary leading-relaxed"
+                              />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-3">
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">City</label>
+                                <input
+                                  type="text"
+                                  value={editForm.city}
+                                  onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
+                                  className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">State</label>
+                                <input
+                                  type="text"
+                                  value={editForm.state}
+                                  onChange={(e) => setEditForm({ ...editForm, state: e.target.value })}
+                                  className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-bold text-foreground">PIN Code</label>
+                                <input
+                                  type="text"
+                                  value={editForm.pincode}
+                                  onChange={(e) => setEditForm({ ...editForm, pincode: e.target.value })}
+                                  className="w-full rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                                />
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        {activeEditSection === "work" && (
+                          <>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-foreground">Experience Level</label>
+                              <input
+                                type="text"
+                                value={editForm.experienceYears}
+                                onChange={(e) => setEditForm({ ...editForm, experienceYears: e.target.value })}
+                                placeholder="Fresher or e.g. 2 Years"
+                                className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-bold text-foreground">Current / Last Hospital or Clinic</label>
+                              <input
+                                type="text"
+                                value={editForm.employer}
+                                onChange={(e) => setEditForm({ ...editForm, employer: e.target.value })}
+                                placeholder="Hospital Name / Medical Center"
+                                className="w-full rounded-xl border border-border bg-muted/40 px-3.5 py-2.5 text-xs font-semibold text-foreground focus:outline-none focus:border-primary"
+                              />
+                            </div>
+                          </>
+                        )}
+
+                        {activeEditSection === "skills" && (
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-bold text-foreground">Clinical Competencies (comma separated)</label>
+                            <textarea
+                              rows={4}
+                              value={editForm.skillsText}
+                              onChange={(e) => setEditForm({ ...editForm, skillsText: e.target.value })}
+                              placeholder="Clinical Diagnosis, Emergency Management, BLS / ACLS, Pharmacotherapy..."
+                              className="w-full rounded-xl border border-border bg-muted/40 p-3 text-xs font-medium text-foreground focus:outline-none focus:border-primary leading-relaxed"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Modal Actions */}
+                      <div className="grid grid-cols-2 gap-3 sm:flex sm:items-center sm:justify-end sm:gap-3 pt-4 sm:pt-5 border-t border-border mt-4 sm:mt-5">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setActiveEditSection(null)}
+                          className="rounded-xl text-xs font-bold border-border cursor-pointer w-full sm:w-auto h-10"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={isSavingSection}
+                          isLoading={isSavingSection}
+                          loadingText="Saving..."
+                          onClick={handleSaveSection}
+                          className="rounded-xl text-xs font-bold bg-primary text-primary-foreground hover:bg-primary-hover shadow-brand px-5 cursor-pointer w-full sm:w-auto h-10"
+                        >
+                          Save Changes
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ========================================================= */}
+                {/* REAL UPLOADED DOCUMENT PREVIEW MODAL (Bottom Drawer on Mobile, Centered Modal on Desktop) */}
+                {/* ========================================================= */}
+                {previewDoc && (
+                  <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="relative w-full max-w-4xl max-h-[88vh] sm:max-h-[92vh] flex flex-col bg-card rounded-t-3xl sm:rounded-3xl border border-border shadow-2xl overflow-hidden animate-in slide-in-from-bottom-8 sm:slide-in-from-none sm:zoom-in-95 duration-200">
+                      {/* Mobile Drawer Pull Indicator */}
+                      <div className="w-12 h-1.5 bg-muted-foreground/20 rounded-full mx-auto mt-2.5 -mb-1 sm:hidden shrink-0" />
+                      {/* Modal Header */}
+                      <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="h-8 w-8 rounded-xl bg-primary-soft flex items-center justify-center text-primary shrink-0">
+                            <HiOutlineDocumentText className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="font-extrabold text-sm sm:text-base text-foreground truncate">
+                              {previewDoc.title}
+                            </h3>
+                            <p className="text-[11px] font-mono text-muted-foreground truncate">
+                              {previewDoc.fileName}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => window.open(previewDoc.url, "_blank")}
+                            className="rounded-xl text-xs font-bold gap-1.5 border-border hover:border-primary text-foreground hover:text-primary h-8 px-3 cursor-pointer"
+                          >
+                            <HiOutlineArrowTopRightOnSquare className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Open in New Tab</span>
+                          </Button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewDoc(null)}
+                            className="rounded-xl p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                            title="Close Preview"
+                          >
+                            <HiOutlineXMark className="h-5 w-5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Modal Viewer Body */}
+                      <div className="flex-1 overflow-auto p-4 sm:p-6 bg-muted/40 flex items-center justify-center min-h-[380px] max-h-[75vh]">
+                        {previewDoc.isImage ? (
+                          <img
+                            src={previewDoc.url}
+                            alt={previewDoc.fileName}
+                            className="max-h-[70vh] max-w-full rounded-2xl object-contain shadow-md border border-border bg-white"
+                          />
+                        ) : (
+                          <iframe
+                            src={previewDoc.url}
+                            title={previewDoc.fileName}
+                            className="w-full h-[70vh] rounded-2xl border border-border bg-white shadow-sm"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </AppShell>
-  );
+            </AppShell>
+            );
 }
-export default Profile;
+            export default Profile;

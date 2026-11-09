@@ -47,8 +47,8 @@ const candidateNav = [
   { to: "/home", label: "Home", icon: HiOutlineHome, active: HiHome, badge: 0 },
   { to: "/jobs", label: "Jobs", icon: HiOutlineBriefcase, active: HiBriefcase, badge: 0 },
   { to: "/shifts", label: "Shifts", icon: HiOutlineClock, active: HiClock, badge: 0 },
-  { to: "/earnings", label: "Earnings", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
   { to: "/applications", label: "Applications", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
+  { to: "/earnings", label: "Earnings", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
   { to: "/learning", label: "Learning", icon: HiOutlineAcademicCap, active: HiAcademicCap, badge: 0 },
   { to: "/huddle", label: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: 0 },
 ] as const;
@@ -56,10 +56,10 @@ const candidateNav = [
 const facilityNav = [
   { to: "/employer", label: "Dashboard", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: 0 },
   { to: "/employer/postings", label: "Active Roles", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
+  { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
   { to: "/employer/post", label: "Post Opening", icon: HiOutlinePlusCircle, active: HiPlusCircle, badge: 0 },
   { to: "/employer/applicants", label: "Shortlisted", icon: HiOutlineUserGroup, active: HiUserGroup, badge: 0 },
-  { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
-  { to: "/employer/wallet", label: "Wallet & Escrow", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
+  { to: "/employer/wallet", label: "Wallet & Escrow", shortLabel: "Wallet", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
   { to: "/huddle", label: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: 0 },
 ] as const;
 
@@ -438,28 +438,51 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [path, s.portal]);
 
+  // Helper to read seen candidate IDs from local storage
+  const getSeenApplicantIds = (): Set<string> => {
+    try {
+      const stored = localStorage.getItem("fale_seen_applicant_ids");
+      return stored ? new Set(JSON.parse(stored)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  };
+
   const [facilityShortlistedCount, setFacilityShortlistedCount] = useState<number>(() => {
-    return (s.adminApplications || []).filter((a) => a.status === "shortlisted").length;
+    const seen = getSeenApplicantIds();
+    return (s.adminApplications || [])
+      .filter((a) => a.status === "shortlisted" && !seen.has(String(a.id)))
+      .length;
   });
 
   useEffect(() => {
-    if (!isApiEnabled || (activePortal !== "facility" && !isFacilityPath)) return;
+    if (activePortal !== "facility" && !isFacilityPath) return;
     let isMounted = true;
 
-    const fetchFacilityApplicants = () => {
-      getFacilityApplicants()
-        .then((data) => {
-          if (isMounted && Array.isArray(data)) {
-            setFacilityShortlistedCount(data.length);
-          }
-        })
-        .catch(() => { });
+    const refreshFacilityApplicants = () => {
+      const seen = getSeenApplicantIds();
+
+      if (isApiEnabled) {
+        getFacilityApplicants()
+          .then((data) => {
+            if (isMounted && Array.isArray(data)) {
+              const unread = data.filter((a) => !seen.has(String(a.id))).length;
+              setFacilityShortlistedCount(unread);
+            }
+          })
+          .catch(() => { });
+      } else {
+        const unread = (s.adminApplications || [])
+          .filter((a) => a.status === "shortlisted" && !seen.has(String(a.id)))
+          .length;
+        setFacilityShortlistedCount(unread);
+      }
     };
 
-    fetchFacilityApplicants();
+    refreshFacilityApplicants();
 
     const handleUpdate = () => {
-      fetchFacilityApplicants();
+      refreshFacilityApplicants();
     };
 
     window.addEventListener("fale:applications-updated", handleUpdate);
@@ -467,7 +490,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       isMounted = false;
       window.removeEventListener("fale:applications-updated", handleUpdate);
     };
-  }, [activePortal, isFacilityPath, path]);
+  }, [activePortal, isFacilityPath, path, isApiEnabled, s.adminApplications]);
 
   useEffect(() => {
     if (!isApiEnabled || (activePortal !== "admin" && !isAdminPath)) return;
@@ -507,17 +530,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, [path, activePortal]);
 
-  const facilityShortlistedBadge = isApiEnabled
-    ? facilityShortlistedCount
-    : (s.adminApplications || []).filter((a) => a.status === "shortlisted").length;
+  const facilityShortlistedBadge = path === "/employer/applicants"
+    ? 0
+    : facilityShortlistedCount;
 
   const dynamicFacilityNav = [
     { to: "/employer", label: "Dashboard", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: 0 },
     { to: "/employer/postings", label: "Active Roles", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
+    { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
     { to: "/employer/post", label: "Post Opening", icon: HiOutlinePlusCircle, active: HiPlusCircle, badge: 0 },
     { to: "/employer/applicants", label: "Shortlisted", icon: HiOutlineUserGroup, active: HiUserGroup, badge: facilityShortlistedBadge },
-    { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
-    { to: "/employer/wallet", label: "Wallet & Escrow", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
+    { to: "/employer/wallet", label: "Wallet & Escrow", shortLabel: "Wallet", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
     { to: "/huddle", label: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: 0 },
   ] as const;
 
@@ -800,7 +823,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </SheetTrigger>
                 <SheetContent
                   side="bottom"
-                  className="rounded-t-[28px] border-t border-border/80 bg-card max-h-[85vh] overflow-y-auto px-4 pb-6 pt-1 shadow-2xl focus:outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button:last-child]:top-3 [&>button:last-child]:right-3.5 [&>button:last-child]:h-7 [&>button:last-child]:w-7 [&>button:last-child]:grid [&>button:last-child]:place-items-center [&>button:last-child]:rounded-full [&>button:last-child]:bg-muted/70 [&>button:last-child]:text-muted-foreground [&>button:last-child]:hover:text-foreground [&>button:last-child]:hover:bg-muted"
+                  className="rounded-t-[28px] border-t border-border/80 bg-card max-h-[85vh] overflow-y-auto px-4 pb-6 pt-2 shadow-2xl focus:outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>button]:top-3.5 [&>button]:right-4 [&>button]:h-7 [&>button]:w-7 [&>button]:grid [&>button]:place-items-center [&>button]:rounded-full [&>button]:bg-muted/80 [&>button]:text-muted-foreground [&>button]:hover:text-foreground [&>button]:hover:bg-muted"
                 >
                   {/* Centered Drag Handle with balanced breathing room */}
                   <div className="relative flex items-center justify-center pt-2 pb-3.5 shrink-0">

@@ -483,11 +483,11 @@ function FindCandidates() {
               </div>
 
               {/* Filter Controls: Custom Selects & Verified Toggle */}
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full sm:w-auto">
                 {/* Role Select */}
-                <div className="w-36 shrink-0">
+                <div className="flex-1 sm:w-36 sm:flex-initial min-w-[130px]">
                   <Select value={selectedRole} onValueChange={setSelectedRole}>
-                    <SelectTrigger className="h-10 rounded-xl border-input bg-card text-xs font-medium">
+                    <SelectTrigger className="h-10 w-full rounded-xl border-input bg-card text-xs font-medium">
                       <SelectValue placeholder="All Roles" />
                     </SelectTrigger>
                     <SelectContent align="end">
@@ -501,9 +501,9 @@ function FindCandidates() {
                 </div>
 
                 {/* City Select */}
-                <div className="w-32 shrink-0">
+                <div className="flex-1 sm:w-32 sm:flex-initial min-w-[120px]">
                   <Select value={selectedCity} onValueChange={setSelectedCity}>
-                    <SelectTrigger className="h-10 rounded-xl border-input bg-card text-xs font-medium">
+                    <SelectTrigger className="h-10 w-full rounded-xl border-input bg-card text-xs font-medium">
                       <SelectValue placeholder="All Cities" />
                     </SelectTrigger>
                     <SelectContent align="end">
@@ -521,7 +521,7 @@ function FindCandidates() {
                   type="button"
                   onClick={() => setVerifiedOnly((v) => !v)}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-xl border px-3 h-10 text-xs font-semibold transition-all shrink-0 cursor-pointer",
+                    "inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 h-10 text-xs font-semibold transition-all shrink-0 cursor-pointer w-full sm:w-auto",
                     verifiedOnly
                       ? "border-primary bg-primary text-primary-foreground shadow-xs"
                       : "border-input bg-card text-muted-foreground hover:border-ring hover:text-foreground"
@@ -580,21 +580,21 @@ function FindCandidates() {
               >
                 <div>
                   {/* Card Header: Avatar, Name/Title, Match Badge */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3.5 min-w-0">
+                  <div className="flex items-start justify-between gap-2.5 sm:gap-3">
+                    <div className="flex items-start gap-2.5 sm:gap-3.5 min-w-0 flex-1">
                       {isUnlocked ? (
-                        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-gradient-brand text-xs font-bold text-primary-foreground shadow-2xs">
+                        <span className="grid h-10 w-10 sm:h-12 sm:w-12 shrink-0 place-items-center rounded-full bg-gradient-brand text-xs font-bold text-primary-foreground shadow-2xs">
                           {initials(a.name)}
                         </span>
                       ) : (
-                        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground shadow-2xs border border-border">
-                          <HiOutlineUser className="h-6 w-6 text-muted-foreground/70" />
+                        <span className="grid h-10 w-10 sm:h-12 sm:w-12 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground shadow-2xs border border-border">
+                          <HiOutlineUser className="h-5 w-5 sm:h-6 sm:w-6 text-muted-foreground/70" />
                         </span>
                       )}
 
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <h2 className="text-base font-bold text-foreground leading-snug truncate">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h2 className="text-sm sm:text-base font-bold text-foreground leading-snug break-normal">
                             {isUnlocked ? a.name : a.role}
                           </h2>
                           {a.verified && (
@@ -606,47 +606,63 @@ function FindCandidates() {
                         </div>
 
                         {isUnlocked ? (
-                          <p className="mt-0.5 text-xs text-muted-foreground font-medium truncate">
-                            {a.role} - {a.exp} experience
+                          <p className="mt-0.5 text-xs text-muted-foreground font-medium flex items-center gap-1.5 flex-wrap">
+                            <span className="text-foreground/90 font-semibold">{a.role}</span>
+                            <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                            <span>{a.exp}</span>
+                            <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                            <span className="inline-flex items-center gap-1">
+                              <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+                              <span>{a.city}</span>
+                            </span>
                           </p>
                         ) : (
-                          <p className="mt-0.5 text-xs text-muted-foreground font-medium flex items-center gap-1.5 truncate">
-                            <span className="text-muted-foreground/70">Candidate:</span>
-                            <span className="font-mono tracking-wider select-none text-muted-foreground">{displayName}</span>
-                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">Masked</span>
-                          </p>
+                          <div className="space-y-0.5">
+                            <p className="mt-0.5 text-xs text-muted-foreground font-medium flex items-center gap-1.5 flex-wrap">
+                              <span className="text-muted-foreground/70">Candidate:</span>
+                              <span className="font-mono tracking-wider select-none text-muted-foreground">{displayName}</span>
+                              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">Masked</span>
+                            </p>
+                            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5 flex-wrap">
+                              <span>{a.exp}</span>
+                              <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                              <span className="inline-flex items-center gap-1">
+                                <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+                                <span>{a.city}</span>
+                              </span>
+                            </p>
+                          </div>
                         )}
 
-                        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground truncate">
+                        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
                           <HiOutlineBuildingOffice2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
-                          <span className={cn(isUnlocked ? "font-medium text-foreground" : "font-mono select-none text-muted-foreground/70")}>
+                          <span className={cn("truncate", isUnlocked ? "font-medium text-foreground/85" : "font-mono select-none text-muted-foreground/70")}>
                             {displayHospital}
                           </span>
-                          <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
-                          <HiOutlineMapPin className="h-3.5 w-3.5 shrink-0" />
-                          <span>{a.city}</span>
-                          <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
-                          <span>{a.exp}</span>
                         </p>
                       </div>
                     </div>
 
-                    {/* Right: Match score & lock state */}
-                    <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200/70 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
-                        <HiOutlineSparkles className="h-3 w-3" />
-                        {(a.match ?? 0) >= 90 ? `Exact Match (${a.match}%)` : `${a.match}% Match`}
-                      </span>
+                    {/* Right: Lock state / Action chip */}
+                    <div className="shrink-0 pt-0.5">
                       {isUnlocked ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary">
-                          <HiOutlineLockOpen className="h-3.5 w-3.5" /> Unlocked
+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10.5px] font-bold text-primary">
+                          <HiOutlineLockOpen className="h-3 w-3" /> Unlocked
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
-                          <HiOutlineLockClosed className="h-3.5 w-3.5" /> Masked
+                        <span className="inline-flex items-center gap-1 rounded-full bg-muted border border-border px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">
+                          <HiOutlineLockClosed className="h-3 w-3" /> Masked
                         </span>
                       )}
                     </div>
+                  </div>
+
+                  {/* Sub-row: Dynamic Match Score Chip */}
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200/70 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      <HiOutlineSparkles className="h-3 w-3" />
+                      {(a.match ?? 0) >= 90 ? `Exact Match (${a.match}%)` : `${a.match}% Match`}
+                    </span>
                   </div>
 
                   {/* Skills Tags */}
@@ -672,7 +688,7 @@ function FindCandidates() {
                         : "bg-muted/40 border-border text-muted-foreground"
                     )}
                   >
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                         {isUnlocked ? (
                           <>
@@ -716,13 +732,13 @@ function FindCandidates() {
                 </div>
 
                 {/* Bottom Action Footer */}
-                <div className="mt-5 pt-3.5 border-t border-border/70 flex flex-wrap items-center justify-between gap-2">
+                <div className="mt-4 pt-3.5 border-t border-border/70 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
                   {isUnlocked ? (
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => { setViewResumeApplicant(a); if (a.id) recordCandidateProfileView(a.id, (store as any)?.facilityProfile?.hospitalName || "Partner Hospital").catch(() => {}); }}
-                      className="rounded-xl text-xs font-semibold gap-1.5 border-primary/30 bg-primary-soft text-primary hover:bg-primary-soft/80 shadow-2xs cursor-pointer"
+                      className="rounded-xl text-xs font-semibold gap-1.5 border-primary/30 bg-primary-soft text-primary hover:bg-primary-soft/80 shadow-2xs cursor-pointer w-full sm:w-auto h-9"
                     >
                       <HiOutlineDocumentText className="h-4 w-4 text-primary" /> View resume
                     </Button>
@@ -731,7 +747,7 @@ function FindCandidates() {
                       size="sm"
                       variant="outline"
                       onClick={() => handleUnlockClick(a)}
-                      className="rounded-xl text-xs font-medium gap-1.5 border-dashed border-border hover:border-primary/60 text-muted-foreground hover:text-primary transition-all shadow-2xs cursor-pointer"
+                      className="rounded-xl text-xs font-medium gap-1.5 border-dashed border-border hover:border-primary/60 text-muted-foreground hover:text-primary transition-all shadow-2xs cursor-pointer w-full sm:w-auto h-9"
                       title="Unlock candidate profile with 1 credit to view full resume"
                     >
                       <HiOutlineLockClosed className="h-3.5 w-3.5 text-muted-foreground" />
@@ -740,10 +756,10 @@ function FindCandidates() {
                   )}
 
                   {isUnlocked ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
                       <a
                         href={`tel:${a.phone}`}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-primary text-primary-foreground px-3.5 py-1.5 text-xs font-semibold shadow-xs hover:bg-primary-hover transition-colors"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary text-primary-foreground px-4 py-2 sm:py-1.5 text-xs font-semibold shadow-xs hover:bg-primary-hover transition-colors w-full sm:w-auto h-9"
                       >
                         <HiOutlinePhone className="h-3.5 w-3.5" /> Call candidate
                       </a>
@@ -752,7 +768,7 @@ function FindCandidates() {
                     <Button
                       size="sm"
                       onClick={() => handleUnlockClick(a)}
-                      className="rounded-xl text-xs font-semibold gap-1.5 shadow-xs bg-primary hover:bg-primary-hover cursor-pointer"
+                      className="rounded-xl text-xs font-semibold gap-1.5 shadow-xs bg-primary hover:bg-primary-hover cursor-pointer w-full sm:w-auto h-9"
                     >
                       <HiOutlineLockOpen className="h-3.5 w-3.5" /> Unlock profile & resume (1 Credit)
                     </Button>
@@ -799,7 +815,7 @@ function FindCandidates() {
         open={!!candidateToUnlock}
         onOpenChange={(open) => !open && setCandidateToUnlock(null)}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[92vh] overflow-y-auto sm:rounded-3xl rounded-t-[28px] border-t sm:border border-border bg-card shadow-2xl p-5 sm:p-6">
           {candidateToUnlock && (
             <div className="space-y-4">
               <DialogHeader className="text-left">
@@ -855,19 +871,19 @@ function FindCandidates() {
                 Unlocks candidate name, verified mobile number, email, current hospital, and gives full access to view & download their clinical resume.
               </p>
 
-              <div className="flex items-center justify-end gap-2.5 pt-1">
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 pt-1">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setCandidateToUnlock(null)}
-                  className="rounded-xl text-xs font-semibold cursor-pointer px-4"
+                  className="rounded-xl text-xs font-semibold cursor-pointer px-4 w-full sm:w-auto h-9"
                 >
                   Cancel
                 </Button>
                 <Button
                   size="sm"
                   onClick={handleConfirmUnlock}
-                  className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover shadow-xs cursor-pointer px-4"
+                  className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover shadow-xs cursor-pointer px-4 w-full sm:w-auto h-9"
                 >
                   Confirm & unlock (1 Credit)
                 </Button>
@@ -1019,77 +1035,87 @@ function FindCandidates() {
         open={!!viewResumeApplicant}
         onOpenChange={(open) => !open && setViewResumeApplicant(null)}
       >
-        <DialogContent className="sm:max-w-4xl p-0">
+        <DialogContent className="sm:max-w-4xl h-[90vh] max-h-[92vh] overflow-hidden flex flex-col sm:rounded-3xl rounded-t-[28px] border-t sm:border border-border bg-card shadow-2xl p-0">
           {viewResumeApplicant && (
-            <div className="flex flex-col">
+            <div className="flex flex-col h-full overflow-hidden">
               {/* Header */}
-              <div className="border-b border-border bg-muted/30 p-5 sm:p-6">
-                <DialogHeader className="text-left space-y-1">
-                  <div className="flex flex-wrap items-center justify-between gap-3 pr-6">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <DialogTitle className="text-xl font-bold text-foreground">
-                          {unlockedIds.includes(viewResumeApplicant.id)
-                            ? viewResumeApplicant.name
-                            : maskName()}
-                        </DialogTitle>
-                        {viewResumeApplicant.verified && (
-                          <HiOutlineShieldCheck
-                            className="h-5 w-5 text-primary"
-                            title="Verified profile"
-                          />
-                        )}
-                        <span className="rounded-full bg-primary-soft text-primary px-2.5 py-0.5 text-xs font-bold">
-                          {viewResumeApplicant.role}
-                        </span>
-                      </div>
-                      <DialogDescription className="mt-1 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
-                        <span className="flex items-center gap-1">
-                          <HiOutlineMapPin className="h-3.5 w-3.5" />
-                          {viewResumeApplicant.city}
-                        </span>
-                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
-                        <span>{viewResumeApplicant.exp} experience</span>
-                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
-                        <span className="flex items-center gap-1">
-                          <HiOutlinePhone className="h-3.5 w-3.5" />
-                          {unlockedIds.includes(viewResumeApplicant.id)
-                            ? viewResumeApplicant.phone
-                            : maskPhone()}
-                        </span>
-                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
-                        <span className="flex items-center gap-1">
-                          <HiOutlineEnvelope className="h-3.5 w-3.5" />
-                          {unlockedIds.includes(viewResumeApplicant.id)
-                            ? viewResumeApplicant.email
-                            : maskEmail()}
-                        </span>
-                      </DialogDescription>
+              <div className="border-b border-border bg-muted/30 p-4 sm:p-6 shrink-0 pr-10 sm:pr-12">
+                <DialogHeader className="text-left space-y-1.5">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <DialogTitle className="text-lg sm:text-xl font-bold text-foreground break-normal">
+                        {unlockedIds.includes(viewResumeApplicant.id)
+                          ? viewResumeApplicant.name
+                          : maskName()}
+                      </DialogTitle>
+                      {viewResumeApplicant.verified && (
+                        <HiOutlineShieldCheck
+                          className="h-5 w-5 text-primary shrink-0"
+                          title="Verified profile"
+                        />
+                      )}
                     </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                      <span className="rounded-full bg-primary-soft text-primary px-2.5 py-0.5 text-xs font-bold shrink-0">
+                        {viewResumeApplicant.role}
+                      </span>
+                      {viewResumeApplicant.match !== undefined && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 shrink-0">
+                          <HiOutlineSparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <span>{(viewResumeApplicant.match ?? 0) >= 90 ? `Exact Match (${viewResumeApplicant.match}%)` : `${viewResumeApplicant.match}% Match`}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <DialogDescription className="mt-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2">
+                      <span className="flex items-center gap-1">
+                        <HiOutlineMapPin className="h-3.5 w-3.5" />
+                        {viewResumeApplicant.city}
+                      </span>
+                      <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <span>{viewResumeApplicant.exp} experience</span>
+                      {unlockedIds.includes(viewResumeApplicant.id) && (
+                        <>
+                          <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                          <span className="flex items-center gap-1">
+                            <HiOutlinePhone className="h-3.5 w-3.5" />
+                            {viewResumeApplicant.phone}
+                          </span>
+                          <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                          <span className="flex items-center gap-1">
+                            <HiOutlineEnvelope className="h-3.5 w-3.5" />
+                            {viewResumeApplicant.email}
+                          </span>
+                        </>
+                      )}
+                    </DialogDescription>
                   </div>
                 </DialogHeader>
 
                 {/* Council Verification Pill */}
-                <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-card border border-border p-3 text-xs">
-                  <span className="text-muted-foreground font-medium">Council Registration:</span>
-                  <span className="font-mono font-bold text-foreground">
-                    {unlockedIds.includes(viewResumeApplicant.id)
-                      ? viewResumeApplicant.regNumber
-                      : maskReg()}
-                  </span>
-                  <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                <div className="mt-3 sm:mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl bg-card border border-border p-3 text-xs shadow-2xs">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-muted-foreground font-medium">Council Registration:</span>
+                    <span className="font-mono font-bold text-foreground">
+                      {unlockedIds.includes(viewResumeApplicant.id)
+                        ? viewResumeApplicant.regNumber
+                        : maskReg()}
+                    </span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
                     <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> FALE Credential Verified
                   </span>
                 </div>
               </div>
 
               {/* Resume Body */}
-              <div className="p-5 sm:p-6 space-y-4">
+              <div className="w-full flex-1 overflow-y-auto bg-muted/20 p-4 sm:p-5 custom-scrollbar">
                 {viewResumeApplicant.resumeUrl ? (
                   <iframe
                     src={`${viewResumeApplicant.resumeUrl}#toolbar=0&navpanes=0&scrollbar=1`}
                     title="Candidate Resume Preview"
-                    className="h-[560px] w-full rounded-2xl border border-border shadow-xs bg-white"
+                    className="w-full h-full min-h-[55vh] rounded-xl border border-border shadow-xs bg-white"
                   />
                 ) : (
                   <div className="space-y-4 text-sm">

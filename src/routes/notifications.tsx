@@ -25,6 +25,7 @@ import {
   HiOutlineCalendarDays,
   HiOutlineDocumentCheck,
   HiOutlineChatBubbleLeftRight,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
@@ -52,6 +53,15 @@ import {
   getCandidateViewStats,
   type CandidateViewStats,
 } from "@/lib/adapters/candidateAdapter";
+
+function stripEmojis(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/[\p{Extended_Pictographic}\uD83C-\uDBFF\uDC00-\uDFFF\u2600-\u27BF]/gu, "")
+    .replace(/⚡|👁️|🛡️|🎓|💼/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 export const Route = createFileRoute("/notifications")({
   head: () => ({
@@ -353,9 +363,9 @@ function NotificationsPage() {
               hospital = "FALE Escrow Settlement";
               hospitalCode = "₹";
               hospitalGradient = "from-emerald-600 to-teal-700";
-            } else if (rawType === "SHIFT_URGENT" || n.title.includes("Urgent") || n.title.includes("⚡")) {
+            } else if (rawType === "SHIFT_URGENT" || n.title.includes("Urgent")) {
               hospital = "Emergency Surge Shift";
-              hospitalCode = "⚡";
+              hospitalCode = "ER";
               hospitalGradient = "from-amber-600 to-rose-700";
               urgent = true;
             } else {
@@ -371,7 +381,7 @@ function NotificationsPage() {
           } else if (rawType.includes("KYC") || rawType.includes("UPGRADE") || rawType.includes("PROFILE_VIEW")) {
             category = "credentials";
             hospital = rawType === "PROFILE_VIEW" ? "Institutional Reach" : "FALE Compliance Board";
-            hospitalCode = rawType === "PROFILE_VIEW" ? "👁️" : "KYC";
+            hospitalCode = rawType === "PROFILE_VIEW" ? "PR" : "KYC";
             hospitalGradient = "from-emerald-600 to-teal-800";
           } else if (rawType === "SUPPORT") {
             hospital = "FALE Help & Support";
@@ -380,7 +390,7 @@ function NotificationsPage() {
           } else if (rawType === "WALLET") {
             category = "shifts";
             hospital = "Hospital Escrow Vault";
-            hospitalCode = "💼";
+            hospitalCode = "ESC";
             hospitalGradient = "from-rose-600 to-amber-700";
             urgent = true;
           }
@@ -388,11 +398,11 @@ function NotificationsPage() {
           return {
             id: n.id,
             category,
-            title: n.title,
+            title: stripEmojis(n.title),
             hospital,
             hospitalCode,
             hospitalGradient,
-            message: n.message,
+            message: stripEmojis(n.message),
             time: (n as any).createdAt
               ? new Date((n as any).createdAt).toLocaleDateString("en-IN", {
                   month: "short",
@@ -542,6 +552,19 @@ function NotificationsPage() {
     }
   };
 
+  const renderHospitalEmblem = (n: NotificationItem) => {
+    if (n.hospitalCode === "ER") {
+      return <HiOutlineBolt className="h-5 w-5 text-white" />;
+    }
+    if (n.hospitalCode === "PR") {
+      return <HiOutlineEye className="h-5 w-5 text-white" />;
+    }
+    if (n.hospitalCode === "ESC") {
+      return <HiOutlineBriefcase className="h-5 w-5 text-white" />;
+    }
+    return <span>{n.hospitalCode}</span>;
+  };
+
   return (
     <AppShell>
       <div className="w-full max-w-6xl mx-auto space-y-5 pb-8 min-w-0">
@@ -621,7 +644,7 @@ function NotificationsPage() {
           {/* ======================================================= */}
           {/* LEFT SIDEBAR: MANAGE & RECRUITER METRICS (LINKEDIN/NAUKRI) */}
           {/* ======================================================= */}
-          <aside className="space-y-4 w-full min-w-0">
+          <aside className="hidden lg:block space-y-4 w-full min-w-0">
             {/* Quick Filter Navigation Card */}
             <div className="surface p-4 rounded-3xl border border-border/80 space-y-2 shadow-card min-w-0">
               <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground px-2">
@@ -778,10 +801,10 @@ function NotificationsPage() {
           <main className="space-y-4 w-full min-w-0">
             {/* Urgent Priority Broadcast */}
             {s.portal === "admin" ? (
-              <div className="relative overflow-hidden rounded-3xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-card to-amber-500/5 p-4 sm:p-5 shadow-xs flex items-start gap-3.5 min-w-0">
+              <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-card to-amber-500/5 p-3.5 sm:p-5 shadow-xs flex items-start gap-3 sm:gap-3.5 min-w-0">
                 <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-amber-500" />
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-amber-500 text-white font-black text-xs shadow-xs">
-                  🛡️
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-amber-500 text-white shadow-xs">
+                  <HiOutlineShieldCheck className="h-5 w-5 text-white" />
                 </span>
                 <div className="space-y-1 flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -798,10 +821,10 @@ function NotificationsPage() {
                 </div>
               </div>
             ) : isStudent ? (
-              <div className="relative overflow-hidden rounded-3xl border border-primary/30 bg-gradient-to-r from-primary/10 via-card to-primary/5 p-4 sm:p-5 shadow-xs flex items-start gap-3.5 min-w-0">
+              <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-primary/30 bg-gradient-to-r from-primary/10 via-card to-primary/5 p-3.5 sm:p-5 shadow-xs flex items-start gap-3 sm:gap-3.5 min-w-0">
                 <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-primary" />
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary text-white font-black text-xs shadow-xs">
-                  🎓
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary text-white shadow-xs">
+                  <HiOutlineAcademicCap className="h-5 w-5 text-white" />
                 </span>
                 <div className="space-y-1 flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -822,10 +845,10 @@ function NotificationsPage() {
                 </div>
               </div>
             ) : activeShiftAlerts > 0 ? (
-              <div className="relative overflow-hidden rounded-3xl border border-red-500/30 bg-gradient-to-r from-red-500/10 via-card to-red-500/5 p-4 sm:p-5 shadow-xs flex items-start gap-3.5 min-w-0">
+              <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-red-500/30 bg-gradient-to-r from-red-500/10 via-card to-red-500/5 p-3.5 sm:p-5 shadow-xs flex items-start gap-3 sm:gap-3.5 min-w-0">
                 <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-red-500" />
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-red-500 text-white font-black text-xs shadow-xs animate-pulse">
-                  ⚡
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-red-500 text-white shadow-xs animate-pulse">
+                  <HiOutlineBolt className="h-5 w-5 text-white" />
                 </span>
                 <div className="space-y-1 flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -847,8 +870,28 @@ function NotificationsPage() {
               </div>
             ) : null}
 
-            {/* Mobile Category Scroll Pills (Visible on mobile/tablet) */}
-            <div className="flex lg:hidden items-center gap-1.5 overflow-x-auto scrollbar-none pb-1 w-full min-w-0">
+            {/* Mobile Category Scroll Pills & Unread Toggle (Visible on mobile/tablet) */}
+            <div className="flex lg:hidden items-center gap-1.5 overflow-x-auto scrollbar-none py-1 -mx-4 px-4 sm:mx-0 sm:px-0 w-full min-w-0">
+              <button
+                type="button"
+                onClick={() => setShowUnreadOnly((prev) => !prev)}
+                className={cn(
+                  "rounded-xl px-3 py-1.5 text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 border shrink-0",
+                  showUnreadOnly
+                    ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                    : "bg-card text-muted-foreground border-border/70 hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <span>Unread</span>
+                {unreadCount > 0 && (
+                  <span className={cn(
+                    "text-[10px] px-1.5 py-0.2 rounded-full font-bold",
+                    showUnreadOnly ? "bg-white/20 text-white" : "bg-primary/10 text-primary"
+                  )}>
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
               {(
                 s.portal === "admin"
                   ? [
@@ -900,7 +943,7 @@ function NotificationsPage() {
             <div className="space-y-3 w-full min-w-0">
               {loading ? (
                 <div className="surface p-8 sm:p-14 text-center rounded-3xl border border-border/70 space-y-3">
-                  <HiOutlineClock className="mx-auto h-8 w-8 text-primary animate-spin" />
+                  <HiOutlineArrowPath className="mx-auto h-8 w-8 text-primary animate-spin" />
                   <p className="text-sm font-semibold text-muted-foreground">Loading clinical notifications...</p>
                 </div>
               ) : loadError ? (
@@ -930,19 +973,19 @@ function NotificationsPage() {
                         )}
 
                         {/* Header Row: Hospital Emblem Avatar + Meta + Action Menu */}
-                        <div className="flex items-start justify-between gap-3 min-w-0">
+                        <div className="flex items-start justify-between gap-2.5 sm:gap-3 min-w-0">
                           {/* Hospital Emblem Avatar */}
-                          <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
                             <div className="relative shrink-0">
                               <div className={cn(
-                                "grid h-11 w-11 sm:h-12 sm:w-12 place-items-center rounded-2xl font-black text-xs sm:text-sm text-white shadow-xs bg-gradient-to-br",
+                                "grid h-10 w-10 sm:h-12 sm:w-12 place-items-center rounded-xl sm:rounded-2xl font-black text-xs sm:text-sm text-white shadow-xs bg-gradient-to-br",
                                 n.hospitalGradient
                               )}>
-                                {n.hospitalCode}
+                                {renderHospitalEmblem(n)}
                               </div>
                               {/* Category Badge Ring on Avatar */}
                               <span className={cn(
-                                "absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border-2 border-card shadow-xs",
+                                "absolute -bottom-1 -right-1 grid h-4.5 w-4.5 sm:h-5 sm:w-5 place-items-center rounded-full border-2 border-card shadow-xs",
                                 getSubBadgeBg(n.category)
                               )}>
                                 {getSubBadgeIcon(n.category)}
@@ -950,28 +993,36 @@ function NotificationsPage() {
                             </div>
 
                             <div className="space-y-1 min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                                <span className="text-xs font-bold text-foreground truncate max-w-[200px] sm:max-w-none">
+                              <div className="flex items-center justify-between gap-2 min-w-0">
+                                <span className="text-xs font-bold text-foreground truncate max-w-[180px] sm:max-w-none">
                                   {n.hospital}
                                 </span>
-                                {n.matchScore && (
-                                  <Badge className="bg-primary-soft text-primary font-bold border-0 text-[10px] px-1.5 py-0 flex items-center gap-1 shrink-0 whitespace-nowrap">
-                                    <HiOutlineSparkles className="h-3 w-3" />
-                                    {n.matchScore}% Match
-                                  </Badge>
-                                )}
-                                {n.urgent && (
-                                  <Badge className="bg-red-500/15 text-red-700 dark:text-red-300 font-bold border-0 text-[10px] px-1.5 py-0 shrink-0 whitespace-nowrap">
-                                    Urgent
-                                  </Badge>
-                                )}
-                                <span className="text-[11px] text-muted-foreground ml-auto shrink-0 font-medium">
+                                <span className="text-[11px] text-muted-foreground shrink-0 font-medium">
                                   {n.time}
                                 </span>
                               </div>
 
-                              <h3 className="text-sm sm:text-base font-extrabold text-foreground break-words leading-snug">
-                                {n.title}
+                              {(n.matchScore || n.urgent) && (
+                                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                                  {n.matchScore && (
+                                    <Badge className="bg-primary-soft text-primary font-bold border-0 text-[10px] px-1.5 py-0 flex items-center gap-1 shrink-0 whitespace-nowrap">
+                                      <HiOutlineSparkles className="h-3 w-3" />
+                                      {n.matchScore}% Match
+                                    </Badge>
+                                  )}
+                                  {n.urgent && (
+                                    <Badge className="bg-red-500/15 text-red-700 dark:text-red-300 font-bold border-0 text-[10px] px-1.5 py-0 shrink-0 whitespace-nowrap">
+                                      Urgent
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
+
+                              <h3 className="text-sm sm:text-base font-extrabold text-foreground break-words leading-snug pt-0.5 flex items-center gap-1.5">
+                                {n.urgent && (
+                                  <HiOutlineBolt className="h-4 w-4 text-amber-500 shrink-0 inline-block" />
+                                )}
+                                <span>{stripEmojis(n.title)}</span>
                               </h3>
                             </div>
                           </div>
@@ -1038,7 +1089,7 @@ function NotificationsPage() {
                             {/* Shift Accept Action */}
                             {n.actionType === "accept_shift" && (
                               isShiftAccepted ? (
-                                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border-0 px-3 py-1 text-xs flex items-center gap-1.5">
+                                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border-0 px-3 py-1.5 text-xs flex items-center gap-1.5">
                                   <HiCheckCircle className="h-4 w-4 text-emerald-600" />
                                   Shift Accepted • Pass Active
                                 </Badge>
@@ -1046,7 +1097,7 @@ function NotificationsPage() {
                                 <Button
                                   size="sm"
                                   onClick={(e) => handleAcceptShift(n.id, n.hospital, e)}
-                                  className="w-full sm:w-auto rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 px-4 shadow-xs"
+                                  className="w-full sm:w-auto rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-9 sm:h-8.5 px-4 shadow-xs justify-center"
                                 >
                                   Accept Shift
                                 </Button>
@@ -1056,7 +1107,7 @@ function NotificationsPage() {
                             {/* Interview Confirmation Action */}
                             {n.actionType === "confirm_interview" && (
                               isInterviewConfirmed ? (
-                                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border-0 px-3 py-1 text-xs flex items-center gap-1.5">
+                                <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold border-0 px-3 py-1.5 text-xs flex items-center gap-1.5">
                                   <HiCheckCircle className="h-4 w-4 text-emerald-600" />
                                   Confirmed • Added to Calendar
                                 </Badge>
@@ -1064,7 +1115,7 @@ function NotificationsPage() {
                                 <Button
                                   size="sm"
                                   onClick={(e) => handleConfirmInterview(n.id, n.hospital, e)}
-                                  className="w-full sm:w-auto rounded-xl font-bold bg-primary text-primary-foreground shadow-xs hover:bg-primary/95 text-xs h-8 px-4"
+                                  className="w-full sm:w-auto rounded-xl font-bold bg-primary text-primary-foreground shadow-xs hover:bg-primary/95 text-xs h-9 sm:h-8.5 px-4 justify-center"
                                 >
                                   Confirm Interview
                                 </Button>
@@ -1077,7 +1128,7 @@ function NotificationsPage() {
                                 size="sm"
                                 asChild
                                 variant="outline"
-                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5 text-primary hover:text-primary hover:bg-primary-soft"
+                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-9 sm:h-8.5 gap-1.5 text-primary hover:text-primary hover:bg-primary-soft justify-center"
                               >
                                 <Link to={n.actionLink}>
                                   <HiOutlineDocumentCheck className="h-4 w-4" />
@@ -1092,7 +1143,7 @@ function NotificationsPage() {
                                 size="sm"
                                 asChild
                                 variant="outline"
-                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5"
+                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-9 sm:h-8.5 gap-1.5 justify-center"
                               >
                                 <Link to={n.actionLink}>
                                   <HiOutlineShieldCheck className="h-4 w-4 text-purple-600" />
@@ -1107,7 +1158,7 @@ function NotificationsPage() {
                                 size="sm"
                                 asChild
                                 variant="outline"
-                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5"
+                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-9 sm:h-8.5 gap-1.5 justify-center"
                               >
                                 <Link to={n.actionLink}>
                                   <HiOutlineEye className="h-4 w-4 text-primary" />
@@ -1122,7 +1173,7 @@ function NotificationsPage() {
                                 size="sm"
                                 asChild
                                 variant="outline"
-                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-8 gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
+                                className="w-full sm:w-auto rounded-xl font-bold text-xs border-border/80 h-9 sm:h-8.5 gap-1.5 text-primary hover:text-primary hover:bg-primary/10 justify-center"
                               >
                                 <Link to={n.actionLink}>
                                   <HiOutlineEye className="h-3.5 w-3.5" />
@@ -1193,6 +1244,83 @@ function NotificationsPage() {
                   )}
                 </>
               )}
+            </div>
+
+            {/* Mobile Recruiter Pulse & Delivery Preferences (At bottom of stream on mobile) */}
+            <div className="lg:hidden space-y-4 pt-6 border-t border-border/70">
+              {s.portal === "candidate" && (
+                <div className="surface p-4 rounded-2xl border border-border/80 space-y-3 shadow-card bg-gradient-to-br from-card via-card to-primary-soft/40 min-w-0">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-extrabold text-foreground flex items-center gap-1.5">
+                      <HiOutlineBolt className="h-4 w-4 text-amber-500" /> {isStudent ? "Academic Reach" : "Recruiter Reach"}
+                    </span>
+                    <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-0 font-bold text-[10px] px-2 py-0">
+                      {viewStats.weeklyGrowthPercent > 0
+                        ? `+${viewStats.weeklyGrowthPercent}% wk`
+                        : isStudent
+                          ? "Top Intern"
+                          : "Top 5%"}
+                    </Badge>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-lg font-black text-foreground">
+                      {viewStats.totalViews > 0
+                        ? `${viewStats.totalViews} ${isStudent ? "Faculty Views" : "Profile Views"}`
+                        : isStudent
+                          ? "Student Profile Active"
+                          : "Profile Active"}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      {viewStats.hospitalsViewedToday > 0
+                        ? `${viewStats.hospitalsViewedToday} hospital recruiter${viewStats.hospitalsViewedToday === 1 ? "" : "s"} viewed your clinical dossier today.`
+                        : isStudent
+                          ? "Apollo, Manipal, and college clinical directors review active student logbooks weekly."
+                          : "Apollo, Fortis, and Kauvery hospital recruiters review verified clinical dossiers weekly."}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    asChild
+                    className="w-full rounded-xl text-xs font-bold border-border/80 h-8.5 hover:text-primary transition-colors justify-center"
+                  >
+                    <Link to="/profile">
+                      <span>{isStudent ? "Update Logbook" : "Boost Visibility"}</span>
+                      <HiOutlineArrowRight className="ml-1 h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                </div>
+              )}
+
+              {/* Instant Delivery Channels */}
+              <div className="surface p-4 rounded-2xl border border-border/80 space-y-3 shadow-card text-xs min-w-0">
+                <h3 className="font-extrabold text-foreground flex items-center gap-1.5">
+                  <HiOutlineSparkles className="h-4 w-4 text-primary" /> Delivery Channels
+                </h3>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between py-1">
+                    <span className="flex items-center gap-2 text-muted-foreground font-medium">
+                      <HiOutlineChatBubbleBottomCenterText className="h-4 w-4 text-emerald-600" />
+                      <span>WhatsApp Passes</span>
+                    </span>
+                    <Switch checked={whatsappAlerts} onCheckedChange={setWhatsappAlerts} className="scale-75" />
+                  </div>
+                  <div className="flex items-center justify-between py-1">
+                    <span className="flex items-center gap-2 text-muted-foreground font-medium">
+                      <HiOutlineDevicePhoneMobile className="h-4 w-4 text-primary" />
+                      <span>{isStudent ? "Stipend SMS Alerts" : "Urgent Shift SMS"}</span>
+                    </span>
+                    <Switch checked={urgentSms} onCheckedChange={setUrgentSms} className="scale-75" />
+                  </div>
+                  <div className="flex items-center justify-between py-1">
+                    <span className="flex items-center gap-2 text-muted-foreground font-medium">
+                      <HiOutlineEnvelope className="h-4 w-4 text-amber-500" />
+                      <span>Daily Summary</span>
+                    </span>
+                    <Switch checked={emailDigest} onCheckedChange={setEmailDigest} className="scale-75" />
+                  </div>
+                </div>
+              </div>
             </div>
           </main>
         </div>

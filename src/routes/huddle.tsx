@@ -37,6 +37,8 @@ import {
   HiOutlineVideoCamera,
   HiOutlineTrash,
   HiOutlinePlus,
+  HiOutlineArrowPath,
+  HiOutlineMicrophone,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill, RiStethoscopeLine, RiChatVoiceLine, RiHospitalLine } from "react-icons/ri";
 import { toast } from "sonner";
@@ -314,6 +316,7 @@ function HuddlePage() {
   const [postAnon, setPostAnon] = useState(false);
   const [postImage, setPostImage] = useState<string | null>(null);
   const [postAudio, setPostAudio] = useState<{ audioUrl: string; duration: number } | null>(null);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({});
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 
@@ -812,6 +815,7 @@ function HuddlePage() {
     setPostText("");
     setPostImage(null);
     setPostAudio(null);
+    setIsRecordingAudio(false);
     setPostAnon(false);
 
     if (created.status === "review") {
@@ -1757,13 +1761,20 @@ function HuddlePage() {
                       </div>
                     )}
 
-                    {/* Voice Note Audio Preview (When Recorded) */}
-                    {postAudio && (
-                      <div className="rounded-2xl p-2 bg-primary/5 border border-primary/20">
+                    {/* Voice Note Active Recording or Recorded Audio Preview (Full-Width Above Controls) */}
+                    {(isRecordingAudio || postAudio) && (
+                      <div className="w-full">
                         <VoiceNoteRecorder
+                          autoStart={isRecordingAudio && !postAudio}
                           existingAudio={postAudio}
-                          onRecorded={setPostAudio}
-                          onDiscard={() => setPostAudio(null)}
+                          onRecorded={(data) => {
+                            setPostAudio(data);
+                            setIsRecordingAudio(false);
+                          }}
+                          onDiscard={() => {
+                            setPostAudio(null);
+                            setIsRecordingAudio(false);
+                          }}
                         />
                       </div>
                     )}
@@ -1885,12 +1896,17 @@ function HuddlePage() {
                           />
                         </label>
 
-                        {/* Voice Note Recorder Button */}
-                        {!postAudio && (
-                          <VoiceNoteRecorder
-                            onRecorded={setPostAudio}
-                            onDiscard={() => setPostAudio(null)}
-                          />
+                        {/* Voice Note Trigger Button */}
+                        {!postAudio && !isRecordingAudio && (
+                          <button
+                            type="button"
+                            onClick={() => setIsRecordingAudio(true)}
+                            className="h-9 cursor-pointer px-3 rounded-xl text-xs font-semibold border border-border bg-muted/40 text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                            title="Record up to 1-minute audio pearl"
+                          >
+                            <HiOutlineMicrophone className="h-4 w-4 text-primary shrink-0" />
+                            <span>Voice Note (1m)</span>
+                          </button>
                         )}
 
                       </div>
@@ -1920,7 +1936,7 @@ function HuddlePage() {
               <div className="space-y-4">
                 {loading ? (
                   <div className="surface p-12 text-center text-xs text-muted-foreground rounded-3xl border border-border/80">
-                    <HiOutlineClock className="mx-auto h-8 w-8 text-primary animate-spin" />
+                    <HiOutlineArrowPath className="mx-auto h-8 w-8 text-primary animate-spin" />
                     <p className="mt-2 text-sm font-semibold">Loading discussions...</p>
                   </div>
                 ) : visiblePosts.length === 0 ? (
@@ -2336,7 +2352,7 @@ function HuddlePage() {
               <div className="space-y-4">
                 {loading ? (
                   <div className="surface p-8 text-center text-xs text-muted-foreground rounded-3xl border border-border/80">
-                    <HiOutlineClock className="mx-auto h-6 w-6 text-primary animate-spin" />
+                    <HiOutlineArrowPath className="mx-auto h-6 w-6 text-primary animate-spin" />
                     <p className="mt-2 font-semibold">Loading questions...</p>
                   </div>
                 ) : visibleQuestions.length === 0 ? (
@@ -2855,65 +2871,71 @@ function HuddlePage() {
 
             {/* Become a Mentor Callout (Dynamic clinical experience check & admin review workflow) */}
             {userLevel !== "student" && !isHospital && (
-              <div className="rounded-2xl bg-muted/40 p-4 border border-border/80 text-xs space-y-3">
+              <div className="rounded-3xl bg-card p-4 sm:p-5 border border-border/80 text-xs shadow-xs space-y-3.5 mb-10 lg:mb-0">
                 {isMentorCertified ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-foreground flex items-center gap-1.5 text-xs">
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-extrabold text-sm text-foreground flex items-center gap-1.5">
                         <RiVerifiedBadgeFill className="h-4 w-4 text-primary shrink-0" />
                         Certified FALE Mentor
                       </span>
-                      <span className="rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5">
+                      <span className="rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-black px-2.5 py-0.5 whitespace-nowrap">
                         Seal Active
                       </span>
                     </div>
-                    <p className="text-muted-foreground text-[11px] leading-relaxed">
+                    <p className="text-muted-foreground text-xs leading-relaxed">
                       Your clinical credentials have been verified by FALE Admin. You are accredited to mentor junior clinicians, answer peer AMA queries, and host CME sessions.
                     </p>
                   </div>
                 ) : isMentorPending ? (
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-foreground block">Become a FALE Mentor</span>
-                      <span className="rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[10px] font-black px-2 py-0.5 flex items-center gap-1">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-extrabold text-sm text-foreground block">Become a FALE Mentor</span>
+                      <span className="rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-black px-2.5 py-0.5 flex items-center gap-1 whitespace-nowrap">
                         <HiOutlineClock className="h-3 w-3" />
                         Under Review
                       </span>
                     </div>
-                    <p className="text-muted-foreground text-[11px] leading-relaxed">
+                    <p className="text-muted-foreground text-xs leading-relaxed">
                       Your mentor application and clinical credentials ({candidateExpYears}+ yrs) are undergoing audit at the FALE Moderation Desk. You will receive your verified seal upon admin review.
                     </p>
                     <Button
                       type="button"
                       variant="outline"
                       disabled
-                      className="w-full text-xs font-bold h-8 rounded-xl border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/5 cursor-not-allowed"
+                      className="w-full text-xs font-bold h-10 rounded-xl border-primary/30 text-primary bg-primary-soft/30 cursor-not-allowed"
                     >
                       Application Under Review
                     </Button>
                   </div>
                 ) : (
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-foreground block">Become a FALE Mentor</span>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-extrabold text-sm text-foreground block">Become a FALE Mentor</span>
                       <span
                         className={cn(
-                          "rounded-full text-[10px] font-black px-2 py-0.5 border",
+                          "rounded-full text-[10px] font-black px-2.5 py-0.5 border whitespace-nowrap shrink-0",
                           hasMinExperience
-                            ? "bg-primary/10 text-primary border-primary/20"
-                            : "bg-muted text-muted-foreground border-border/60"
+                            ? "bg-primary-soft text-primary border-primary/25"
+                            : "bg-muted text-muted-foreground border-border/70"
                         )}
                       >
                         {candidateExpYears} {candidateExpYears === 1 ? "yr" : "yrs"} clinical exp
                       </span>
                     </div>
-                    <p className="text-muted-foreground text-[11px] leading-relaxed">
+                    <p className="text-muted-foreground text-xs leading-relaxed">
                       Are you a healthcare practitioner with 3+ years of clinical experience? Help guide junior nurses,
                       interns, and students.
                     </p>
                     {!hasMinExperience && (
-                      <div className="text-[11px] font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 rounded-lg p-2.5 border border-amber-500/20">
-                        Requires 3+ years of clinical experience to apply. (Your profile has {candidateExpYears} {candidateExpYears === 1 ? "year" : "years"}).
+                      <div className="text-xs font-medium text-foreground bg-primary-soft/40 dark:bg-primary-soft/20 rounded-xl p-3 border border-primary/20 space-y-1">
+                        <div className="flex items-center gap-1.5 font-bold text-primary text-xs">
+                          <HiOutlineInformationCircle className="h-4 w-4 shrink-0 text-primary" />
+                          <span>Experience Requirement</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          Requires 3+ years of clinical experience to apply. (Your profile has {candidateExpYears} {candidateExpYears === 1 ? "year" : "years"}).
+                        </p>
                       </div>
                     )}
                     <Button
@@ -2922,13 +2944,13 @@ function HuddlePage() {
                       disabled={!hasMinExperience || applyingMentor}
                       onClick={handleApplyMentor}
                       className={cn(
-                        "w-full text-xs font-bold h-8 rounded-xl transition-all",
+                        "w-full text-xs font-bold h-10 rounded-xl transition-all",
                         hasMinExperience
-                          ? "border-primary text-primary hover:bg-primary hover:text-white cursor-pointer"
-                          : "border-border/60 text-muted-foreground cursor-not-allowed opacity-60"
+                          ? "bg-primary hover:bg-primary-hover text-white shadow-xs cursor-pointer border-transparent"
+                          : "border-border/80 text-muted-foreground bg-muted/40 cursor-not-allowed opacity-70"
                       )}
                     >
-                      {applyingMentor ? "Submitting Application..." : hasMinExperience ? "Apply for Mentor Seal" : "Requires 3+ Yrs Clinical Exp"}
+                      {applyingMentor ? "Submitting Application..." : hasMinExperience ? "Apply for Mentor Seal" : "Requires 3+ Yrs Clinical Experience"}
                     </Button>
                   </div>
                 )}

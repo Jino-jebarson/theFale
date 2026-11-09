@@ -1593,7 +1593,7 @@ export const dentalCouncils = [
 ];
 
 export function getCouncilsForRole(role?: string): string[] {
-  const r = (role || "").toLowerCase();
+  const r = (role || "Doctor").toLowerCase();
   if (r.includes("doctor") || r.includes("physician") || r.includes("surgeon")) {
     return doctorCouncils;
   }

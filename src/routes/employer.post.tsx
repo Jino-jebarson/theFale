@@ -8,10 +8,11 @@ import {
   HiOutlineCheck,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill, RiRobot2Line } from "react-icons/ri";
+import { BotMessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, PageHead } from "@/components/fale/AppShell";
 import { OrgMark } from "@/components/fale/JobCard";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SelectField } from "@/components/fale/fields";
 import { professions, indianCities } from "@/lib/data";
@@ -19,7 +20,7 @@ import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { postFacilityJob } from "@/lib/adapters/facilityAdapter";
-import { generateJobDescriptionWithAi } from "@/lib/adapters/aiAdapter";
+import { generateJobDescriptionWithAi, formatClinicalJobDescription } from "@/lib/adapters/aiAdapter";
 
 export const Route = createFileRoute("/employer/post")({
   head: () => ({
@@ -163,17 +164,17 @@ function Post() {
   const hospitalCity = String(store.profile["city"] || "Bengaluru");
 
   // Form State
-  const [title, setTitle] = useState("Staff Nurse — ICU");
-  const [profession, setProfession] = useState("Nurse");
-  const [dept, setDept] = useState("Critical care");
-  const [workLocation, setWorkLocation] = useState(hospitalCity);
+  const [title, setTitle] = useState("");
+  const [profession, setProfession] = useState("");
+  const [dept, setDept] = useState("");
+  const [workLocation, setWorkLocation] = useState("");
   const [empType, setEmpType] = useState("Full-time");
-  const [minSalary, setMinSalary] = useState("35000");
-  const [maxSalary, setMaxSalary] = useState("50000");
-  const [openings, setOpenings] = useState("3");
-  const [experience, setExperience] = useState("2–5 yrs");
-  const [shifts, setShifts] = useState<string[]>(["Day", "Night", "Rotational"]);
-  const [description, setDescription] = useState(presets[0].desc);
+  const [minSalary, setMinSalary] = useState("");
+  const [maxSalary, setMaxSalary] = useState("");
+  const [openings, setOpenings] = useState("1");
+  const [experience, setExperience] = useState("");
+  const [shifts, setShifts] = useState<string[]>([]);
+  const [description, setDescription] = useState("");
   const [requireCouncilReg, setRequireCouncilReg] = useState(true);
   const [isUrgent, setIsUrgent] = useState(false);
   const [generatingJd, setGeneratingJd] = useState(false);
@@ -182,20 +183,6 @@ function Post() {
     const base = [hospitalCity, ...indianCities];
     return Array.from(new Set(base.filter(Boolean)));
   }, [hospitalCity]);
-
-  // Apply preset
-  const handleApplyPreset = (p: (typeof presets)[0]) => {
-    setTitle(p.role);
-    setProfession(p.profession);
-    setDept(p.dept);
-    setMinSalary(String(p.minSal));
-    setMaxSalary(String(p.maxSal));
-    setExperience(p.exp);
-    setEmpType(p.type);
-    setShifts(p.shifts);
-    setDescription(p.desc);
-    toast.success(`Loaded "${p.role}" template`);
-  };
 
   // Toggle shift
   const toggleShift = (s: string) => {
@@ -291,12 +278,15 @@ function Post() {
     if (minN && maxN) {
       return `₹${minN.toLocaleString("en-IN")} – ₹${maxN.toLocaleString("en-IN")}`;
     }
-    return "₹35,000 – ₹50,000";
+    if (minN) {
+      return `₹${minN.toLocaleString("en-IN")}+`;
+    }
+    return "Pay Scale Pending";
   }, [minSalary, maxSalary]);
 
   return (
     <AppShell>
-      <form onSubmit={submit("Open")} className="mx-auto max-w-6xl space-y-6 pb-16">
+      <form onSubmit={submit("Open")} className="w-full min-w-0 space-y-6 pb-16">
         {/* Header & Mode Switcher */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <PageHead
@@ -318,35 +308,12 @@ function Post() {
           </div>
         </div>
 
-        {/* Quick Presets Bar */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none">
-          <span className="text-muted-foreground font-semibold shrink-0">Quick templates:</span>
-          {presets.map((p) => {
-            const isSelected = title === p.role;
-            return (
-              <button
-                key={p.role}
-                type="button"
-                onClick={() => handleApplyPreset(p)}
-                className={cn(
-                  "px-3 py-1 rounded-lg text-xs font-medium border transition-all cursor-pointer whitespace-nowrap shrink-0",
-                  isSelected
-                    ? "bg-primary text-primary-foreground border-primary font-bold shadow-2xs"
-                    : "bg-card border-border/70 text-foreground hover:border-primary/50 hover:bg-muted/40"
-                )}
-              >
-                {p.role}
-              </button>
-            );
-          })}
-        </div>
-
         {/* 2-Column Grid: Form (Left) + Candidate Preview (Right) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Main Form (8 Columns) */}
           <div className="lg:col-span-7 xl:col-span-8 space-y-6">
             {/* 01 · The Role */}
-            <section className="rounded-2xl border border-border/80 bg-card p-6 shadow-2xs space-y-5">
+            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-5">
               <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
                 01 · The Role
               </p>
@@ -362,7 +329,7 @@ function Post() {
                   required
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Staff Nurse — ICU"
+                  placeholder="Enter role title (e.g. ICU Staff Nurse, Duty Medical Officer, Consultant)"
                   className="w-full h-11 px-3.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-medium"
                 />
               </div>
@@ -395,7 +362,7 @@ function Post() {
                   options={cityOptions}
                   value={workLocation}
                   onChange={setWorkLocation}
-                  placeholder="Select city / location"
+                  placeholder="Select hospital location / city"
                   searchable
                 />
               </div>
@@ -429,7 +396,7 @@ function Post() {
             </section>
 
             {/* 02 · The Details */}
-            <section className="rounded-2xl border border-border/80 bg-card p-6 shadow-2xs space-y-5">
+            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-5">
               <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
                 02 · The Details
               </p>
@@ -549,31 +516,58 @@ function Post() {
               </div>
 
               {/* Responsibilities & Requirements */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="responsibilities-text" className="text-xs font-semibold text-foreground block">
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <label htmlFor="responsibilities-text" className="text-xs font-semibold text-foreground">
                     Responsibilities &amp; requirements <span className="text-destructive">*</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setGeneratingJd(true);
-                      try {
-                        const res = await generateJobDescriptionWithAi(title || profession || "Healthcare Specialist", dept || "Hospital Department");
-                        if (res.response) {
-                          setDescription(res.response);
-                          toast.success("AI Generated NABH-Compliant Job Description!");
+                  <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+                    {description && (description.includes("**") || description.includes("###")) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDescription(formatClinicalJobDescription(description));
+                          toast.success("Formatted job description cleanly!");
+                        }}
+                        className="text-[11px] font-semibold text-primary hover:underline cursor-pointer"
+                      >
+                        Format Cleanly
+                      </button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      isLoading={generatingJd}
+                      loadingText="Generating with Ally..."
+                      onClick={async () => {
+                        setGeneratingJd(true);
+                        try {
+                          const res = await generateJobDescriptionWithAi({
+                            title: title || profession || "",
+                            department: dept || "",
+                            minSalary,
+                            maxSalary,
+                            experience,
+                            shifts,
+                            empType,
+                            location: workLocation || hospitalCity,
+                            openings,
+                          });
+                          if (res.response) {
+                            setDescription(formatClinicalJobDescription(res.response));
+                            toast.success("Ally Generated NABH-Compliant Job Description!");
+                          }
+                        } finally {
+                          setGeneratingJd(false);
                         }
-                      } finally {
-                        setGeneratingJd(false);
-                      }
-                    }}
-                    disabled={generatingJd}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 border border-primary/25 px-2.5 py-1 text-[11px] font-bold text-primary hover:bg-primary/20 transition-all cursor-pointer"
-                  >
-                    <RiRobot2Line className="h-3.5 w-3.5 text-primary" />
-                    <span>{generatingJd ? "Generating..." : "Auto-Generate Job Description"}</span>
-                  </button>
+                      }}
+                      className="h-7 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/25 px-2.5 text-[11px] font-bold shadow-none cursor-pointer gap-1.5"
+                    >
+                      <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
+                      <span>Auto-Generate with Ally</span>
+                    </Button>
+                  </div>
                 </div>
                 <textarea
                   id="responsibilities-text"
@@ -581,14 +575,31 @@ function Post() {
                   rows={6}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Duties, qualifications, registrations and benefits…"
+                  onBlur={() => {
+                    if (description && (description.includes("**") || description.includes("###"))) {
+                      setDescription(formatClinicalJobDescription(description));
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData("text");
+                    if (pasted && (pasted.includes("**") || pasted.includes("###"))) {
+                      e.preventDefault();
+                      const formatted = formatClinicalJobDescription(pasted);
+                      const target = e.currentTarget;
+                      const start = target.selectionStart;
+                      const end = target.selectionEnd;
+                      const nextVal = description.substring(0, start) + formatted + description.substring(end);
+                      setDescription(nextVal);
+                    }
+                  }}
+                  placeholder="Detail clinical scope, duties, registrations, certifications, and shift timings…"
                   className="w-full p-3.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-y font-normal leading-relaxed"
                 />
               </div>
             </section>
 
             {/* 03 · Screening */}
-            <section className="rounded-2xl border border-border/80 bg-card p-6 shadow-2xs space-y-4">
+            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-4">
               <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
                 03 · Screening
               </p>
@@ -697,24 +708,32 @@ function Post() {
                     <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
                       <span className="flex items-center gap-1 truncate">
                         <HiOutlineMapPin className="h-3 w-3 shrink-0 text-primary" />
-                        <span>{workLocation || hospitalCity}</span>
+                        <span>{workLocation || "Location Pending"}</span>
                       </span>
-                      <span>•</span>
-                      <span className="truncate">{dept}</span>
+                      {dept && (
+                        <>
+                          <span>•</span>
+                          <span className="truncate">{dept}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]">
                   <span className="font-mono font-bold text-primary bg-primary-soft/60 px-2 py-0.5 rounded-md border border-primary/20">
-                    {salaryDisplay} / mo
+                    {salaryDisplay} {salaryDisplay !== "Pay Scale Pending" ? "/ mo" : ""}
                   </span>
-                  <span className="bg-muted px-2 py-0.5 rounded-md text-foreground font-medium">
-                    {experience}
-                  </span>
-                  <span className="bg-muted px-2 py-0.5 rounded-md text-foreground font-medium">
-                    {empType}
-                  </span>
+                  {experience && (
+                    <span className="bg-muted px-2 py-0.5 rounded-md text-foreground font-medium">
+                      {experience}
+                    </span>
+                  )}
+                  {empType && (
+                    <span className="bg-muted px-2 py-0.5 rounded-md text-foreground font-medium">
+                      {empType}
+                    </span>
+                  )}
                 </div>
 
                 {requireCouncilReg && (

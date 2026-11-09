@@ -34,8 +34,8 @@ import {
   HiOutlinePhone,
   HiOutlineBuildingLibrary,
   HiOutlineLockClosed,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
-import { ImSpinner2 } from "react-icons/im";
 import {
   RiVerifiedBadgeFill,
   RiStethoscopeLine,
@@ -497,7 +497,7 @@ function Onboarding() {
       proof: "college_id",
       univReg: "",
       adult: true,
-      area: "Bengaluru",
+      area: (profile["area"] as string) || (profile["city"] as string) || "",
       ...profile,
       fresher: isFresher,
     };
@@ -525,6 +525,7 @@ function Onboarding() {
   const handleProfessionChange = (newRole: string) => {
     const allowedSkills = skillsByProfession[newRole] ?? [];
     const availableDepts = departmentsByProfession[newRole] ?? [];
+    const allowedCouncils = getCouncilsForRole(newRole);
     setP((prev) => {
       const currentSkills = (prev["skills"] as string[]) ?? [];
       const allPredefinedSkills = Object.values(skillsByProfession).flat();
@@ -532,7 +533,9 @@ function Onboarding() {
       const validSkills = Array.from(new Set([...currentSkills.filter((s) => allowedSkills.includes(s)), ...customSkills]));
       const currentDept = String(prev["specialty"] || "");
       const validDept = availableDepts.includes(currentDept) ? currentDept : (availableDepts[0] ?? "");
-      const defaultCouncil = councilByProfession[newRole] ?? "";
+      const defaultCouncil = councilByProfession[newRole] || (allowedCouncils[0] ?? "");
+      const currentCouncil = String(prev["council"] || "");
+      const validCouncil = allowedCouncils.includes(currentCouncil) ? currentCouncil : defaultCouncil;
       const allowedQuals = qualificationsByProfession[newRole] ?? [];
       const currentQual = String(prev["qual"] || "");
       const validQual = allowedQuals.includes(currentQual) || currentQual === "Other" ? currentQual : "";
@@ -541,10 +544,11 @@ function Onboarding() {
         role: newRole,
         specialty: validDept,
         skills: validSkills,
-        council: prev["council"] && prev["council"] !== "Not applicable for my role" ? prev["council"] : defaultCouncil,
+        council: validCouncil,
         qual: validQual,
       };
     });
+    setRegVerification(null);
   };
 
   const [verifyingReg, setVerifyingReg] = useState(false);
@@ -561,9 +565,12 @@ function Onboarding() {
       toast.error("Please enter your registration number first.");
       return;
     }
-    const currentCouncil = str("council") || councilByProfession[str("role") || "Doctor"] || councilOptions[0] || "";
+    const currentRole = str("role") || "Doctor";
+    const roleCouncils = getCouncilsForRole(currentRole);
+    const defaultCouncil = councilByProfession[currentRole] || (roleCouncils[0] ?? "");
+    const currentCouncil = roleCouncils.includes(str("council")) ? str("council") : defaultCouncil;
     const candidateName = str("name") || `${str("fn")} ${str("ln")}`.trim() || "Candidate";
-    const role = str("role") || "Healthcare Professional";
+    const role = currentRole;
 
     setVerifyingReg(true);
 
@@ -581,26 +588,52 @@ function Onboarding() {
         },
       });
 
-      const aiText = aiRes.response || "";
-      const lower = aiText.toLowerCase();
+      const structured = aiRes.structuredData as Record<string, any> | undefined;
+      const aiText = (typeof structured?.assessment === "string" ? structured.assessment : aiRes.response) || "";
+      const lower = (aiText + " " + JSON.stringify(structured || {})).toLowerCase();
 
-      if (lower.includes("not found") || lower.includes("invalid") || lower.includes("discrepancy") || lower.includes("non-compliant") || lower.includes("does not conform")) {
+      // Rule-based client-side format guard for obvious unformatted random digits
+      const isPureDigits = /^\d{1,11}$/.test(num);
+      const isNuid = /^\d{14}$/.test(num) || num.toUpperCase().startsWith("NUID");
+      const clientFlaggedDummy = isPureDigits && !isNuid;
+
+      const isFlagged = clientFlaggedDummy
+        || structured?.status === "FLAGGED"
+        || structured?.status === "FLAGGED_DISCREPANCY"
+        || structured?.formatValid === false
+        || lower.includes("discrepancy")
+        || lower.includes("invalid")
+        || lower.includes("does not conform")
+        || lower.includes("lacks the required")
+        || lower.includes("not found")
+        || lower.includes("non-compliant");
+
+      const reportedConfidence = typeof structured?.confidence === "number"
+        ? Math.round(structured.confidence)
+        : (isFlagged ? 38 : 98);
+
+      const noteText = isFlagged && clientFlaggedDummy && !aiText.includes("nomenclature")
+        ? `Registration number '${num}' does not conform to ${currentCouncil} statutory nomenclature. It lacks the required council prefix (e.g. KSNC, KMC, TNC) or 14-digit NUID format.`
+        : (aiText || structured?.recommendation || `Registration format audit completed for ${currentCouncil}.`);
+
+      if (isFlagged) {
         setRegVerification({
           status: "not_found",
           num,
-          aiNote: aiText,
+          aiNote: noteText,
+          confidence: reportedConfidence,
         });
-        toast.error("Council Format Discrepancy Flagged", {
-          description: "Please check your certificate details.",
+        toast.error("Statutory Format Discrepancy Flagged", {
+          description: "Lacks official council prefix. Please check certificate.",
         });
       } else {
         setRegVerification({
           status: "ok",
           num,
-          aiNote: aiText,
-          confidence: 98,
+          aiNote: noteText,
+          confidence: reportedConfidence,
         });
-        toast.success("AI Pre-Check Verified", {
+        toast.success("Ally Pre-Check Verified", {
           description: `Validated against ${currentCouncil} standards.`,
         });
       }
@@ -712,7 +745,7 @@ function Onboarding() {
       studyYear: str("studyYear"),
       grad: str("grad"),
       area: str("area"),
-      city: str("area").split(",")[0]?.trim() || "Bengaluru",
+      city: str("area").split(",")[0]?.trim() || str("city") || "",
       proof,
       univReg: str("univReg"),
       mobile: str("mobile"),
@@ -744,8 +777,8 @@ function Onboarding() {
         email: str("email") || undefined,
         gender: str("gender") || undefined,
         dob: str("dob") || undefined,
-        city: str("area").split(",")[0]?.trim() || str("city") || "Bengaluru",
-        state: str("state") || "Karnataka",
+        city: str("area").split(",")[0]?.trim() || str("city") || "",
+        state: str("state") || "",
         pincode: str("pincode") || undefined,
         addressLine: str("address") || undefined,
         candidateLevel: "STUDENT",
@@ -938,8 +971,8 @@ function Onboarding() {
         email: str("email") || undefined,
         gender: str("gender") || undefined,
         dob: str("dob") || undefined,
-        city: str("city") || str("area")?.split(",")[0]?.trim() || "Chennai",
-        state: str("state") || "Tamil Nadu",
+        city: str("city") || str("area")?.split(",")[0]?.trim() || "",
+        state: str("state") || "",
         pincode: str("pincode") || undefined,
         addressLine: str("address") || undefined,
         candidateLevel: isStudent ? "STUDENT" : isFresher ? "FRESHER" : "PROFESSIONAL",
@@ -1057,8 +1090,8 @@ function Onboarding() {
           size: str("size") || undefined,
           about: str("about") || undefined,
           website: str("website") || undefined,
-          city: str("city") || "Chennai",
-          state: str("state") || "Tamil Nadu",
+          city: str("city") || "",
+          state: str("state") || "",
           pincode: str("pincode") || "600001",
           addressLine: str("address") || "Hospital Campus",
           beds: Math.max(1, parseInt(str("beds")) || 50),
@@ -1149,10 +1182,10 @@ function Onboarding() {
     if (data.employer || data.designation) {
       setExps([
         {
-          org: data.employer || "Sunrise Hospital",
-          role: data.designation || "Staff Nurse",
-          fm: "4",
-          fy: "2022",
+          org: data.employer || "",
+          role: data.designation || data.role || "",
+          fm: "1",
+          fy: "2023",
           cur: true,
         },
       ]);
@@ -1228,7 +1261,7 @@ function Onboarding() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4 min-w-0">
           <div className="flex items-start gap-3 sm:gap-3.5 min-w-0 flex-1">
             <span className="grid h-10 w-10 sm:h-12 sm:w-12 shrink-0 place-items-center rounded-xl sm:rounded-2xl bg-primary text-white shadow-md shadow-primary/25">
-              <HiOutlineSparkles className="h-5 w-5 sm:h-6 sm:w-6" />
+              <BotMessageSquare className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -1393,8 +1426,10 @@ function Onboarding() {
             subtitle="Clinical registration council details for government verification"
           >
             {(() => {
-              const roleCouncils = getCouncilsForRole(str("role"));
-              const selectedCouncil = str("council") || councilByProfession[str("role") || "Doctor"] || roleCouncils[0] || "";
+              const currentRole = str("role") || "Doctor";
+              const roleCouncils = getCouncilsForRole(currentRole);
+              const defaultCouncil = councilByProfession[currentRole] || (roleCouncils[0] ?? "");
+              const selectedCouncil = roleCouncils.includes(str("council")) ? str("council") : defaultCouncil;
               const onlineRegisterName = selectedCouncil ? (onlineCouncilRegisters[selectedCouncil] || getOnlineRegisterName(selectedCouncil)) : undefined;
 
               return (
@@ -1440,10 +1475,23 @@ function Onboarding() {
                             "absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] font-bold no-underline transition-colors select-none",
                             regVerification?.status === "ok"
                               ? "text-emerald-600 hover:text-emerald-700 cursor-default"
+                              : regVerification?.status === "not_found"
+                              ? "text-rose-600 hover:text-rose-700 cursor-pointer"
                               : "text-primary hover:text-primary-hover cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed disabled:pointer-events-none",
                           )}
                         >
-                          {verifyingReg ? "Verifying..." : regVerification?.status === "ok" ? "Verified" : "Verify"}
+                          {verifyingReg ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin" />
+                              <span>Verifying...</span>
+                            </span>
+                          ) : regVerification?.status === "ok" ? (
+                            "Verified"
+                          ) : regVerification?.status === "not_found" ? (
+                            "Flagged"
+                          ) : (
+                            "Verify"
+                          )}
                         </button>
                       </div>
                     </div>
@@ -1452,37 +1500,37 @@ function Onboarding() {
                   {/* Real-time council check status banner (matching thefale_website (19).html) */}
                   {verifyingReg && (
                     <div className="flex items-center gap-2.5 rounded-xl border border-primary/20 bg-primary-soft/60 p-3 text-xs text-primary font-medium animate-in fade-in duration-200">
-                      <ImSpinner2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                      <HiOutlineArrowPath className="h-4 w-4 animate-spin text-primary shrink-0" />
                       <span>Checking with the {onlineRegisterName || selectedCouncil}…</span>
                     </div>
                   )}
 
                   {!verifyingReg && regVerification?.status === "ok" && (
-                    <div className="flex items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/90 p-3.5 text-xs text-emerald-900 animate-in fade-in duration-200">
-                      <BotMessageSquare className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <b className="font-bold">AI Pre-Check Verified • {regVerification.num}</b>
-                          <span className="rounded-full bg-emerald-600/10 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                    <div className="min-h-[105px] flex items-start gap-2.5 rounded-xl border border-primary/25 bg-primary-soft/50 p-3.5 text-xs text-foreground animate-in fade-in duration-200">
+                      <BotMessageSquare className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <b className="font-bold text-foreground">Ally Pre-Check Verified • {regVerification.num}</b>
+                          <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
                             {regVerification.confidence ?? 98}% Statutory Confidence
                           </span>
                         </div>
-                        <p className="text-[11.5px] text-emerald-800 leading-relaxed max-h-32 overflow-y-auto pr-1">
+                        <p className="text-[11.5px] text-muted-foreground leading-relaxed max-h-[72px] overflow-y-auto pr-1.5 [scrollbar-width:thin] [scrollbar-color:rgba(255,90,0,0.3)_transparent]">
                           {cleanAiNote(regVerification.aiNote) || `Regulatory registration format validated against ${selectedCouncil} standards.`}
                         </p>
-                        <span className="text-[10px] text-emerald-700/80 font-medium block">
-                          Pre-checked by AI • Final sign-off by FALE Compliance Desk
+                        <span className="text-[10px] text-primary/90 font-semibold block">
+                          Pre-checked by Ally • Final sign-off by FALE Compliance Desk
                         </span>
                       </div>
                     </div>
                   )}
 
                   {!verifyingReg && regVerification?.status === "manual" && (
-                    <div className="flex items-start gap-2.5 rounded-xl border border-sky-200 bg-sky-50/90 p-3.5 text-xs text-sky-900 animate-in fade-in duration-200">
-                      <BotMessageSquare className="h-4 w-4 text-sky-600 shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <b className="font-bold">Format Verified • {regVerification.num}</b>
-                        <p className="text-[11.5px] text-sky-700 leading-relaxed">
+                    <div className="min-h-[105px] flex items-start gap-2.5 rounded-xl border border-primary/20 bg-primary-soft/40 p-3.5 text-xs text-foreground animate-in fade-in duration-200">
+                      <BotMessageSquare className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <b className="font-bold text-foreground">Format Verified • {regVerification.num}</b>
+                        <p className="text-[11.5px] text-muted-foreground leading-relaxed max-h-[72px] overflow-y-auto pr-1.5 [scrollbar-width:thin] [scrollbar-color:rgba(255,90,0,0.3)_transparent]">
                           {cleanAiNote(regVerification.aiNote) || `${selectedCouncil} format recorded. Our compliance desk checks the original certificate within 24–48 hours.`}
                         </p>
                       </div>
@@ -1490,13 +1538,21 @@ function Onboarding() {
                   )}
 
                   {!verifyingReg && regVerification?.status === "not_found" && (
-                    <div className="flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50/90 p-3.5 text-xs text-rose-900 animate-in fade-in duration-200">
+                    <div className="min-h-[105px] flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50/90 p-3.5 text-xs text-rose-900 animate-in fade-in duration-200">
                       <HiOutlineXMark className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <b className="font-bold">Format Discrepancy Flagged • {regVerification.num}</b>
-                        <p className="text-[11.5px] text-rose-700 leading-relaxed max-h-32 overflow-y-auto pr-1">
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <b className="font-bold text-rose-950">Statutory Discrepancy Flagged • {regVerification.num}</b>
+                          <span className="rounded-full bg-rose-600/10 border border-rose-300 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                            {regVerification.confidence ?? 38}% Statutory Confidence
+                          </span>
+                        </div>
+                        <p className="text-[11.5px] text-rose-800 leading-relaxed max-h-[72px] overflow-y-auto pr-1.5 [scrollbar-width:thin] [scrollbar-color:rgba(225,29,72,0.3)_transparent]">
                           {cleanAiNote(regVerification.aiNote) || "Check your registration certificate. If correct, you may continue and our compliance team will audit by hand."}
                         </p>
+                        <span className="text-[10px] text-rose-700/90 font-semibold block">
+                          Pre-checked by Ally • Official council registration certificate re-upload required
+                        </span>
                       </div>
                     </div>
                   )}

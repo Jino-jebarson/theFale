@@ -296,10 +296,10 @@ function Applications() {
       </div>
 
       {/* ================= CLEAN NAVIGATION BAR (APPLE STYLE) ================= */}
-      <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2.5 pb-2.5 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
-        <div className="surface rounded-3xl border border-border/80 bg-card p-2 sm:p-2.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+      <div className="relative sm:sticky sm:top-[var(--header-offset,4rem)] z-10 sm:z-30 mb-4 sm:mb-6 sm:-mx-6 lg:-mx-8 sm:px-6 lg:px-8 sm:pt-2.5 sm:pb-2.5 sm:bg-background/95 sm:backdrop-blur-md transition-all duration-300 ease-in-out">
+        <div className="surface rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-2 sm:p-2.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           {/* Segmented Tabs */}
-          <div className="flex items-center rounded-2xl bg-muted/60 p-1 text-xs font-semibold border border-border/50 shrink-0">
+          <div className="grid grid-cols-3 sm:flex items-center rounded-2xl bg-muted/60 p-1 text-xs font-semibold border border-border/50 shrink-0 w-full sm:w-auto">
             {(["Active", "Saved", "Closed"] as const).map((t) => {
               const count =
                 t === "Active" ? activeApps.length : t === "Saved" ? savedJobs.length : closedApps.length;
@@ -309,7 +309,7 @@ function Applications() {
                   type="button"
                   onClick={() => setTab(t)}
                   className={cn(
-                    "flex items-center gap-2 rounded-xl px-4 py-2 transition-all cursor-pointer font-bold",
+                    "flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl px-2 sm:px-4 py-2 transition-all cursor-pointer font-bold text-center",
                     tab === t
                       ? "bg-card text-primary shadow-xs"
                       : "text-muted-foreground hover:text-foreground"
@@ -318,7 +318,7 @@ function Applications() {
                   <span>{t}</span>
                   <span
                     className={cn(
-                      "rounded-full px-2 py-0.5 text-[10px] font-black",
+                      "rounded-full px-1.5 sm:px-2 py-0.5 text-[10px] font-black",
                       tab === t ? "bg-primary text-white" : "bg-muted text-muted-foreground"
                     )}
                   >
@@ -354,7 +354,7 @@ function Applications() {
       {/* ================= APPLICATIONS LIST ================= */}
       {loading ? (
         <div className="surface p-8 text-center text-muted-foreground">
-          <HiOutlineClock className="mx-auto h-8 w-8 text-primary animate-spin" />
+          <HiOutlineArrowPath className="mx-auto h-8 w-8 text-primary animate-spin" />
           <p className="mt-3 text-sm font-semibold">Loading applications...</p>
         </div>
       ) : loadError ? (
@@ -419,71 +419,72 @@ function Applications() {
               key={a.jobId}
               className="surface group relative rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs transition-all duration-200 hover:border-primary/40 hover:shadow-md"
             >
-              {/* Card Top: OrgMark, Title, Chips & Status Action */}
-              <div className="flex items-start gap-3 sm:gap-4">
-                <OrgMark name={j.org} className="h-12 w-12 sm:h-13 sm:w-13 text-sm shrink-0" />
+              {/* Card Top: OrgMark, Hospital Info & Status Action */}
+              <div className="flex items-start justify-between gap-3 sm:gap-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <OrgMark name={j.org} className="h-11 w-11 sm:h-12 sm:w-12 text-xs sm:text-sm shrink-0" />
 
-                <div className="flex-1 min-w-0">
-                  {/* Title and Withdraw Action */}
-                  <div className="flex items-start justify-between gap-3">
-                    <Link
-                      to="/jobs/$id"
-                      params={{ id: j.id }}
-                      className="font-extrabold text-base sm:text-lg text-foreground group-hover:text-primary transition-colors leading-snug break-words inline-flex items-center gap-1.5"
-                    >
-                      <span>{j.title}</span>
-                      <HiOutlineArrowTopRightOnSquare className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-primary" />
-                    </Link>
-
-                    {tab === "Active" && (
-                      <button
-                        type="button"
-                        onClick={() => setWithdrawingApp({ jobId: a.jobId, title: j.title, org: j.org })}
-                        title="Withdraw this application"
-                        className="inline-flex items-center gap-1 rounded-xl border border-border/80 bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground transition-all hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:border-rose-900/60 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 active:scale-[0.98] cursor-pointer shrink-0"
-                      >
-                        <HiOutlineArrowUturnLeft className="h-3.5 w-3.5" />
-                        <span>Withdraw</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Hospital & Department */}
-                  <div className="flex flex-wrap items-center gap-2 mt-1 text-xs">
-                    <span className="inline-flex items-center gap-1 font-bold text-foreground">
-                      <span>{j.org}</span>
-                      <HiCheckBadge className="h-4 w-4 text-primary shrink-0" title="Verified Hospital" />
-                    </span>
-                    {j.dept && (
-                      <span className="rounded-lg bg-primary-soft/80 px-2 py-0.5 text-[11px] font-bold text-primary shrink-0">
-                        {j.dept}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Metadata Chips Bar */}
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                    <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground">
-                      <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span>{j.city}</span>
-                    </span>
-
-                    <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground">
-                      <HiOutlineBriefcase className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span>{j.kind === "internship" ? "Academic Track" : j.type}</span>
-                    </span>
-
-                    <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground">
-                      <HiOutlineCurrencyRupee className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span>{j.kind === "internship" ? `Stipend: ${j.salary}` : j.salary}</span>
-                    </span>
-
-                    <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground">
-                      <HiOutlineCalendarDays className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span>{isWithdrawn ? `Withdrawn ${a.date}` : `Applied ${a.date}`}</span>
-                    </span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-xs sm:text-sm text-foreground truncate">{j.org}</span>
+                      {j.dept && (
+                        <span className="rounded-lg bg-primary-soft/80 px-2 py-0.5 text-[10px] sm:text-[11px] font-bold text-primary shrink-0">
+                          {j.dept}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                      {j.city} · {j.kind === "internship" ? "Academic Track" : j.type}
+                    </p>
                   </div>
                 </div>
+
+                {tab === "Active" && (
+                  <button
+                    type="button"
+                    onClick={() => setWithdrawingApp({ jobId: a.jobId, title: j.title, org: j.org })}
+                    title="Withdraw this application"
+                    className="inline-flex items-center gap-1 rounded-xl border border-border/80 bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground transition-all hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 dark:hover:border-rose-900/60 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 active:scale-[0.98] cursor-pointer shrink-0 shadow-2xs"
+                  >
+                    <HiOutlineArrowUturnLeft className="h-3.5 w-3.5" />
+                    <span>Withdraw</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Full-Width Job Title (Never breaks awkwardly on mobile) */}
+              <div className="mt-3">
+                <Link
+                  to="/jobs/$id"
+                  params={{ id: j.id }}
+                  className="font-black tracking-tight text-base sm:text-lg text-foreground hover:text-primary transition-colors leading-snug inline-flex items-center gap-1.5"
+                >
+                  <span>{j.title}</span>
+                  <HiOutlineArrowTopRightOnSquare className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-primary" />
+                </Link>
+              </div>
+
+              {/* Metadata Chips Bar */}
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground whitespace-nowrap">
+                  <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>{j.city}</span>
+                </span>
+
+                <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground whitespace-nowrap">
+                  <HiOutlineBriefcase className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>{j.kind === "internship" ? "Academic Track" : j.type}</span>
+                </span>
+
+                <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground whitespace-nowrap">
+                  <HiOutlineCurrencyRupee className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>{j.kind === "internship" ? `Stipend: ${j.salary.replace(/\.00/g, "")}` : j.salary.replace(/\.00/g, "")}</span>
+                </span>
+
+                <span className="inline-flex items-center gap-1 rounded-xl bg-muted/40 px-2.5 py-1 font-semibold text-muted-foreground whitespace-nowrap">
+                  <HiOutlineCalendarDays className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <span>{isWithdrawn ? `Withdrawn ${a.date}` : `Applied ${a.date}`}</span>
+                </span>
               </div>
 
               {/* ================= STEPPER / JOURNEY ================= */}

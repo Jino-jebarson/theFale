@@ -13,6 +13,7 @@ import {
   HiOutlineShieldCheck,
   HiOutlineAcademicCap,
   HiOutlineLockClosed,
+  HiOutlineSparkles,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill } from "react-icons/ri";
 import { toast } from "sonner";
@@ -42,7 +43,7 @@ export function OrgMark({ name, className }: { name: string; className?: string 
       </span>
       <span
         title="Verified Hospital Partner"
-        className="absolute -bottom-1 -right-1 grid h-4 w-4 place-items-center rounded-full bg-emerald-600 text-white ring-2 ring-card shadow-2xs"
+        className="absolute -bottom-1 -right-1 grid h-4 w-4 place-items-center rounded-full bg-primary text-white ring-2 ring-card shadow-2xs"
       >
         <RiVerifiedBadgeFill className="h-2.5 w-2.5" />
       </span>
@@ -65,8 +66,8 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
 
   const p = (s.profile || {}) as Record<string, unknown>;
   const candLoc = {
-    city: String(p["city"] || "Bengaluru"),
-    address: String(p["addressLine"] || p["address"] || "Indiranagar"),
+    city: String(p["city"] || p["area"] || ""),
+    address: String(p["addressLine"] || p["address"] || ""),
     pincode: String(p["pincode"] || ""),
   };
   const { distanceKm, isSameCity, description: distanceDesc } = estimateDistanceKm(candLoc, {
@@ -86,7 +87,7 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
     try {
       const candidateRole = String(p["role"] || p["profession"] || p["designation"] || "Doctor");
       const candidateQual = String(p["qualification"] || p["primaryDegree"] || "MBBS");
-      const candidateCity = String(p["city"] || "Chennai");
+      const candidateCity = String(p["city"] || p["area"] || "");
 
       const res = await explainJobMatchWithAi(
         job.title,
@@ -104,7 +105,11 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
         setAiRationale(res.response);
       }
     } catch {
-      setAiRationale(`Commute distance of ${distanceKm} km with verified ${job.dept || "clinical"} credentials required by ${job.org}.`);
+      setAiRationale(
+        distanceKm > 50
+          ? `Relocation opportunity (${distanceKm} km away) with verified ${job.dept || "clinical"} requirements for ${job.org}.`
+          : `Calculated commute of ${distanceKm} km with verified ${job.dept || "clinical"} credentials requested by ${job.org}.`
+      );
     } finally {
       setLoadingRationale(false);
     }
@@ -186,9 +191,9 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold",
               (job.match ?? 0) >= 70
-                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                ? "bg-primary-soft border-primary/20 text-primary"
                 : (job.match ?? 0) >= 40
-                ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                ? "bg-primary-soft/60 border-primary/15 text-primary/80"
                 : "bg-muted border-border text-muted-foreground"
             )}
           >
@@ -196,9 +201,9 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
                 (job.match ?? 0) >= 70
-                  ? "bg-emerald-500 animate-pulse"
+                  ? "bg-primary animate-pulse"
                   : (job.match ?? 0) >= 40
-                  ? "bg-amber-500"
+                  ? "bg-primary/70"
                   : "bg-muted-foreground"
               )}
             />
@@ -253,35 +258,51 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
           </div>
         )}
 
-        {/* Match Explainer: "Why this job" */}
-        <div className="mt-2.5 rounded-xl bg-primary/5 border border-primary/15 p-2.5 text-[11px] text-muted-foreground transition-all">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <BotMessageSquare className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span className="font-bold text-foreground truncate">
-                Match Rationale ({distanceDesc}):
+        {/* Match Explainer: Ally Clinical Match Rationale */}
+        <div className="mt-3 rounded-2xl border border-primary/20 bg-gradient-to-r from-primary-soft/60 via-primary-soft/25 to-background p-3 sm:p-3.5 space-y-2.5 transition-all shadow-2xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+              <span className="grid h-6 w-6 place-items-center rounded-lg bg-primary text-primary-foreground shadow-2xs shrink-0">
+                <BotMessageSquare className="h-3.5 w-3.5" />
+              </span>
+              <span className="text-xs font-bold text-foreground tracking-tight">
+                Ally Match Rationale
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-background/90 border border-primary/20 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground shrink-0 shadow-2xs">
+                <HiOutlineMapPin className="h-3 w-3 text-primary shrink-0" />
+                <span>{isSameCity || distanceKm <= 50 ? `${distanceKm} km commute` : `${distanceKm} km · Relocation`}</span>
               </span>
             </div>
+
             {!aiRationale && (
               <button
                 type="button"
                 onClick={handleGetAiRationale}
                 disabled={loadingRationale}
-                className="shrink-0 rounded-md bg-primary/10 hover:bg-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary transition-colors cursor-pointer"
+                className="self-start sm:self-auto inline-flex items-center gap-1.5 rounded-xl bg-primary hover:bg-primary-hover text-primary-foreground px-3 py-1 text-[11px] font-bold transition-all shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-70 shrink-0"
               >
-                {loadingRationale ? "Thinking..." : "Explain with AI"}
+                <BotMessageSquare className={cn("h-3.5 w-3.5", loadingRationale && "animate-pulse")} />
+                <span>{loadingRationale ? "Ally is analyzing..." : "Explain with Ally"}</span>
               </button>
             )}
           </div>
-          <p className="mt-1 leading-relaxed text-foreground/85">
-            {aiRationale ? (
-              <span className="text-foreground font-medium animate-in fade-in">{aiRationale}</span>
-            ) : (
-              <span>
-                Calculated commute: <strong className="text-foreground font-semibold">{distanceKm} km</strong> from your registered area. Holds {job.dept || "clinical"} requirements for {job.org}.
-              </span>
-            )}
-          </p>
+
+          {aiRationale ? (
+            <div className="rounded-xl bg-background/90 border border-primary/20 p-2.5 text-xs text-foreground leading-relaxed animate-in fade-in duration-200">
+              <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-primary mb-1">
+                <BotMessageSquare className="h-3 w-3 shrink-0" />
+                <span>Verified Clinical Fit</span>
+              </div>
+              <p className="text-foreground/90 font-medium leading-relaxed">{aiRationale}</p>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
+              {isSameCity || distanceKm <= 50 ? "Convenient local commute of" : "Inter-city relocation opening"}{" "}
+              <strong className="text-foreground font-semibold">{distanceKm} km</strong> from your registered area. Aligns with verified{" "}
+              <strong className="text-foreground font-semibold">{job.dept || "clinical"}</strong> unit requirements at{" "}
+              <span className="font-semibold text-foreground">{job.org}</span>.
+            </p>
+          )}
         </div>
       </div>
 
@@ -314,7 +335,7 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
           </Link>
 
           {isApplied ? (
-            <span className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 px-3.5 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+            <span className="inline-flex items-center gap-1 rounded-xl bg-primary-soft border border-primary/20 px-3.5 py-1.5 text-xs font-bold text-primary">
               <HiOutlineCheckCircle className="h-4 w-4" />
               <span>Applied</span>
             </span>

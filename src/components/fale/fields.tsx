@@ -16,9 +16,9 @@ import {
   HiOutlineXMark,
   HiOutlineShieldCheck,
   HiPlus,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
 import { MdMyLocation } from "react-icons/md";
-import { ImSpinner2 } from "react-icons/im";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -989,8 +989,8 @@ export function AddressField({
           const d = await r.json();
           const a = d.address ?? {};
           // Sanitize any regional script to clean English fallback if necessary
-          const cleanCity = a.city || a.town || a.village || a.county || value.city || "Bengaluru";
-          const cleanState = a.state || value.state || "Karnataka";
+          const cleanCity = a.city || a.town || a.village || a.county || value.city || "";
+          const cleanState = a.state || value.state || "";
           onChange({
             address: d.display_name ?? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`,
             city: cleanCity,
@@ -1035,7 +1035,7 @@ export function AddressField({
         disabled={loading}
         className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary hover:text-primary-hover disabled:opacity-60"
       >
-        {loading ? <ImSpinner2 className="h-4 w-4 animate-spin" /> : <MdMyLocation className="h-4 w-4" />}
+        {loading ? <HiOutlineArrowPath className="h-4 w-4 animate-spin" /> : <MdMyLocation className="h-4 w-4" />}
         {loading ? "Detecting your location…" : "Use my current location"}
       </Button>
     </div>

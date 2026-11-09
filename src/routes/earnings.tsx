@@ -25,6 +25,7 @@ import {
   HiOutlineAcademicCap,
   HiOutlineXMark,
   HiOutlinePlus,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { Logo } from "@/components/fale/Logo";
@@ -98,6 +99,23 @@ function amountInWords(num: number): string {
   }
 
   return `Rupees ${inWords(Math.floor(num)).trim()} Only`;
+}
+
+function formatMobilePayoutMethod(method: string): string {
+  if (!method) return "Cashfree Escrow";
+  if (method.startsWith("Cashfree Direct Bank · ")) {
+    return method.replace("Cashfree Direct Bank · ", "");
+  }
+  if (method.startsWith("Cashfree Instant UPI · ")) {
+    return method.replace("Cashfree Instant UPI · ", "UPI: ");
+  }
+  if (method.startsWith("Cashfree Direct UPI · ")) {
+    return method.replace("Cashfree Direct UPI · ", "UPI: ");
+  }
+  if (method.includes(" · ")) {
+    return method.split(" · ").slice(1).join(" · ");
+  }
+  return method;
 }
 
 function CandidateEarningsPage() {
@@ -229,7 +247,7 @@ function CandidateEarningsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const candidateName = String(store.profile["name"] || (isApiEnabled ? "Clinician" : "Jino Jebarson R"));
+  const candidateName = String(store.profile["name"] || "Clinician");
   const candidatePayoutMethod: CandidatePayoutMethod | null = store.candidatePayoutMethod || null;
   const hasLinkedPayout = Boolean(candidatePayoutMethod && (candidatePayoutMethod.upiId || candidatePayoutMethod.accountNumber));
 
@@ -455,15 +473,9 @@ function CandidateEarningsPage() {
         {/* ================= PAGE HEADER (MATCHING HUDDLE) ================= */}
         <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-2xl font-extrabold tracking-tight sm:text-[28px] text-foreground whitespace-nowrap">
-                {isStudent ? "Earnings & Clinical Stipends" : "Earnings & 24-Hour Payouts"}
-              </h1>
-              <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0 bg-primary/10 text-primary border border-primary/20">
-                <HiOutlineBolt className="h-3.5 w-3.5" />
-                <span>24h Escrow SLA</span>
-              </span>
-            </div>
+            <h1 className="text-2xl font-extrabold tracking-tight sm:text-[28px] text-foreground">
+              {isStudent ? "Earnings & Clinical Stipends" : "Earnings & 24-Hour Payouts"}
+            </h1>
             <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed max-w-3xl">
               {isStudent
                 ? "Professional clinical earnings, locum shift payouts, and disbursement accounts."
@@ -476,11 +488,11 @@ function CandidateEarningsPage() {
               <Button
                 asChild
                 variant="outline"
-                className="h-10 border-border/80 text-foreground hover:bg-muted text-xs font-bold px-3 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                className="h-10 border-border/80 text-foreground hover:bg-muted text-[11px] sm:text-xs font-bold px-2.5 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto min-w-0"
               >
                 <Link to="/jobs" search={{ q: undefined }}>
-                  <HiOutlineSparkles className="h-4 w-4 text-primary" />
-                  <span>Explore Internships</span>
+                  <HiOutlineSparkles className="h-4 w-4 text-primary shrink-0" />
+                  <span className="truncate">Internships</span>
                 </Link>
               </Button>
             ) : (
@@ -488,26 +500,29 @@ function CandidateEarningsPage() {
                 <Button
                   asChild
                   variant="outline"
-                  className="h-10 border-border/80 text-foreground hover:bg-muted text-xs font-bold px-3 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                  className="h-10 border-border/80 text-foreground hover:bg-muted text-[11px] sm:text-xs font-bold px-2.5 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto min-w-0"
                 >
                   <Link to="/shifts">
-                    <HiOutlineBolt className="h-4 w-4 text-primary" />
-                    <span>Find Shifts</span>
+                    <HiOutlineBolt className="h-4 w-4 text-primary shrink-0" />
+                    <span className="truncate">Find Shifts</span>
                   </Link>
                 </Button>
                 <Button
                   onClick={() => setPayoutModalOpen(true)}
-                  className="h-10 bg-primary hover:bg-primary-hover text-white text-xs font-bold px-3 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto"
+                  className="h-10 bg-primary hover:bg-primary-hover text-white text-[11px] sm:text-xs font-bold px-2.5 sm:px-4 rounded-2xl shadow-xs cursor-pointer flex items-center justify-center gap-1.5 w-full sm:w-auto min-w-0"
                 >
                   {hasLinkedPayout ? (
                     <>
-                      <HiOutlinePencilSquare className="h-4 w-4" />
-                      <span>Update Account</span>
+                      <HiOutlinePencilSquare className="h-4 w-4 shrink-0" />
+                      <span className="truncate">Update Account</span>
                     </>
                   ) : (
                     <>
-                      <HiOutlinePlus className="h-4 w-4" />
-                      <span>Add Payout Method</span>
+                      <HiOutlinePlus className="h-4 w-4 shrink-0" />
+                      <span className="truncate">
+                        <span className="sm:hidden">Add Payout</span>
+                        <span className="hidden sm:inline">Add Payout Method</span>
+                      </span>
                     </>
                   )}
                 </Button>
@@ -525,24 +540,24 @@ function CandidateEarningsPage() {
           />
         ) : (
           <>
-            {/* 4 Telemetry Balance Cards (Matching Huddle) */}
+            {/* 4 Telemetry Balance Cards (Matching Shifts Page) */}
             <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
               {/* Card 1: Total Disbursed */}
-              <div className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs hover:border-border transition-all flex flex-col justify-between space-y-3 sm:space-y-4">
+              <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md flex flex-col justify-between space-y-3 sm:space-y-4">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0">
+                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-2xl bg-primary-soft text-primary shrink-0">
                     <HiOutlineBanknotes className="h-5 w-5" />
                   </span>
-                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                  <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
                     100% on-time
                   </span>
                 </div>
                 <div>
-                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
                     {isStudent ? "Disbursed Stipends" : "Disbursed Earnings"}
                   </span>
-                  <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono mt-1">
-                    ₹{totalDisbursed.toLocaleString("en-IN")}
+                  <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
+                    ₹{Math.round(totalDisbursed).toLocaleString("en-IN")}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     {isStudent ? "Credited to bank / UPI" : "Received in bank / UPI"}
@@ -551,21 +566,21 @@ function CandidateEarningsPage() {
               </div>
 
               {/* Card 2: In Escrow */}
-              <div className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs hover:border-border transition-all flex flex-col justify-between space-y-3 sm:space-y-4">
+              <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md flex flex-col justify-between space-y-3 sm:space-y-4">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0">
+                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-2xl bg-primary-soft text-primary shrink-0">
                     <HiOutlineLockClosed className="h-5 w-5" />
                   </span>
-                  <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                  <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
                     {isStudent ? "Next Cycle Ready" : "Releasing < 24h"}
                   </span>
                 </div>
                 <div>
-                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
                     {isStudent ? "Next Stipend Cycle" : "In 24-hr Escrow"}
                   </span>
-                  <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono mt-1">
-                    ₹{inEscrowAmount.toLocaleString("en-IN")}
+                  <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
+                    ₹{Math.round(inEscrowAmount).toLocaleString("en-IN")}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     {isStudent
@@ -578,21 +593,21 @@ function CandidateEarningsPage() {
               </div>
 
               {/* Card 3: Monthly Rate */}
-              <div className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs hover:border-border transition-all flex flex-col justify-between space-y-3 sm:space-y-4">
+              <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md flex flex-col justify-between space-y-3 sm:space-y-4">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0">
+                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-2xl bg-primary-soft text-primary shrink-0">
                     <HiOutlineArrowTrendingUp className="h-5 w-5" />
                   </span>
-                  <span className="text-[10px] font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                  <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
                     {new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" }).toUpperCase()}
                   </span>
                 </div>
                 <div>
-                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
                     {isStudent ? "Monthly Stipend Rate" : "This Month's Earnings"}
                   </span>
-                  <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono mt-1">
-                    ₹{(isStudent ? 18000 : totalDisbursed + inEscrowAmount).toLocaleString("en-IN")}
+                  <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
+                    ₹{Math.round(isStudent ? 18000 : totalDisbursed + inEscrowAmount).toLocaleString("en-IN")}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     {isStudent ? "Accredited teaching hospital" : "Gross locum earnings"}
@@ -601,20 +616,20 @@ function CandidateEarningsPage() {
               </div>
 
               {/* Card 4: Rotations / Duties */}
-              <div className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs hover:border-border transition-all flex flex-col justify-between space-y-3 sm:space-y-4">
+              <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md flex flex-col justify-between space-y-3 sm:space-y-4">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0">
+                  <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-2xl bg-primary-soft text-primary shrink-0">
                     <HiOutlineClock className="h-5 w-5" />
                   </span>
-                  <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                  <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
                     {isStudent ? "Faculty Verified" : "Verified Cover"}
                   </span>
                 </div>
                 <div>
-                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
                     {isStudent ? "Completed Rotations" : "Completed Duties"}
                   </span>
-                  <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground font-mono mt-1">
+                  <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
                     {payouts.length} {isStudent ? "Rotations" : payouts.length === 1 ? "Shift" : "Shifts"}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -628,12 +643,12 @@ function CandidateEarningsPage() {
               </div>
             </section>
 
-            {/* Active Payout Destination Strip */}
+            {/* Unified 24-Hour Payout Destination Strip */}
             {!hasLinkedPayout ? (
-              <section className="rounded-2xl sm:rounded-3xl border border-dashed border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-2xs">
+              <section className="rounded-2xl sm:rounded-3xl border border-primary/20 bg-primary-soft/30 p-4 sm:p-5 lg:p-6 shadow-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
-                    <span className="grid h-10 w-10 sm:h-11 sm:w-11 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0 mt-0.5">
+                    <span className="grid h-10 w-10 sm:h-11 sm:w-11 place-items-center rounded-xl sm:rounded-2xl bg-primary-soft text-primary shrink-0 mt-0.5">
                       <HiOutlineBuildingLibrary className="h-5 w-5 sm:h-6 sm:w-6" />
                     </span>
                     <div className="space-y-1 min-w-0">
@@ -641,12 +656,30 @@ function CandidateEarningsPage() {
                         <h3 className="text-sm sm:text-base font-extrabold text-foreground tracking-tight">
                           Candidate 24-Hour Payout Destination
                         </h3>
-                        <span className="text-[10px] text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-bold">
+                        <span className="text-[10px] text-primary bg-primary-soft border border-primary/25 px-2.5 py-0.5 rounded-full font-bold">
                           Not Linked
                         </span>
                       </div>
+
+                      {/* Dynamic Amount Highlight */}
+                      {totalDisbursed > 0 ? (
+                        <p className="text-sm font-black text-primary flex items-center gap-1.5 pt-0.5">
+                          <HiOutlineBolt className="h-4 w-4 shrink-0" />
+                          <span>₹{Math.round(totalDisbursed).toLocaleString("en-IN")} Disbursed & Ready for Instant Transfer</span>
+                        </p>
+                      ) : inEscrowAmount > 0 ? (
+                        <p className="text-sm font-black text-primary flex items-center gap-1.5 pt-0.5">
+                          <HiOutlineBolt className="h-4 w-4 shrink-0" />
+                          <span>₹{Math.round(inEscrowAmount).toLocaleString("en-IN")} Pending in 24-Hour Escrow</span>
+                        </p>
+                      ) : null}
+
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        Link your personal UPI ID or bank account to enable automated shift payouts within 24 hours of timesheet signoff.
+                        {totalDisbursed > 0
+                          ? "Link your personal UPI ID or bank account so your disbursed shift earnings transfer directly to your account within 24 hours."
+                          : inEscrowAmount > 0
+                          ? "Link your personal UPI ID or bank account so your shift earnings disburse automatically within 24 hours of duty signoff."
+                          : "Link your personal UPI ID or bank account to enable automated shift payouts within 24 hours of timesheet signoff."}
                       </p>
                     </div>
                   </div>
@@ -655,7 +688,7 @@ function CandidateEarningsPage() {
                     type="button"
                     size="sm"
                     onClick={() => setPayoutModalOpen(true)}
-                    className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary-hover text-white shrink-0 shadow-xs cursor-pointer gap-1.5"
+                    className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary-hover text-white shrink-0 shadow-xs cursor-pointer gap-1.5 w-full sm:w-auto justify-center"
                   >
                     <HiOutlinePlus className="h-4 w-4" />
                     <span>Add Payout Method</span>
@@ -666,7 +699,7 @@ function CandidateEarningsPage() {
               <section className="rounded-2xl sm:rounded-3xl border border-border/80 bg-card p-4 sm:p-5 lg:p-6 shadow-xs">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-5">
                   <div className="flex items-start gap-3 sm:gap-3.5 min-w-0">
-                    <span className="grid h-10 w-10 sm:h-11 sm:w-11 place-items-center rounded-xl sm:rounded-2xl bg-primary/10 text-primary shrink-0 mt-0.5">
+                    <span className="grid h-10 w-10 sm:h-11 sm:w-11 place-items-center rounded-xl sm:rounded-2xl bg-primary-soft text-primary shrink-0 mt-0.5">
                       <HiOutlineCheckBadge className="h-5 w-5 sm:h-6 sm:w-6" />
                     </span>
                     <div className="space-y-1.5 min-w-0 flex-1">
@@ -674,7 +707,7 @@ function CandidateEarningsPage() {
                         <h3 className="text-sm sm:text-base font-extrabold text-foreground tracking-tight leading-snug">
                           Active Cashfree 24-Hour Payout Destination
                         </h3>
-                        <span className="text-[10px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold shrink-0">
+                        <span className="text-[10px] text-primary bg-primary-soft border border-primary/20 px-2.5 py-0.5 rounded-full font-bold shrink-0">
                           {candidatePayoutMethod.verifiedAt || "Cashfree VPA Validated"}
                         </span>
                       </div>
@@ -729,36 +762,6 @@ function CandidateEarningsPage() {
                 </div>
               </section>
             ) : null}
-
-            {/* Actionable Payout Alert Banner if funds exist in escrow but no payout method is linked */}
-            {!hasLinkedPayout && (inEscrowAmount > 0 || payouts.length > 0) && (
-              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                <div className="flex items-start gap-3">
-                  <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5">
-                    <HiOutlineBolt className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h4 className="font-bold text-foreground text-sm">
-                      {inEscrowAmount > 0
-                        ? `₹${inEscrowAmount.toLocaleString("en-IN")} Pending in 24-Hour Escrow`
-                        : "Ready for automated shift payouts"}
-                    </h4>
-                    <p className="text-muted-foreground mt-0.5 leading-relaxed">
-                      Link your personal UPI ID or bank account so your shift earnings disburse automatically within 24 hours of duty signoff.
-                    </p>
-                  </div>
-                </div>
-
-                <Button
-                  size="sm"
-                  onClick={() => setPayoutModalOpen(true)}
-                  className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary-hover text-white shrink-0 shadow-xs cursor-pointer gap-1.5"
-                >
-                  <HiOutlinePlus className="h-4 w-4" />
-                  <span>Add Payout Method</span>
-                </Button>
-              </div>
-            )}
 
             {/* Ledger & Statements (Matching Huddle) */}
             <section className="rounded-3xl border border-border/80 bg-card shadow-xs overflow-hidden">
@@ -850,7 +853,7 @@ function CandidateEarningsPage() {
                   <div className="sm:hidden divide-y divide-border/60">
                     {loading ? (
                       <div className="py-12 px-4 text-center text-muted-foreground text-xs font-medium">
-                        <HiOutlineClock className="mx-auto h-6 w-6 text-primary animate-spin" />
+                        <HiOutlineArrowPath className="mx-auto h-6 w-6 text-primary animate-spin" />
                         <p className="mt-2 font-semibold">Loading shift claims & payouts...</p>
                       </div>
                     ) : loadError ? (
@@ -905,8 +908,8 @@ function CandidateEarningsPage() {
                       </div>
                     ) : (
                       filteredPayouts.map((tx) => (
-                        <div key={tx.id} className="p-4 space-y-3 hover:bg-muted/10 transition-colors">
-                          {/* Top Row: Shift Role & Amount */}
+                        <div key={tx.id} className="p-4 space-y-2.5 hover:bg-muted/10 transition-colors">
+                          {/* Top Row: Shift Role & Amount + Status Badge */}
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 flex-1">
                               <h4 className="font-bold text-sm text-foreground leading-snug">{tx.shiftTitle}</h4>
@@ -915,47 +918,57 @@ function CandidateEarningsPage() {
                               </p>
                             </div>
                             <div className="text-right shrink-0">
-                              <div className="font-mono font-extrabold text-base text-foreground">
-                                ₹{tx.amount.toLocaleString("en-IN")}
+                              <div className="font-black tracking-tight text-base sm:text-lg text-foreground">
+                                ₹{Math.round(tx.amount).toLocaleString("en-IN")}
                               </div>
-                              <span className="text-[10px] text-muted-foreground font-medium block">
-                                {isStudent ? "Net Stipend" : "Net Remuneration"}
+                              <span
+                                className={cn(
+                                  "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mt-1",
+                                  tx.status === "Disbursed"
+                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                                    : "bg-primary-soft text-primary border border-primary/25"
+                                )}
+                              >
+                                {tx.status}
                               </span>
                             </div>
                           </div>
 
-                          {/* Middle Row: Date, Hours/Rate, and Status */}
-                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-xs">
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground bg-muted/60 border border-border/60 px-2 py-0.5 rounded-lg">
+                          {/* Middle Row: Schedule Badges (Fits cleanly without wrapping) */}
+                          <div className="flex items-center gap-1.5 pt-0.5 text-xs">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground bg-muted/60 border border-border/60 px-2 py-0.5 rounded-lg shrink-0">
                               <HiOutlineCalendarDays className="h-3 w-3 text-muted-foreground" />
                               <span>{tx.shiftDate}</span>
                             </span>
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground bg-muted/40 border border-border/50 px-2 py-0.5 rounded-lg">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground bg-muted/40 border border-border/50 px-2 py-0.5 rounded-lg shrink-0">
                               <HiOutlineClock className="h-3 w-3" />
                               <span>{tx.hours} hrs {isStudent ? "rotation" : `@ ₹${tx.rate}/hr`}</span>
                             </span>
-                            <span
-                              className={cn(
-                                "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ml-auto",
-                                tx.status === "Disbursed"
-                                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
-                                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
-                              )}
-                            >
-                              {tx.status}
-                            </span>
                           </div>
 
-                          {/* Bottom Row: Disbursement Destination & Advice Slip Action */}
-                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/40 text-xs">
-                            <div className="min-w-0 flex-1 text-muted-foreground">
-                              <div className="text-[11px] font-mono truncate">{tx.payoutMethodUsed}</div>
-                              {tx.utr && <div className="text-[10px] text-muted-foreground/70 font-mono">UTR: {tx.utr}</div>}
+                          {/* Bottom Row: Clean Payout Destination & Advice Slip Action */}
+                          <div className="flex items-center justify-between gap-2.5 pt-2 border-t border-border/40 text-xs">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                                {tx.payoutMethodUsed.toLowerCase().includes("upi") ? (
+                                  <HiOutlineBolt className="h-3.5 w-3.5 text-primary shrink-0" />
+                                ) : (
+                                  <HiOutlineBuildingLibrary className="h-3.5 w-3.5 text-primary shrink-0" />
+                                )}
+                                <span className="truncate text-[11px] font-mono text-foreground font-semibold">
+                                  {formatMobilePayoutMethod(tx.payoutMethodUsed)}
+                                </span>
+                              </div>
+                              {tx.utr && (
+                                <div className="text-[10px] text-muted-foreground/80 font-mono mt-0.5 truncate pl-5">
+                                  UTR: {tx.utr}
+                                </div>
+                              )}
                             </div>
                             <button
                               type="button"
                               onClick={() => setSelectedSlipTx(tx)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer shrink-0"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary-soft hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer shrink-0 border border-primary/20 shadow-2xs"
                               title="View & Print Payout Advice Slip"
                             >
                               <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
@@ -985,7 +998,7 @@ function CandidateEarningsPage() {
                         {loading ? (
                           <tr>
                             <td colSpan={7} className="py-12 text-center text-muted-foreground font-medium">
-                              <HiOutlineClock className="mx-auto h-6 w-6 text-primary animate-spin" />
+                              <HiOutlineArrowPath className="mx-auto h-6 w-6 text-primary animate-spin" />
                               <p className="mt-2 text-xs font-semibold">Loading shift claims & payouts...</p>
                             </td>
                           </tr>
@@ -1064,7 +1077,7 @@ function CandidateEarningsPage() {
                                     "inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
                                     tx.status === "Disbursed"
                                       ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
-                                      : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
+                                      : "bg-primary-soft text-primary border border-primary/25"
                                   )}
                                 >
                                   {tx.status}
@@ -1074,14 +1087,14 @@ function CandidateEarningsPage() {
                                 <div>{tx.payoutMethodUsed}</div>
                                 {tx.utr && <div className="text-[10px] text-muted-foreground/70 mt-0.5">UTR: {tx.utr}</div>}
                               </td>
-                              <td className="py-4 px-5 whitespace-nowrap text-right font-mono font-bold text-sm sm:text-base text-foreground">
-                                ₹{tx.amount.toLocaleString("en-IN")}
+                              <td className="py-4 px-5 whitespace-nowrap text-right font-black tracking-tight text-sm sm:text-base text-foreground">
+                                ₹{Math.round(tx.amount).toLocaleString("en-IN")}
                               </td>
                               <td className="py-4 px-5 whitespace-nowrap text-right">
                                 <button
                                   type="button"
                                   onClick={() => setSelectedSlipTx(tx)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary-soft hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer border border-primary/20"
                                   title="View & Print Payout Advice Slip"
                                 >
                                   <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
@@ -1141,20 +1154,20 @@ function CandidateEarningsPage() {
                             <span className="text-xs text-muted-foreground mt-0.5 block">{t.period} · {t.tdsRate}</span>
                           </div>
                           <div className="text-right">
-                            <div className="font-mono font-bold text-sm text-foreground">₹{t.netCredited.toLocaleString("en-IN")}</div>
-                            <div className="text-[10px] text-muted-foreground font-medium">Gross: ₹{t.gross.toLocaleString("en-IN")}</div>
+                            <div className="font-black tracking-tight text-sm text-foreground">₹{Math.round(t.netCredited).toLocaleString("en-IN")}</div>
+                            <div className="text-[10px] text-muted-foreground font-medium">Gross: ₹{Math.round(t.gross).toLocaleString("en-IN")}</div>
                           </div>
                         </div>
                         <div className="flex items-center justify-between pt-1 border-t border-border/40 text-xs">
                           <span className="text-[11px] text-muted-foreground">
                             TDS: <span className={t.tdsAmount === 0 ? "text-muted-foreground font-medium" : "text-destructive font-semibold"}>
-                              {t.tdsAmount === 0 ? "₹0" : `-₹${t.tdsAmount.toLocaleString("en-IN")}`}
+                              {t.tdsAmount === 0 ? "₹0" : `-₹${Math.round(t.tdsAmount).toLocaleString("en-IN")}`}
                             </span>
                           </span>
                           <button
                             type="button"
                             onClick={() => toast.success(`Statement ${t.id} downloaded.`)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary-soft hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer border border-primary/20"
                           >
                             <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
                             <span>Download</span>
@@ -1241,42 +1254,42 @@ function CandidateEarningsPage() {
 
       {/* MODAL: Update Payout Method (UPI or Bank Account) */}
       <Dialog open={payoutModalOpen} onOpenChange={setPayoutModalOpen}>
-        <DialogContent className="sm:max-w-md p-0 overflow-hidden max-h-[88vh] flex flex-col rounded-2xl border-border/80 shadow-lg">
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden max-h-[90vh] sm:max-h-[85vh] flex flex-col rounded-t-3xl sm:rounded-3xl border border-border/80 shadow-2xl bg-card">
           {/* Fixed Header */}
-          <DialogHeader className="p-5 border-b border-border/60 shrink-0 text-left space-y-1 bg-card">
-            <div className="flex items-center gap-2">
-              <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
-                <HiOutlineBanknotes className="h-4.5 w-4.5" />
+          <DialogHeader className="p-4 sm:p-5 border-b border-border/60 shrink-0 text-left space-y-1 bg-card">
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-soft text-primary">
+                <HiOutlineBanknotes className="h-5 w-5" />
               </span>
-              <DialogTitle className="text-lg font-bold text-foreground">
+              <DialogTitle className="text-base sm:text-lg font-black text-foreground">
                 24-Hour Payout Destination
               </DialogTitle>
             </div>
-            <DialogDescription className="text-xs text-muted-foreground">
+            <DialogDescription className="text-xs text-muted-foreground pt-0.5 leading-relaxed">
               Configure your verified UPI ID or Bank Account for automated Cashfree shift earnings.
             </DialogDescription>
           </DialogHeader>
 
           {/* Scrollable Form Body */}
-          <form onSubmit={handleSavePayoutMethod} className="flex flex-col flex-1 min-h-0">
-            <div className="overflow-y-auto scrollbar-none p-5 space-y-4 flex-1">
+          <form onSubmit={handleSavePayoutMethod} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-4 flex-1">
               {/* Type Switcher with Stacked Mobile-Friendly Cards */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground">Choose Payout Method</label>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-foreground">Choose Payout Method</label>
                 <div className="flex flex-col gap-2.5">
                   <button
                     type="button"
                     onClick={() => setPayoutType("upi")}
                     className={cn(
-                      "p-3 sm:p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3",
+                      "p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3",
                       payoutType === "upi"
-                        ? "border-primary bg-primary/5 ring-1 ring-primary shadow-2xs"
+                        ? "border-primary bg-primary-soft/20 ring-1 ring-primary/40 shadow-xs"
                         : "border-border bg-card hover:bg-muted/40"
                     )}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div className={cn(
-                        "h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-colors",
+                        "h-10 w-10 rounded-xl flex items-center justify-center shrink-0 transition-colors",
                         payoutType === "upi" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
                       )}>
                         <HiOutlineBolt className="h-5 w-5" />
@@ -1284,20 +1297,20 @@ function CandidateEarningsPage() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs font-bold text-foreground">Instant UPI</span>
-                          <span className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-semibold px-2 py-0.5 rounded-full whitespace-nowrap">
+                          <span className="text-[10px] bg-primary-soft text-primary border border-primary/20 font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
                             Fastest · 24×7
                           </span>
                         </div>
-                        <span className="text-[11px] text-muted-foreground block mt-0.5 truncate">
+                        <span className="text-[11px] text-muted-foreground block mt-1 leading-snug">
                           GPay, PhonePe, Paytm, BHIM, Cred
                         </span>
                       </div>
                     </div>
                     <div className={cn(
-                      "h-4.5 w-4.5 rounded-full border flex items-center justify-center shrink-0 ml-2 transition-all",
+                      "h-5 w-5 rounded-full border flex items-center justify-center shrink-0 ml-2 transition-all",
                       payoutType === "upi" ? "border-primary bg-primary text-white" : "border-muted-foreground/40"
                     )}>
-                      {payoutType === "upi" && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                      {payoutType === "upi" && <span className="h-2 w-2 rounded-full bg-white" />}
                     </div>
                   </button>
 
@@ -1305,15 +1318,15 @@ function CandidateEarningsPage() {
                     type="button"
                     onClick={() => setPayoutType("bank")}
                     className={cn(
-                      "p-3 sm:p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3",
+                      "p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3",
                       payoutType === "bank"
-                        ? "border-primary bg-primary/5 ring-1 ring-primary shadow-2xs"
+                        ? "border-primary bg-primary-soft/20 ring-1 ring-primary/40 shadow-xs"
                         : "border-border bg-card hover:bg-muted/40"
                     )}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div className={cn(
-                        "h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-colors",
+                        "h-10 w-10 rounded-xl flex items-center justify-center shrink-0 transition-colors",
                         payoutType === "bank" ? "bg-primary text-white" : "bg-muted text-muted-foreground"
                       )}>
                         <HiOutlineBuildingLibrary className="h-5 w-5" />
@@ -1325,24 +1338,24 @@ function CandidateEarningsPage() {
                             Direct IMPS / NEFT
                           </span>
                         </div>
-                        <span className="text-[11px] text-muted-foreground block mt-0.5 truncate">
+                        <span className="text-[11px] text-muted-foreground block mt-1 leading-snug">
                           Direct transfer to any verified savings or current account
                         </span>
                       </div>
                     </div>
                     <div className={cn(
-                      "h-4.5 w-4.5 rounded-full border flex items-center justify-center shrink-0 ml-2 transition-all",
+                      "h-5 w-5 rounded-full border flex items-center justify-center shrink-0 ml-2 transition-all",
                       payoutType === "bank" ? "border-primary bg-primary text-white" : "border-muted-foreground/40"
                     )}>
-                      {payoutType === "bank" && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                      {payoutType === "bank" && <span className="h-2 w-2 rounded-full bg-white" />}
                     </div>
                   </button>
                 </div>
               </div>
 
               {/* Account Holder Name */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground">
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-bold text-foreground">
                   Account Holder Name <span className="text-destructive">*</span>
                 </label>
                 <input
@@ -1350,18 +1363,18 @@ function CandidateEarningsPage() {
                   required
                   value={formHolderName}
                   onChange={(e) => setFormHolderName(e.target.value)}
-                  placeholder="e.g. Dr. Jino Jebarson R"
-                  className="h-9.5 w-full rounded-xl border border-input bg-card px-3 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                  placeholder="e.g. Dr. Sneha Sharma"
+                  className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                 />
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-[11px] text-muted-foreground">
                   Must match the name on your State Medical / Nursing Council registration.
                 </p>
               </div>
 
               {/* UPI Fields */}
               {payoutType === "upi" && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-foreground">
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-xs font-bold text-foreground">
                     Virtual Payment Address (UPI ID) <span className="text-destructive">*</span>
                   </label>
                   <input
@@ -1369,10 +1382,10 @@ function CandidateEarningsPage() {
                     required
                     value={formUpiId}
                     onChange={(e) => setFormUpiId(e.target.value)}
-                    placeholder="e.g. jino@okhdfcbank or 9845012345@paytm"
-                    className="h-9.5 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                    placeholder="e.g. clinician@okhdfcbank or 9845012345@paytm"
+                    className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   />
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[11px] text-muted-foreground">
                     Cashfree will perform an instant VPA check to verify account holder match.
                   </p>
                 </div>
@@ -1380,13 +1393,13 @@ function CandidateEarningsPage() {
 
               {/* Bank Account Fields */}
               {payoutType === "bank" && (
-                <div className="space-y-3">
+                <div className="space-y-3.5 pt-1">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-foreground">
+                    <label className="text-xs font-bold text-foreground">
                       Bank Name <span className="text-destructive">*</span>
                     </label>
                     <Select value={formBankName} onValueChange={setFormBankName}>
-                      <SelectTrigger className="h-9.5 rounded-xl border-input bg-card px-3 text-xs font-medium">
+                      <SelectTrigger className="h-10 rounded-xl border-input bg-card px-3 text-xs font-medium">
                         <SelectValue placeholder="Select Bank" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1402,7 +1415,7 @@ function CandidateEarningsPage() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-foreground">
+                      <label className="text-xs font-bold text-foreground">
                         Account Number <span className="text-destructive">*</span>
                       </label>
                       <input
@@ -1411,12 +1424,12 @@ function CandidateEarningsPage() {
                         value={formAccNumber}
                         onChange={(e) => setFormAccNumber(e.target.value)}
                         placeholder="50100412891234"
-                        className="h-9.5 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                       />
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs font-semibold text-foreground">
+                      <label className="text-xs font-bold text-foreground">
                         Confirm Number <span className="text-destructive">*</span>
                       </label>
                       <input
@@ -1425,13 +1438,13 @@ function CandidateEarningsPage() {
                         value={formConfirmAcc}
                         onChange={(e) => setFormConfirmAcc(e.target.value)}
                         placeholder="Re-enter number"
-                        className="h-9.5 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                        className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-foreground">
+                    <label className="text-xs font-bold text-foreground">
                       IFSC Code <span className="text-destructive">*</span>
                     </label>
                     <input
@@ -1441,52 +1454,44 @@ function CandidateEarningsPage() {
                       value={formIfsc}
                       onChange={(e) => setFormIfsc(e.target.value.toUpperCase())}
                       placeholder="e.g. HDFC0000060"
-                      className="h-9.5 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono font-bold uppercase text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
+                      className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono font-bold uppercase text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                     />
                   </div>
                 </div>
               )}
 
               {/* Cashfree Guarantee Note */}
-              <div className="p-3 rounded-xl border border-primary/20 bg-primary/5 text-xs text-muted-foreground space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-foreground text-[11px]">
-                  <HiOutlineShieldCheck className="h-4 w-4 text-primary" />
+              <div className="p-3.5 rounded-2xl border border-primary/20 bg-primary-soft/30 text-xs text-muted-foreground space-y-1 mt-2">
+                <div className="flex items-center gap-1.5 font-bold text-foreground text-xs">
+                  <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
                   <span>24-Hour Payout Guarantee</span>
                 </div>
-                <p className="text-[10px] leading-relaxed">
+                <p className="text-[11px] leading-relaxed">
                   Upon clocking out and timesheet approval by the hospital supervisor, funds held in FALE Escrow are instantly transferred to this verified account.
                 </p>
               </div>
             </div>
 
             {/* Sticky Actions Footer */}
-            <div className="p-4 border-t border-border/60 bg-muted/20 shrink-0 flex items-center justify-end gap-2.5">
+            <div className="p-4 border-t border-border/60 bg-card shrink-0 flex items-center justify-end gap-2.5 sm:gap-3">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => setPayoutModalOpen(false)}
-                className="rounded-xl text-xs font-medium h-9 px-3.5 cursor-pointer"
+                className="rounded-xl text-xs font-bold h-10 px-4 cursor-pointer border-border hover:bg-muted text-foreground flex-1 sm:flex-initial"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 size="sm"
-                disabled={isVerifying}
-                className="rounded-xl text-xs font-semibold h-9 px-4.5 cursor-pointer bg-primary hover:bg-primary-hover shadow-2xs gap-1.5"
+                isLoading={isVerifying}
+                loadingText="Validating with Cashfree..."
+                className="rounded-xl text-xs font-bold h-10 px-5 cursor-pointer bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 flex-1 sm:flex-initial"
               >
-                {isVerifying ? (
-                  <>
-                    <span className="h-3 w-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                    <span>Validating with Cashfree...</span>
-                  </>
-                ) : (
-                  <>
-                    <HiOutlineCheck className="h-4 w-4" />
-                    <span>Verify &amp; Save Payout</span>
-                  </>
-                )}
+                <HiOutlineCheck className="h-4 w-4" />
+                <span>Verify &amp; Save Payout</span>
               </Button>
             </div>
           </form>

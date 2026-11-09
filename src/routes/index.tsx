@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { HiArrowLeft } from "react-icons/hi2";
+import { HiArrowLeft, HiOutlineArrowPath } from "react-icons/hi2";
 import { FaLinkedin } from "react-icons/fa6";
 import { openCookieSettings } from "@/components/fale/CookieConsent";
 import { setState, useApp, type Portal } from "@/lib/store";
@@ -638,48 +638,6 @@ function SignInPage() {
                 ))}
               </div>
 
-              {isSubmitting && (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "10px",
-                    width: "100%",
-                    padding: "10px 14px",
-                    marginTop: "6px",
-                    borderRadius: "12px",
-                    background: "rgba(255, 90, 0, 0.08)",
-                    border: "1px solid rgba(255, 90, 0, 0.25)",
-                    color: "var(--primary, #ff5a00)",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                  }}
-                >
-                  <svg
-                    style={{
-                      width: "16px",
-                      height: "16px",
-                      animation: "spin 0.8s linear infinite",
-                      flexShrink: 0,
-                    }}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                  >
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                      strokeDasharray="31.4 31.4"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <span>Verifying OTP, please wait…</span>
-                </div>
-              )}
-
               {otpErr && (
                 <div className="err" style={{ textAlign: "center", marginTop: 4 }}>
                   {otpErr}
@@ -694,26 +652,8 @@ function SignInPage() {
                 onClick={() => submitOtp(otpValues.join(""))}
               >
                 {isSubmitting ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-                    <svg
-                      style={{
-                        width: "16px",
-                        height: "16px",
-                        animation: "spin 0.8s linear infinite",
-                      }}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                    >
-                      <circle
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="3"
-                        strokeDasharray="31.4 31.4"
-                        strokeLinecap="round"
-                      />
-                    </svg>
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                    <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
                     <span>Verifying code…</span>
                   </span>
                 ) : (
