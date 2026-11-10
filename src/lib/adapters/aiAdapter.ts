@@ -749,10 +749,12 @@ export async function getDemandForecastWithAi(context?: {
   metro?: string;
   topSpecialties?: string[];
   surgeWeekendMultiplier?: number;
+  activeShifts?: number;
 }) {
   const metro = context?.metro || "Bengaluru & Chennai Metros";
   const specialties = (context?.topSpecialties || ["ICU Critical Care Nurses", "Dialysis Technicians", "Emergency Medical Officers"]).join(", ");
-  const prompt = `Region: ${metro}, Monitored Specialties: ${specialties}. Project upcoming 7-day locum shift demand, expected weekend surge percentage, and actionable deployment advice for hospital staffing coordinators. Strictly zero emojis.`;
+  const activeShifts = context?.activeShifts ?? 0;
+  const prompt = `Region: ${metro}, Monitored Specialties: ${specialties}, Active Locum Shifts: ${activeShifts}. Project upcoming 7-day locum shift demand, expected weekend surge percentage, and actionable deployment advice for hospital staffing coordinators. Strictly zero emojis.`;
   return executeAiTask({ task: "demand_forecast", prompt, metadata: context });
 }
 
@@ -1121,10 +1123,11 @@ function getLocalAiFallback(req: AiTaskRequest): AiTaskResponse {
   }
 
   if (req.task === "daily_brief") {
-    const pKyc = req.metadata?.pendingKyc ?? 4;
-    const pJobs = req.metadata?.pendingJobs ?? 3;
-    const pFac = req.metadata?.pendingFacilities ?? 2;
-    const brief = `• ${pKyc} candidate statutory KYC submissions awaiting state council verification check.\n• ${pJobs} hospital job and locum shift approvals pending compliance audit across partner facilities.\n• 0 active escrow disputes reported; 100% automated same-day payout settlement rate maintained.`;
+    const pKyc = req.metadata?.pendingKyc ?? 0;
+    const pJobs = req.metadata?.pendingJobs ?? 0;
+    const pFac = req.metadata?.pendingFacilities ?? 0;
+    const pDisputes = req.metadata?.disputes ?? 0;
+    const brief = `• ${pKyc} candidate statutory KYC submissions awaiting state council verification check.\n• ${pJobs} hospital job and locum shift approvals pending compliance audit across partner facilities.\n• ${pDisputes} active escrow disputes reported; 100% automated same-day payout settlement rate maintained.`;
     return {
       success: true,
       task: "daily_brief",
@@ -1135,7 +1138,16 @@ function getLocalAiFallback(req: AiTaskRequest): AiTaskResponse {
   }
 
   if (req.task === "demand_forecast") {
-    const forecast = "Anticipating a 35% weekend surge in Critical Care Nurses and Dialysis Technicians across South Bengaluru and Central Chennai. 14 locum shift broadcasts projected with recommended ₹450-₹600/hr escrow allocation.";
+    const specs = req.metadata?.topSpecialties && req.metadata.topSpecialties.length > 0
+      ? req.metadata.topSpecialties.slice(0, 2).join(" and ")
+      : "Emergency Specialists and Duty Clinicians";
+    const metro = req.metadata?.metro || "Regional Healthcare Hubs";
+    const shiftsCount = req.metadata?.activeShifts ?? 0;
+    const shiftText = shiftsCount > 0 ? `${shiftsCount} locum shift broadcasts active` : "upcoming shift deployments queued";
+    const multiplier = req.metadata?.surgeWeekendMultiplier
+      ? Math.round((req.metadata.surgeWeekendMultiplier - 1) * 100)
+      : 30;
+    const forecast = `Anticipating a ${multiplier}% weekend surge in ${specs} across ${metro}. ${shiftText} with automated escrow settlement and verified compliance.`;
     return {
       success: true,
       task: "demand_forecast",

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   HiOutlineDocumentCheck,
@@ -53,6 +53,24 @@ import {
 } from "@/lib/adapters/adminAdapter";
 import { BotMessageSquare } from "lucide-react";
 import { auditPostingComplianceWithAi } from "@/lib/adapters/aiAdapter";
+import {
+  type AllyAuditStatus,
+  cleanMarkdownAndJsonNoise,
+  extractJsonPayload,
+  readSessionAuditCache,
+  writeSessionAuditCache,
+} from "@/lib/allyAuditUtils";
+
+const ALLY_POSTING_CACHE_KEY = "fale_ally_posting_compliance_cache_v1";
+
+type AllyPostingComplianceResult = {
+  status: AllyAuditStatus;
+  isCompliant: boolean;
+  wageSentence: string;
+  hoursSentence: string;
+  recSentence: string;
+  verdict: string;
+};
 
 export const Route = createFileRoute("/admin/postings")({
   head: () => ({
@@ -75,105 +93,194 @@ function JobApprovalsAdmin() {
   const [apiPostings, setApiPostings] = useState<AdminJobApproval[]>([]);
   const [loading, setLoading] = useState(isApiEnabled);
 
-  // AI Posting Compliance Audit Desk State
-  const [aiComplianceResults, setAiComplianceResults] = useState<
-    Record<
-      string,
-      {
-        isCompliant: boolean;
-        status: "COMPLIANT" | "FLAGGED";
-        wageSentence: string;
-        hoursSentence: string;
-        recSentence: string;
-        verdict: string;
-      }
-    >
-  >({});
-  const [runningComplianceId, setRunningComplianceId] = useState<string | null>(null);
+  // Ally Posting Compliance Pre-Check State (session-cached + concurrency-limited live checks)
+  const getPostingCacheKey = useCallback((job: AdminJobApproval) => {
+    return `${job.id}:${job.title}:${job.compensation}:${job.hours || 0}`;
+  }, []);
 
-  const getPostingCompliance = (job: AdminJobApproval) => {
-    if (aiComplianceResults[job.id]) {
-      return aiComplianceResults[job.id];
-    }
-    const hours = job.hours || 8;
-    const isHoursExceeded = job.type === "shift" && hours > 12;
-    const isCompliant = !isHoursExceeded;
+  const [aiComplianceResults, setAiComplianceResults] = useState<Record<string, AllyPostingComplianceResult>>(() =>
+    readSessionAuditCache<AllyPostingComplianceResult>(ALLY_POSTING_CACHE_KEY)
+  );
+  const [runningComplianceIds, setRunningComplianceIds] = useState<Record<string, boolean>>({});
+  const inFlightComplianceKeysRef = useRef<Set<string>>(new Set());
+  const autoAuditedKeysRef = useRef<Set<string>>(new Set());
 
-    const wageSentence = `Remuneration package of ${job.compensation} at ${job.org} satisfies prevailing state healthcare minimum wage floors.`;
-    const hoursSentence = isHoursExceeded
-      ? `Duty duration of ${hours} hours violates the statutory maximum 12-hour continuous shift cap without mandatory clinical handover rest.`
-      : `Continuous duty duration of ${hours} hours adheres to statutory occupational safety limits and mandated clinical rest cycles.`;
-    const recSentence = isCompliant
-      ? `Posting fully satisfies Clinical Establishments Act and regulatory staffing criteria; approved for candidate broadcast.`
-      : `Posting flagged for duty duration safety infraction; employer roster adjustment required prior to publishing.`;
+  const getPostingCompliance = useCallback(
+    (job: AdminJobApproval): AllyPostingComplianceResult => {
+      const cacheKey = getPostingCacheKey(job);
+      const cached = aiComplianceResults[cacheKey] || aiComplianceResults[job.id];
+      if (cached) return cached;
 
-    const verdict = `${wageSentence} ${hoursSentence} ${recSentence}`;
+      return {
+        status: "PENDING",
+        isCompliant: false,
+        wageSentence: `Ally compliance pre-check queued for live remuneration and minimum wage verification.`,
+        hoursSentence: `Duty duration (${job.hours ? `${job.hours} hrs` : job.expOrHours || "standard roster"}) and clinical rest cycle checks will run automatically.`,
+        recSentence: `Compliance recommendation will appear once Ally completes its review.`,
+        verdict: "",
+      };
+    },
+    [aiComplianceResults, getPostingCacheKey]
+  );
 
-    return {
-      isCompliant,
-      status: isCompliant ? ("COMPLIANT" as const) : ("FLAGGED" as const),
-      wageSentence,
-      hoursSentence,
-      recSentence,
-      verdict,
-    };
-  };
+  const handleRunAiCompliance = useCallback(
+    async (job: AdminJobApproval, options?: { silent?: boolean }) => {
+      const cacheKey = getPostingCacheKey(job);
+      if (options?.silent && inFlightComplianceKeysRef.current.has(cacheKey)) return;
 
-  const handleRunAiCompliance = async (job: AdminJobApproval) => {
-    setRunningComplianceId(job.id);
-    try {
-      const res = await auditPostingComplianceWithAi(
-        job.title,
-        job.org,
-        job.dept,
-        job.compensation,
-        {
-          type: job.type,
-          hours: job.hours,
-          city: job.city,
-          description: job.description,
-          qualificationRequired: job.qualificationRequired,
-          salaryMin: job.salaryMin,
-          salaryMax: job.salaryMax,
-        }
-      );
+      inFlightComplianceKeysRef.current.add(cacheKey);
+      setRunningComplianceIds((prev) => ({ ...prev, [job.id]: true }));
+      try {
+        const res = await auditPostingComplianceWithAi(
+          job.title,
+          job.org,
+          job.dept,
+          job.compensation,
+          {
+            type: job.type,
+            hours: job.hours ?? 8,
+            city: job.city,
+            description: job.description || "",
+            qualificationRequired: job.qualificationRequired || "",
+            ...(job.salaryMin !== undefined ? { salaryMin: job.salaryMin } : {}),
+            ...(job.salaryMax !== undefined ? { salaryMax: job.salaryMax } : {}),
+          }
+        );
 
-      const text = res.response || res.content || "";
-      const sData = res.structuredData || {};
-      const lower = text.toLowerCase();
-      const isCompliant =
-        sData.isCompliant !== undefined
-          ? !!sData.isCompliant
-          : sData.status === "COMPLIANT" ||
-            (!lower.includes("violation") && !lower.includes("flagged") && !lower.includes("exceed"));
+        const rawText = res.response || res.content || "";
+        const embeddedJson = extractJsonPayload(rawText);
+        const sData: Record<string, any> = {
+          ...(embeddedJson || {}),
+          ...(res.structuredData || {}),
+        };
 
-      const sentences = text
-        .split(/(?<=[.?!])\s+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+        const rawStatus = String(sData["status"] || "").toUpperCase();
+        const plainProse = cleanMarkdownAndJsonNoise(
+          typeof sData["assessment"] === "string"
+            ? sData["assessment"]
+            : typeof sData["summary"] === "string"
+              ? sData["summary"]
+              : typeof sData["reasoning"] === "string"
+                ? sData["reasoning"]
+                : embeddedJson
+                  ? ""
+                  : rawText
+        );
+        const lower = plainProse.toLowerCase();
 
-      const wageSentence = sentences[0] || `Remuneration package of ${job.compensation} satisfies state clinical wage guidelines.`;
-      const hoursSentence = sentences[1] || `Duty duration complies with continuous shift safety standards.`;
-      const recSentence = sentences[2] || (isCompliant ? `Approved for candidate publication.` : `Employer roster adjustment required.`);
+        const isCompliant =
+          typeof sData["isCompliant"] === "boolean"
+            ? sData["isCompliant"]
+            : rawStatus === "COMPLIANT" || rawStatus === "VERIFIED" || rawStatus === "CLEAR"
+              ? true
+              : rawStatus.includes("FLAG") || rawStatus.includes("VIOLATION") || rawStatus.includes("INVALID")
+                ? false
+                : !lower.includes("violation") &&
+                  !lower.includes("flagged") &&
+                  !lower.includes("exceed") &&
+                  !lower.includes("discrepancy");
 
-      setAiComplianceResults((prev) => ({
-        ...prev,
-        [job.id]: {
+        const sentences = plainProse
+          .split(/(?<=[.?!])\s+/)
+          .map((s) => cleanMarkdownAndJsonNoise(s))
+          .filter(Boolean);
+
+        const wageSentence =
+          cleanMarkdownAndJsonNoise(typeof sData["wageAssessment"] === "string" ? sData["wageAssessment"] : "") ||
+          sentences[0] ||
+          `Remuneration package of ${job.compensation} at ${job.org} aligns with prevailing state clinical wage floors.`;
+
+        const hoursSentence =
+          cleanMarkdownAndJsonNoise(typeof sData["hoursAssessment"] === "string" ? sData["hoursAssessment"] : "") ||
+          sentences[1] ||
+          (isCompliant
+            ? `Continuous duty duration (${job.hours ? `${job.hours} hrs` : "standard roster"}) satisfies clinical rest and occupational safety caps.`
+            : `Duty duration (${job.hours ? `${job.hours} hrs` : "specified roster"}) requires compliance verification against continuous shift limits.`);
+
+        const recSentence =
+          cleanMarkdownAndJsonNoise(typeof sData["recommendation"] === "string" ? sData["recommendation"] : "") ||
+          sentences[2] ||
+          (isCompliant
+            ? `Posting cleared by Ally under statutory staffing criteria and ready for candidate broadcast.`
+            : `Compliance discrepancy flagged by Ally; review remuneration and roster hours before publishing.`);
+
+        const nextEntry: AllyPostingComplianceResult = {
+          status: isCompliant ? "VERIFIED" : "FLAGGED",
           isCompliant,
-          status: isCompliant ? "COMPLIANT" : "FLAGGED",
           wageSentence,
           hoursSentence,
           recSentence,
-          verdict: text,
-        },
-      }));
-      toast.success(`AI Compliance Audit completed for ${job.title}`);
-    } catch (err: any) {
-      console.warn("AI compliance audit failed:", err);
-      toast.error("Failed to run AI compliance audit");
-    } finally {
-      setRunningComplianceId(null);
-    }
+          verdict: plainProse,
+        };
+
+        setAiComplianceResults((prev) => {
+          const next = { ...prev, [cacheKey]: nextEntry };
+          writeSessionAuditCache(ALLY_POSTING_CACHE_KEY, next);
+          return next;
+        });
+
+        if (!options?.silent) {
+          toast.success(`Ally compliance audit completed for ${job.title}`);
+        }
+      } catch (err: any) {
+        console.warn("Ally compliance audit failed:", err);
+        const errorEntry: AllyPostingComplianceResult = {
+          status: "ERROR",
+          isCompliant: false,
+          wageSentence: `Ally could not reach the statutory compliance service right now.`,
+          hoursSentence: `Manual verification of wage floor and duty hours (${job.hours ? `${job.hours} hrs` : job.expOrHours}) is available below.`,
+          recSentence: `Click Re-audit with Ally to retry automated posting compliance screening.`,
+          verdict: "",
+        };
+        setAiComplianceResults((prev) => ({ ...prev, [cacheKey]: errorEntry }));
+        if (!options?.silent) {
+          toast.error("Failed to run Ally compliance audit");
+        }
+      } finally {
+        inFlightComplianceKeysRef.current.delete(cacheKey);
+        setRunningComplianceIds((prev) => {
+          const next = { ...prev };
+          delete next[job.id];
+          return next;
+        });
+      }
+    },
+    [getPostingCacheKey]
+  );
+
+  const renderAllyComplianceBadge = (job: AdminJobApproval) => {
+    const comp = getPostingCompliance(job);
+    const isAuditing = Boolean(runningComplianceIds[job.id]);
+    const isVerified = comp.status === "VERIFIED";
+    const isFlagged = comp.status === "FLAGGED" || comp.status === "ERROR";
+
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none whitespace-nowrap shrink-0",
+          isAuditing || isVerified
+            ? "bg-primary/10 text-primary border-primary/25"
+            : isFlagged
+              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
+              : "bg-muted/70 text-muted-foreground border-border/60"
+        )}
+      >
+        {isAuditing ? (
+          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+        ) : (
+          <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
+        )}
+        {isAuditing
+          ? "Ally Auditing..."
+          : isVerified
+            ? "Ally Pre-Check OK"
+            : comp.status === "ERROR"
+              ? "Ally Audit Retry"
+              : isFlagged
+                ? "Ally Flagged"
+                : "Ally Audit Queued"}
+      </span>
+    );
   };
 
   const fetchPostings = async () => {
@@ -292,6 +399,46 @@ function JobApprovalsAdmin() {
 
   const approvals = isApiEnabled ? apiPostings : s.jobApprovals;
 
+  // Performance-safe background Ally compliance verification (MAX_CONCURRENT = 2)
+  useEffect(() => {
+    const queue = approvals.filter((j) => {
+      if (j.status !== "pending") return false;
+      const key = getPostingCacheKey(j);
+      return !aiComplianceResults[key] && !autoAuditedKeysRef.current.has(key) && !inFlightComplianceKeysRef.current.has(key);
+    });
+    if (queue.length === 0) return;
+
+    let cancelled = false;
+    let cursor = 0;
+    const MAX_CONCURRENT = 2;
+
+    const worker = async () => {
+      while (!cancelled && cursor < queue.length) {
+        const nextItem = queue[cursor++];
+        if (!nextItem) break;
+        const key = getPostingCacheKey(nextItem);
+        autoAuditedKeysRef.current.add(key);
+        await handleRunAiCompliance(nextItem, { silent: true });
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(MAX_CONCURRENT, queue.length) }, () => worker());
+    void Promise.all(workers);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [approvals, aiComplianceResults, getPostingCacheKey, handleRunAiCompliance]);
+
+  // Prioritize Ally compliance verification immediately when Inspect opens
+  useEffect(() => {
+    if (!sheetOpen || !selectedJob) return;
+    const key = getPostingCacheKey(selectedJob);
+    if (!aiComplianceResults[key] && !inFlightComplianceKeysRef.current.has(key)) {
+      void handleRunAiCompliance(selectedJob, { silent: true });
+    }
+  }, [sheetOpen, selectedJob, aiComplianceResults, getPostingCacheKey, handleRunAiCompliance]);
+
   const filtered = approvals.filter((j) => {
     const matchesFilter = filter === "all" ? true : j.status === filter;
     const matchesSearch =
@@ -399,7 +546,7 @@ function JobApprovalsAdmin() {
       }
     >
       {/* Metric Strip (4 Cards) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
           <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
             <span>Pending Review</span>
@@ -442,7 +589,7 @@ function JobApprovalsAdmin() {
         {/* Controls Bar */}
         <div className="p-3.5 sm:p-4 border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 min-w-0">
           {/* Segmented Filter Pills */}
-          <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 w-fit">
+          <div className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 w-full md:w-fit overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {[
               { id: "pending" as const, label: "Pending Approval", count: pendingCount },
               { id: "approved" as const, label: "Live / Published", count: approvedCount },
@@ -454,7 +601,7 @@ function JobApprovalsAdmin() {
                 type="button"
                 onClick={() => setFilter(tab.id)}
                 className={cn(
-                  "px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5",
+                  "px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0",
                   filter === tab.id
                     ? "bg-card text-foreground shadow-xs border border-border/60"
                     : "text-muted-foreground hover:text-foreground"
@@ -481,7 +628,7 @@ function JobApprovalsAdmin() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search role, hospital, city..."
-              className="w-full h-9 pl-9 pr-4 rounded-xl border border-border bg-muted/30 focus:bg-card text-xs font-medium outline-none focus:ring-1 focus:ring-primary transition-all placeholder:text-muted-foreground"
+              className="w-full h-9 pl-9 pr-8 rounded-xl border border-border bg-muted/30 focus:bg-card text-xs font-medium outline-none focus:ring-1 focus:ring-primary transition-all placeholder:text-muted-foreground"
             />
             {search && (
               <button
@@ -610,23 +757,7 @@ function JobApprovalsAdmin() {
                           ? "Rejected"
                           : "Pending Approval"}
                       </span>
-                      {(() => {
-                        const comp = getPostingCompliance(item);
-                        const isClear = comp.isCompliant;
-                        return (
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none",
-                              isClear
-                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                                : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
-                            )}
-                          >
-                            <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
-                            {isClear ? "AI Compliant" : "AI Discrepancy"}
-                          </span>
-                        );
-                      })()}
+                      {renderAllyComplianceBadge(item)}
                     </div>
                   </TableCell>
 
@@ -689,15 +820,15 @@ function JobApprovalsAdmin() {
         </div>
 
         {/* Mobile Cards View (visible on mobile, hidden on md+) */}
-        <div className="md:hidden p-3.5 sm:p-4 space-y-4 bg-muted/20">
+        <div className="md:hidden p-3 sm:p-4 pb-24 sm:pb-4 space-y-3.5 bg-muted/20">
           {filtered.map((item) => (
             <div
               key={`m-post-${item.id}`}
-              className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 space-y-3.5 shadow-2xs transition-all overflow-hidden min-w-0"
+              className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 space-y-3.5 shadow-2xs transition-all overflow-hidden min-w-0"
             >
               {/* Status, Type & Timestamp */}
-              <div className="flex items-center justify-between gap-x-2 gap-y-1.5 flex-wrap min-w-0">
-                <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+              <div className="flex items-start justify-between gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                   {item.status === "approved" ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap shrink-0">
                       <HiOutlineCheckBadge className="h-3 w-3" /> Published
@@ -721,26 +852,10 @@ function JobApprovalsAdmin() {
                     {item.type === "shift" ? "Shift" : "Permanent"}
                   </span>
 
-                  {(() => {
-                    const comp = getPostingCompliance(item);
-                    const isClear = comp.isCompliant;
-                    return (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none whitespace-nowrap shrink-0",
-                          isClear
-                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                            : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
-                        )}
-                      >
-                        <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
-                        {isClear ? "AI Compliant" : "AI Flagged"}
-                      </span>
-                    );
-                  })()}
+                  {renderAllyComplianceBadge(item)}
                 </div>
 
-                <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1 whitespace-nowrap shrink-0 ml-auto">
+                <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1 whitespace-nowrap shrink-0 pt-0.5">
                   <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
                   <span>{item.submittedDate}</span>
                 </span>
@@ -750,7 +865,7 @@ function JobApprovalsAdmin() {
               <div className="space-y-1 min-w-0">
                 <h4
                   onClick={() => { setSelectedJob(item); setSheetOpen(true); }}
-                  className="font-bold text-foreground text-sm leading-snug cursor-pointer hover:text-primary transition-colors"
+                  className="font-bold text-foreground text-sm leading-snug cursor-pointer hover:text-primary transition-colors break-words"
                 >
                   {item.title}
                 </h4>
@@ -762,7 +877,7 @@ function JobApprovalsAdmin() {
               </div>
 
               {/* Institution Card Box */}
-              <div className="p-3.5 rounded-xl bg-muted/40 border border-border/50 text-xs space-y-2 min-w-0">
+              <div className="p-3 sm:p-3.5 rounded-xl bg-muted/40 border border-border/50 text-xs space-y-2 min-w-0">
                 <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Hiring Facility</div>
                 <div className="font-bold text-foreground text-xs flex items-center gap-1.5 min-w-0">
                   <HiOutlineBuildingOffice2 className="h-4 w-4 text-primary shrink-0" />
@@ -780,38 +895,33 @@ function JobApprovalsAdmin() {
               </div>
 
               {/* Compensation & Openings Box */}
-              <div className="p-3.5 rounded-xl bg-muted/20 border border-border/40 text-xs space-y-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
+              <div className="p-3 sm:p-3.5 rounded-xl bg-muted/20 border border-border/40 text-xs space-y-1 min-w-0">
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
                   <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Remuneration</span>
                   <span className="text-[11px] font-bold text-primary font-mono shrink-0">{item.openings} Open Positions</span>
                 </div>
-                <div className="text-sm font-bold text-foreground font-mono truncate">
+                <div className="text-sm font-bold text-foreground font-mono break-words">
                   {item.compensation}
                 </div>
               </div>
 
               {/* Action Buttons Row */}
-              <div className="flex items-center gap-2 pt-1 min-w-0">
+              <div className={cn("pt-0.5 min-w-0", item.status === "pending" ? "grid grid-cols-3 gap-1.5 sm:gap-2" : "flex items-center gap-2")}>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => { setSelectedJob(item); setSheetOpen(true); }}
-                  className="flex-1 h-9 text-xs font-bold rounded-xl border-border hover:bg-muted text-foreground cursor-pointer"
+                  className={cn(
+                    "h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl border-border hover:bg-muted text-foreground cursor-pointer gap-1 min-w-0",
+                    item.status !== "pending" && "flex-1"
+                  )}
                 >
-                  <HiOutlineEye className="h-3.5 w-3.5 mr-1 text-muted-foreground shrink-0" />
-                  <span>Inspect</span>
+                  <HiOutlineEye className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="truncate">Inspect</span>
                 </Button>
 
                 {item.status === "pending" && (
                   <>
-                    <Button
-                      size="sm"
-                      onClick={() => handleApprove(item.id, item.title)}
-                      className="flex-1 h-9 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1 transition-all active:scale-[0.98] cursor-pointer"
-                    >
-                      <HiCheck className="h-3.5 w-3.5 shrink-0" />
-                      <span>Approve</span>
-                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
@@ -819,9 +929,18 @@ function JobApprovalsAdmin() {
                         setSelectedJob(item);
                         setRejectModalOpen(true);
                       }}
-                      className="h-9 px-3 text-xs font-bold rounded-xl text-rose-600 border-rose-300 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                      className="h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl text-rose-600 border-rose-300 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 gap-1 cursor-pointer min-w-0"
                     >
-                      <HiOutlineXMark className="h-3.5 w-3.5" />
+                      <HiOutlineXMark className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">Reject</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleApprove(item.id, item.title)}
+                      className="h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1 transition-all active:scale-[0.98] cursor-pointer min-w-0"
+                    >
+                      <HiCheck className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">Approve</span>
                     </Button>
                   </>
                 )}
@@ -840,18 +959,18 @@ function JobApprovalsAdmin() {
 
       {/* Slide-over Inspection Sheet (Comprehensive Requirement Dossier) */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl p-0 flex flex-col h-full max-h-screen overflow-hidden gap-0">
-          <SheetHeader className="px-6 py-4.5 border-b border-border bg-card shrink-0 text-left">
-            <div className="flex items-start justify-between gap-4 pr-10">
+        <SheetContent side="right" className="w-full sm:max-w-2xl p-0 flex flex-col h-full max-h-[100dvh] overflow-hidden gap-0">
+          <SheetHeader className="px-4 sm:px-6 py-3.5 sm:py-4.5 border-b border-border bg-card shrink-0 text-left">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 sm:gap-4 pr-8">
               <div className="flex items-start gap-3 min-w-0">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary border border-primary/20 shrink-0 mt-0.5">
-                  <HiOutlineBriefcase className="h-5 w-5" />
+                <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-primary/10 text-primary border border-primary/20 shrink-0 mt-0.5">
+                  <HiOutlineBriefcase className="h-4 w-4 sm:h-5 sm:w-5" />
                 </span>
                 <div className="min-w-0">
-                  <SheetTitle className="text-base font-extrabold text-foreground leading-snug">
+                  <SheetTitle className="text-sm sm:text-base font-extrabold text-foreground leading-snug">
                     Requirement & Shift Clinical Audit
                   </SheetTitle>
-                  <SheetDescription className="text-xs text-muted-foreground mt-0.5">
+                  <SheetDescription className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
                     Screen wage floor, duty hours safety, and mandatory registrations
                   </SheetDescription>
                 </div>
@@ -859,7 +978,7 @@ function JobApprovalsAdmin() {
               {selectedJob && (
                 <span
                   className={cn(
-                    "px-3 py-1 rounded-full text-xs font-bold border shrink-0 inline-flex items-center gap-1.5 mt-0.5 shadow-2xs",
+                    "px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold border shrink-0 w-fit inline-flex items-center gap-1.5 mt-0.5 shadow-2xs whitespace-nowrap",
                     selectedJob.status === "approved"
                       ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                       : selectedJob.status === "rejected"
@@ -881,17 +1000,17 @@ function JobApprovalsAdmin() {
           </SheetHeader>
 
           {selectedJob && (
-            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-5 sm:p-6 space-y-5">
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 sm:p-6 space-y-4 sm:space-y-5">
               {/* 1. Job Requirement Overview */}
-              <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-4 shadow-xs">
-                <div className="flex items-start gap-4">
-                  <div className="grid h-16 w-16 place-items-center rounded-2xl bg-primary/10 border border-primary/20 text-primary font-black text-xl shrink-0">
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-4 shadow-xs">
+                <div className="flex flex-col xs:flex-row sm:flex-row items-start gap-3 sm:gap-4">
+                  <div className="grid h-14 w-14 sm:h-16 sm:w-16 place-items-center rounded-2xl bg-primary/10 border border-primary/20 text-primary font-black text-lg sm:text-xl shrink-0">
                     {selectedJob.org.split(" ").map(n => n[0]).slice(0, 2).join("")}
                   </div>
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-black text-foreground text-lg truncate">{selectedJob.title}</h3>
+                  <div className="flex-1 min-w-0 w-full">
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                      <h3 className="font-black text-foreground text-base sm:text-lg leading-snug break-words">{selectedJob.title}</h3>
                       <span className="rounded-md bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide border border-primary/20">
                         {selectedJob.dept}
                       </span>
@@ -900,9 +1019,9 @@ function JobApprovalsAdmin() {
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-muted-foreground">
                       <HiOutlineBuildingOffice2 className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <strong className="text-foreground">{selectedJob.org}</strong>
+                      <strong className="text-foreground break-words">{selectedJob.org}</strong>
                       <span>•</span>
                       <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
                       <span>{selectedJob.city}</span>
@@ -911,7 +1030,7 @@ function JobApprovalsAdmin() {
                     {/* Job Description */}
                     <div className="mt-3 pt-3 border-t border-border/60">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block mb-1">Clinical Scope & Responsibilities</span>
-                      <p className="text-xs text-foreground/90 font-medium leading-relaxed bg-muted/30 p-3 rounded-xl border border-border/40">
+                      <p className="text-xs text-foreground/90 font-medium leading-relaxed bg-muted/30 p-3 rounded-xl border border-border/40 break-words">
                         {selectedJob.description}
                       </p>
                     </div>
@@ -919,7 +1038,7 @@ function JobApprovalsAdmin() {
                 </div>
 
                 {/* Role Parameters Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-border/60 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-2.5 pt-2 border-t border-border/60 text-xs">
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">
                       {selectedJob.type === "shift" ? "Hourly Rate" : "Compensation"}
@@ -961,7 +1080,7 @@ function JobApprovalsAdmin() {
 
               {/* Dedicated Locum Shift Schedule, Hours & Floor Audit (When type === 'shift') */}
               {selectedJob.type === "shift" && (
-                <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:p-5 space-y-4 shadow-xs">
+                <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3.5 sm:p-5 space-y-4 shadow-xs">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <h4 className="font-extrabold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                       <HiOutlineClock className="h-4 w-4 text-primary" />
@@ -1048,100 +1167,111 @@ function JobApprovalsAdmin() {
                 </div>
               )}
 
-              {/* AI Statutory Posting Compliance Card */}
+              {/* Ally Statutory Posting Compliance Card */}
               {(() => {
                 const comp = getPostingCompliance(selectedJob);
-                const isAuditing = runningComplianceId === selectedJob.id;
-                const isClear = comp.isCompliant;
+                const isAuditing = Boolean(runningComplianceIds[selectedJob.id]);
+                const isVerified = comp.status === "VERIFIED";
+                const isFlagged = comp.status === "FLAGGED";
+                const isError = comp.status === "ERROR";
 
                 return (
-                  <div
-                    className={cn(
-                      "rounded-2xl border p-4 sm:p-5 space-y-3.5 transition-all shadow-2xs",
-                      isClear
-                        ? "border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10"
-                        : "border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10"
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className={cn(
-                            "grid h-8 w-8 place-items-center rounded-xl shrink-0",
-                            isClear
-                              ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                              : "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                  <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3.5 sm:p-5 space-y-3 transition-all shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
+                          {isAuditing ? (
+                            <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <BotMessageSquare className="h-4 w-4" />
                           )}
-                        >
-                          <BotMessageSquare className="h-4 w-4" />
                         </div>
-                        <div>
-                          <h5
-                            className={cn(
-                              "font-extrabold text-xs uppercase tracking-wider",
-                              isClear ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
-                            )}
-                          >
-                            AI Statutory Posting Compliance Verdict
+                        <div className="min-w-0">
+                          <h5 className="font-extrabold text-xs uppercase tracking-wider text-primary leading-snug">
+                            Ally Statutory Posting Pre-Check
                           </h5>
-                          <p className="text-[10px] text-muted-foreground">
-                            {isClear ? "Compliant · Ready to Broadcast" : "Compliance Discrepancy Flagged"} · {selectedJob.org}
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {isAuditing
+                              ? "Evaluating remuneration floor & continuous shift caps..."
+                              : isVerified
+                                ? "Compliant · Ready to Broadcast"
+                                : isFlagged
+                                  ? "Compliance Discrepancy Flagged"
+                                  : isError
+                                    ? "Audit unavailable · Retry recommended"
+                                    : "Queued for automated Ally screening"}{" "}
+                            · {selectedJob.org}
                           </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
                         <span
                           className={cn(
-                            "text-[10px] font-black px-2 py-0.5 rounded-full border",
-                            isClear
-                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
-                              : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                            "text-[10px] font-black px-2 py-0.5 rounded-full border inline-flex items-center gap-1 whitespace-nowrap",
+                            isAuditing || isVerified
+                              ? "bg-primary/10 text-primary border-primary/25"
+                              : isFlagged
+                                ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25"
+                                : isError
+                                  ? "bg-destructive/10 text-destructive border-destructive/25"
+                                  : "bg-muted text-muted-foreground border-border/60"
                           )}
                         >
-                          {isClear ? "CEA & Minimum Wage: OK" : "Labor Audit Flagged"}
+                          {isAuditing
+                            ? "Ally Auditing..."
+                            : isVerified
+                              ? "CEA & Wage Floor: OK"
+                              : isFlagged
+                                ? "Ally Audit Flagged"
+                                : isError
+                                  ? "Ally Audit Retry"
+                                  : "Ally Audit Queued"}
                         </span>
                         <Button
                           size="sm"
                           variant="outline"
                           disabled={isAuditing}
                           onClick={() => handleRunAiCompliance(selectedJob)}
-                          className={cn(
-                            "h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 cursor-pointer",
-                            isClear
-                              ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
-                              : "border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
-                          )}
+                          className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
                         >
-                          <BotMessageSquare className={cn("h-3.5 w-3.5", isAuditing && "animate-spin")} />
-                          <span>{isAuditing ? "Auditing with AI..." : "Re-audit with AI"}</span>
+                          {isAuditing ? (
+                            <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                          ) : (
+                            <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          <span>{isAuditing ? "Auditing with Ally..." : "Re-audit with Ally"}</span>
                         </Button>
                       </div>
                     </div>
 
-                    <div className="text-xs text-foreground/90 leading-relaxed space-y-2 pt-1 border-t border-border/40">
+                    <div className="max-h-36 sm:max-h-44 overflow-y-auto pr-1.5 [scrollbar-width:thin] text-xs text-foreground/90 leading-relaxed space-y-2 pt-2 border-t border-primary/15">
                       <p className="flex items-start gap-2">
                         <HiOutlineCheckBadge
-                          className={cn("h-4 w-4 shrink-0 mt-0.5", isClear ? "text-emerald-600" : "text-amber-600")}
+                          className={cn(
+                            "h-4 w-4 shrink-0 mt-0.5",
+                            isFlagged ? "text-amber-600 dark:text-amber-400" : isError ? "text-destructive" : "text-primary"
+                          )}
                         />
-                        <span>{comp.wageSentence}</span>
+                        <span className="break-words min-w-0">{comp.wageSentence}</span>
                       </p>
                       <p className="flex items-start gap-2">
                         <HiOutlineCheckBadge
-                          className={cn("h-4 w-4 shrink-0 mt-0.5", isClear ? "text-emerald-600" : "text-amber-600")}
+                          className={cn(
+                            "h-4 w-4 shrink-0 mt-0.5",
+                            isFlagged ? "text-amber-600 dark:text-amber-400" : isError ? "text-destructive" : "text-primary"
+                          )}
                         />
-                        <span>{comp.hoursSentence}</span>
+                        <span className="break-words min-w-0">{comp.hoursSentence}</span>
                       </p>
                       <p
                         className={cn(
-                          "text-[11px] font-semibold pt-1.5 border-t flex items-start gap-2",
-                          isClear
-                            ? "text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                            : "text-amber-700 dark:text-amber-300 border-amber-500/20"
+                          "text-[11px] font-semibold pt-2 border-t border-primary/15 flex items-start gap-2",
+                          isFlagged ? "text-amber-700 dark:text-amber-300" : isError ? "text-destructive" : "text-primary"
                         )}
                       >
                         <HiOutlineSparkles className="h-4 w-4 shrink-0 mt-0.5" />
-                        <span>{comp.recSentence}</span>
+                        <span className="break-words min-w-0">{comp.recSentence}</span>
                       </p>
                     </div>
                   </div>
@@ -1149,7 +1279,7 @@ function JobApprovalsAdmin() {
               })()}
 
               {/* 2. Statutory Wage Floor & Safety Standards */}
-              <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3.5 shadow-xs">
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3.5 shadow-xs">
                 <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                   <HiOutlineCurrencyRupee className="h-4 w-4 text-primary" />
                   <span>Statutory Wage Floor & Duty Hours Audit</span>
@@ -1177,7 +1307,7 @@ function JobApprovalsAdmin() {
               </div>
 
               {/* 3. Statutory Compliance Checklist */}
-              <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3.5 shadow-xs">
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3.5 shadow-xs">
                 <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                   <HiOutlineShieldCheck className="h-4 w-4 text-primary" />
                   <span>Statutory Gatekeeping Checklist</span>
@@ -1212,7 +1342,7 @@ function JobApprovalsAdmin() {
               </div>
 
               {/* 4. Audit Trail */}
-              <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3 shadow-xs">
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3 shadow-xs">
                 <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                   <HiOutlineClock className="h-4 w-4 text-primary" />
                   <span>Requirement Audit Trail</span>
@@ -1258,9 +1388,9 @@ function JobApprovalsAdmin() {
                   <Button
                     size="sm"
                     onClick={() => handleApprove(selectedJob.id, selectedJob.title)}
-                    className="bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1 rounded-xl shadow-none"
+                    className="flex-1 sm:flex-initial bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1 rounded-xl shadow-none whitespace-nowrap"
                   >
-                    <HiCheck className="h-3.5 w-3.5" /> Approve & Publish Live
+                    <HiCheck className="h-3.5 w-3.5 shrink-0" /> Approve & Publish Live
                   </Button>
                 </>
               )}

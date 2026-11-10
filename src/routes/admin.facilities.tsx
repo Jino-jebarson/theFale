@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from '@tanstack/react-router'
 import {
   HiOutlineBuildingOffice2,
@@ -26,6 +26,26 @@ import {
 } from "react-icons/hi2";
 import { BotMessageSquare } from "lucide-react";
 import { auditFacilityWithAi } from "@/lib/adapters/aiAdapter";
+import {
+  type AllyAuditStatus,
+  cleanMarkdownAndJsonNoise,
+  extractJsonPayload,
+  formatConfidencePercent,
+  readSessionAuditCache,
+  writeSessionAuditCache,
+} from "@/lib/allyAuditUtils";
+
+const ALLY_FACILITY_CACHE_KEY = "fale_ally_facility_audit_cache_v1";
+
+type AllyFacilityAuditResult = {
+  status: AllyAuditStatus;
+  isVerified: boolean;
+  confidence: number;
+  licenseSentence: string;
+  infraSentence: string;
+  recSentence: string;
+  verdict: string;
+};
 import { generateFacilityDocumentBlob } from "@/lib/clinicalDocumentPdf";
 import { toast } from "sonner";
 import { AdminLayout } from "@/components/fale/AdminLayout";
@@ -111,107 +131,197 @@ function FacilityKYCAdmin() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
 
-  // AI Institutional Accreditation Audit State
-  const [aiAuditResults, setAiAuditResults] = useState<
-    Record<
-      string,
-      {
-        isVerified: boolean;
-        status: "VERIFIED" | "FLAGGED";
-        confidence: number;
-        licenseSentence: string;
-        infraSentence: string;
-        recSentence: string;
-        verdict: string;
-      }
-    >
-  >({});
-  const [runningAuditId, setRunningAuditId] = useState<string | null>(null);
+  // Ally Institutional Accreditation Audit State (session-cached + concurrency-limited live checks)
+  const getFacilityAuditCacheKey = useCallback((facility: FacilityKYCItem) => {
+    return `${facility.id}:${facility.licenseNumber || ""}:${facility.accreditation || ""}:${facility.gst || ""}`;
+  }, []);
 
-  const getFacilityAiAudit = (facility: FacilityKYCItem) => {
-    if (aiAuditResults[facility.id]) {
-      return aiAuditResults[facility.id];
-    }
-    const lic = facility.licenseNumber || "";
-    const isFlagged = !lic || lic.toLowerCase().includes("pending") || lic.length < 5;
-    const isVerified = !isFlagged;
-    const confidence = isVerified ? 98.4 : 45.0;
+  const [aiAuditResults, setAiAuditResults] = useState<Record<string, AllyFacilityAuditResult>>(() =>
+    readSessionAuditCache<AllyFacilityAuditResult>(ALLY_FACILITY_CACHE_KEY)
+  );
+  const [runningAuditIds, setRunningAuditIds] = useState<Record<string, boolean>>({});
+  const inFlightAuditKeysRef = useRef<Set<string>>(new Set());
+  const autoAuditedKeysRef = useRef<Set<string>>(new Set());
 
-    const licenseSentence = isFlagged
-      ? `Clinical Establishment Act license (#${lic || "UNSPECIFIED"}) displays pending registration nomenclature under the State Health Directorate.`
-      : `Clinical Establishment Act license #${lic} conforms to state statutory healthcare establishment registry patterns for ${facility.city}.`;
-    const infraSentence = `Facility operates ${facility.beds} inpatient beds with ${facility.icuBeds || 0} designated ICU beds maintaining a compliant clinical critical-care capacity ratio under ${facility.accreditation} standards.`;
-    const recSentence = isVerified
-      ? `Hospital institutional credentials verified active; approved for FALE clinical shifts and locum deployments.`
-      : `Institutional accreditation flagged for certificate inspection; mandatory state license upload required.`;
+  const getFacilityAiAudit = useCallback(
+    (facility: FacilityKYCItem): AllyFacilityAuditResult => {
+      const cacheKey = getFacilityAuditCacheKey(facility);
+      const cached = aiAuditResults[cacheKey] || aiAuditResults[facility.id];
+      if (cached) return cached;
 
-    const verdict = `${licenseSentence} ${infraSentence} ${recSentence}`;
+      return {
+        status: "PENDING",
+        isVerified: false,
+        confidence: 0,
+        licenseSentence: `Ally accreditation audit queued for live statutory license review.`,
+        infraSentence: `CEA registration (${facility.licenseNumber || "Pending"}), ${facility.accreditation || "standard"} tier, and ICU capacity will be verified automatically by Ally.`,
+        recSentence: `Verification summary will appear once Ally completes its review.`,
+        verdict: "",
+      };
+    },
+    [aiAuditResults, getFacilityAuditCacheKey]
+  );
 
-    return {
-      isVerified,
-      status: isVerified ? ("VERIFIED" as const) : ("FLAGGED" as const),
-      confidence,
-      licenseSentence,
-      infraSentence,
-      recSentence,
-      verdict,
-    };
-  };
+  const handleRunAiAudit = useCallback(
+    async (facility: FacilityKYCItem, options?: { silent?: boolean }) => {
+      const cacheKey = getFacilityAuditCacheKey(facility);
+      if (options?.silent && inFlightAuditKeysRef.current.has(cacheKey)) return;
 
-  const handleRunAiAudit = async (facility: FacilityKYCItem) => {
-    setRunningAuditId(facility.id);
-    try {
-      const res = await auditFacilityWithAi(
-        facility.name,
-        facility.licenseNumber,
-        facility.accreditation,
-        facility.gst,
-        {
-          beds: facility.beds,
-          icuBeds: facility.icuBeds,
-          city: facility.city,
-          state: facility.state,
-        }
-      );
+      inFlightAuditKeysRef.current.add(cacheKey);
+      setRunningAuditIds((prev) => ({ ...prev, [facility.id]: true }));
+      try {
+        const res = await auditFacilityWithAi(
+          facility.name,
+          facility.licenseNumber,
+          facility.accreditation,
+          facility.gst,
+          {
+            beds: facility.beds,
+            icuBeds: facility.icuBeds ?? 0,
+            city: facility.city,
+            state: facility.state,
+          }
+        );
 
-      const text = res.response || res.content || "";
-      const sData = res.structuredData || {};
-      const lower = text.toLowerCase();
-      const isVerified =
-        sData.isVerified !== undefined
-          ? !!sData.isVerified
-          : sData.status === "VERIFIED" ||
-            (!lower.includes("flagged") && !lower.includes("discrepancy") && !lower.includes("pending") && !lower.includes("invalid"));
+        const rawText = res.response || res.content || "";
+        const embeddedJson = extractJsonPayload(rawText);
+        const sData: Record<string, any> = {
+          ...(embeddedJson || {}),
+          ...(res.structuredData || {}),
+        };
 
-      const confidence = typeof sData.confidence === "number" ? sData.confidence : (isVerified ? 98.4 : 45.0);
-      const sentences = text
-        .split(/(?<=[.?!])\s+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+        const rawStatus = String(sData["status"] || "").toUpperCase();
+        const plainProse = cleanMarkdownAndJsonNoise(
+          typeof sData["assessment"] === "string"
+            ? sData["assessment"]
+            : typeof sData["summary"] === "string"
+              ? sData["summary"]
+              : typeof sData["reasoning"] === "string"
+                ? sData["reasoning"]
+                : embeddedJson
+                  ? ""
+                  : rawText
+        );
+        const lower = plainProse.toLowerCase();
 
-      const licenseSentence = sentences[0] || `CEA License conforms to state healthcare establishment registry standards.`;
-      const infraSentence = sentences[1] || `Facility bed and critical-care ICU capacity adheres to accreditation tier norms.`;
-      const recSentence = sentences[2] || (isVerified ? `Hospital credentials verified active.` : `Document inspection required.`);
+        const isVerified =
+          typeof sData["isVerified"] === "boolean"
+            ? sData["isVerified"]
+            : typeof sData["formatValid"] === "boolean"
+              ? sData["formatValid"]
+              : rawStatus === "VERIFIED"
+                ? true
+                : rawStatus.includes("FLAG") || rawStatus.includes("INVALID") || rawStatus.includes("PENDING")
+                  ? false
+                  : !lower.includes("flagged") &&
+                    !lower.includes("discrepancy") &&
+                    !lower.includes("pending") &&
+                    !lower.includes("invalid");
 
-      setAiAuditResults((prev) => ({
-        ...prev,
-        [facility.id]: {
-          isVerified,
+        const confidence = formatConfidencePercent(sData["confidence"], !isVerified);
+        const sentences = plainProse
+          .split(/(?<=[.?!])\s+/)
+          .map((s) => cleanMarkdownAndJsonNoise(s))
+          .filter(Boolean);
+
+        const licenseSentence =
+          cleanMarkdownAndJsonNoise(typeof sData["licenseAssessment"] === "string" ? sData["licenseAssessment"] : "") ||
+          sentences[0] ||
+          (isVerified
+            ? `CEA License #${facility.licenseNumber} conforms to state healthcare establishment registry standards.`
+            : `CEA License #${facility.licenseNumber || "Missing"} requires statutory compliance verification.`);
+
+        const infraSentence =
+          cleanMarkdownAndJsonNoise(typeof sData["infraAssessment"] === "string" ? sData["infraAssessment"] : "") ||
+          sentences[1] ||
+          `Facility bed capacity (${facility.beds} beds, ${facility.icuBeds || 0} ICU) aligns with ${facility.accreditation || "clinical"} accreditation tier norms.`;
+
+        const recSentence =
+          cleanMarkdownAndJsonNoise(typeof sData["recommendation"] === "string" ? sData["recommendation"] : "") ||
+          sentences[2] ||
+          (isVerified
+            ? `Hospital credentials verified active and ready for administrator approval.`
+            : `Manual inspection of CEA license and statutory certificates recommended before approval.`);
+
+        const nextEntry: AllyFacilityAuditResult = {
           status: isVerified ? "VERIFIED" : "FLAGGED",
+          isVerified,
           confidence,
           licenseSentence,
           infraSentence,
           recSentence,
-          verdict: text,
-        },
-      }));
-      toast.success(`AI Accreditation Audit completed for ${facility.name}`);
-    } catch (err: any) {
-      console.warn("AI audit failed:", err);
-      toast.error("Failed to run AI accreditation audit");
-    } finally {
-      setRunningAuditId(null);
-    }
+          verdict: plainProse,
+        };
+
+        setAiAuditResults((prev) => {
+          const next = { ...prev, [cacheKey]: nextEntry };
+          writeSessionAuditCache(ALLY_FACILITY_CACHE_KEY, next);
+          return next;
+        });
+
+        if (!options?.silent) {
+          toast.success(`Ally accreditation audit completed for ${facility.name}`);
+        }
+      } catch (err: any) {
+        console.warn("Ally audit failed:", err);
+        const errorEntry: AllyFacilityAuditResult = {
+          status: "ERROR",
+          isVerified: false,
+          confidence: 0,
+          licenseSentence: `Ally could not reach the statutory audit service right now.`,
+          infraSentence: `Manual inspection of uploaded CEA license and accreditation documents is available below.`,
+          recSentence: `Click Re-audit with Ally to retry automated statutory verification.`,
+          verdict: "",
+        };
+        setAiAuditResults((prev) => ({ ...prev, [cacheKey]: errorEntry }));
+        if (!options?.silent) {
+          toast.error("Failed to run Ally accreditation audit");
+        }
+      } finally {
+        inFlightAuditKeysRef.current.delete(cacheKey);
+        setRunningAuditIds((prev) => {
+          const next = { ...prev };
+          delete next[facility.id];
+          return next;
+        });
+      }
+    },
+    [getFacilityAuditCacheKey]
+  );
+
+  const renderAllyQueueBadge = (facility: FacilityKYCItem) => {
+    const audit = getFacilityAiAudit(facility);
+    const isAuditing = Boolean(runningAuditIds[facility.id]);
+    const isVerified = audit.status === "VERIFIED";
+    const isFlagged = audit.status === "FLAGGED" || audit.status === "ERROR";
+
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none whitespace-nowrap",
+          isAuditing || isVerified
+            ? "bg-primary/10 text-primary border-primary/25"
+            : isFlagged
+              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
+              : "bg-muted/70 text-muted-foreground border-border/60"
+        )}
+      >
+        {isAuditing ? (
+          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+        ) : (
+          <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
+        )}
+        {isAuditing
+          ? "Ally Auditing..."
+          : isVerified
+            ? "Ally Pre-Check Verified"
+            : audit.status === "ERROR"
+              ? "Ally Audit Retry"
+              : isFlagged
+                ? "Ally Flagged"
+                : "Ally Audit Queued"}
+      </span>
+    );
   };
 
   const getPdfBlobForDoc = async (doc: any): Promise<Blob> => {
@@ -408,6 +518,46 @@ function FacilityKYCAdmin() {
 
   const facilities = isApiEnabled ? apiFacilities : s.facilityKYC;
 
+  // Performance-safe background Ally verification: process pending facilities with bounded concurrency (MAX_CONCURRENT = 2)
+  useEffect(() => {
+    const queue = facilities.filter((f) => {
+      if (f.status !== "pending") return false;
+      const key = getFacilityAuditCacheKey(f);
+      return !aiAuditResults[key] && !autoAuditedKeysRef.current.has(key) && !inFlightAuditKeysRef.current.has(key);
+    });
+    if (queue.length === 0) return;
+
+    let cancelled = false;
+    let cursor = 0;
+    const MAX_CONCURRENT = 2;
+
+    const worker = async () => {
+      while (!cancelled && cursor < queue.length) {
+        const nextItem = queue[cursor++];
+        if (!nextItem) break;
+        const key = getFacilityAuditCacheKey(nextItem);
+        autoAuditedKeysRef.current.add(key);
+        await handleRunAiAudit(nextItem, { silent: true });
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(MAX_CONCURRENT, queue.length) }, () => worker());
+    void Promise.all(workers);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [facilities, aiAuditResults, getFacilityAuditCacheKey, handleRunAiAudit]);
+
+  // Prioritize Ally verification immediately when an admin opens Inspect for a facility
+  useEffect(() => {
+    if (!sheetOpen || !selectedFacility) return;
+    const key = getFacilityAuditCacheKey(selectedFacility);
+    if (!aiAuditResults[key] && !inFlightAuditKeysRef.current.has(key)) {
+      void handleRunAiAudit(selectedFacility, { silent: true });
+    }
+  }, [sheetOpen, selectedFacility, aiAuditResults, getFacilityAuditCacheKey, handleRunAiAudit]);
+
   const filtered = facilities.filter((f) => {
     const matchesFilter = filter === "all" ? true : f.status === filter;
     const matchesSearch =
@@ -518,7 +668,7 @@ function FacilityKYCAdmin() {
       }
     >
       {/* Metric Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
           <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
             <span>Pending Review</span>
@@ -561,7 +711,7 @@ function FacilityKYCAdmin() {
         {/* Controls Bar */}
         <div className="p-3.5 sm:p-4 border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 min-w-0">
           {/* Segmented Filter Pills */}
-          <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 w-fit">
+          <div className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 w-full md:w-fit overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {[
               { id: "pending" as const, label: "Pending Review", count: pendingCount },
               { id: "verified" as const, label: "Verified", count: verifiedCount },
@@ -573,7 +723,7 @@ function FacilityKYCAdmin() {
                 type="button"
                 onClick={() => setFilter(tab.id)}
                 className={cn(
-                  "px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5",
+                  "px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0",
                   filter === tab.id
                     ? "bg-card text-foreground shadow-xs border border-border/60"
                     : "text-muted-foreground hover:text-foreground"
@@ -724,23 +874,7 @@ function FacilityKYCAdmin() {
                             ? "Rejected"
                             : "Pending"}
                         </span>
-                        {(() => {
-                          const audit = getFacilityAiAudit(item);
-                          const isClear = audit.isVerified;
-                          return (
-                            <span
-                              className={cn(
-                                "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none",
-                                isClear
-                                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                                  : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
-                              )}
-                            >
-                              <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
-                              {isClear ? "AI Pre-Check OK" : "AI Flagged"}
-                            </span>
-                          );
-                        })()}
+                        {renderAllyQueueBadge(item)}
                       </div>
                     </TableCell>
 
@@ -804,107 +938,93 @@ function FacilityKYCAdmin() {
         </div>
 
         {/* Mobile Cards View (visible on mobile, hidden on md+) */}
-        <div className="md:hidden p-3.5 sm:p-4 space-y-4 bg-muted/20">
+        <div className="md:hidden p-3 sm:p-4 pb-24 sm:pb-4 space-y-3.5 bg-muted/20">
           {filtered.map((item) => {
             const initials = item.name.split(" ").map((x) => x[0]).slice(0, 2).join("");
             return (
               <div
                 key={`m-fac-${item.id}`}
-                className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 space-y-4 shadow-2xs transition-all"
+                className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 space-y-3.5 shadow-2xs transition-all overflow-hidden"
               >
                 {/* Status & Timestamp */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                     {item.status === "verified" ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
                         <HiOutlineCheckBadge className="h-3.5 w-3.5" /> Verified
                       </span>
                     ) : item.status === "rejected" ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2.5 py-1 text-[10px] font-bold text-rose-700 dark:text-rose-400 border border-rose-500/20">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2.5 py-1 text-[10px] font-bold text-rose-700 dark:text-rose-400 border border-rose-500/20 whitespace-nowrap">
                         <HiOutlineXMark className="h-3.5 w-3.5" /> Rejected
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary border border-primary/20">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary border border-primary/20 whitespace-nowrap">
                         Pending Verification
                       </span>
                     )}
 
-                    {(() => {
-                      const audit = getFacilityAiAudit(item);
-                      const isClear = audit.isVerified;
-                      return (
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none",
-                            isClear
-                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                              : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
-                          )}
-                        >
-                          <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
-                          {isClear ? "AI Pre-Check OK" : "AI Flagged"}
-                        </span>
-                      );
-                    })()}
+                    {renderAllyQueueBadge(item)}
                   </div>
 
-                  <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
-                    <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground/70" />
+                  <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1 whitespace-nowrap shrink-0 pt-0.5">
+                    <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
                     {item.submittedDate}
                   </span>
                 </div>
 
                 {/* Facility Header */}
-                <div className="flex items-start gap-3.5 pt-0.5">
-                  <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary font-bold text-xs shrink-0 border border-primary/20 mt-0.5">
+                <div className="flex items-start gap-3 pt-0.5">
+                  <div className="grid h-10 w-10 sm:h-11 sm:w-11 place-items-center rounded-xl bg-primary/10 text-primary font-bold text-xs shrink-0 border border-primary/20 mt-0.5">
                     {initials}
                   </div>
                   <div className="min-w-0 flex-1">
                     <h4
                       onClick={() => { setSelectedFacility(item); setSheetOpen(true); }}
-                      className="font-bold text-foreground text-sm leading-snug cursor-pointer hover:text-primary transition-colors"
+                      className="font-bold text-foreground text-sm leading-snug cursor-pointer hover:text-primary transition-colors break-words"
                     >
                       {item.name}
                     </h4>
                     <p className="text-xs text-muted-foreground mt-0.5">{item.type}</p>
-                    <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2 flex-wrap">
+                    <div className="text-xs text-muted-foreground mt-1.5 flex items-center gap-x-2 gap-y-1 flex-wrap">
                       <span className="flex items-center gap-1 font-medium text-foreground/80">
-                        <HiOutlineMapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                        <HiOutlineMapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         {item.city}, {item.state}
                       </span>
                       <span className="h-1 w-1 rounded-full bg-border" />
-                      <span className="font-mono text-muted-foreground">{item.beds} Inpatient Beds</span>
+                      <span className="font-mono text-muted-foreground whitespace-nowrap">{item.beds} Inpatient Beds</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Accreditation & License Box */}
-                <div className="p-3.5 rounded-xl bg-muted/40 border border-border/50 text-xs space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
+                <div className="p-3 sm:p-3.5 rounded-xl bg-muted/40 border border-border/50 text-xs space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
                     <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Accreditation Level</span>
-                    <span className="font-bold text-foreground text-xs">{item.accreditation}</span>
+                    <span className="font-bold text-foreground text-xs text-right">{item.accreditation || "State Registered"}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border/40 font-mono text-[11px]">
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-muted-foreground text-[10px] block font-sans font-medium mb-0.5">NABH ID</span>
-                      <span className="font-bold text-primary">{item.nabhNumber}</span>
+                      <span className={cn("break-all", item.nabhNumber ? "font-bold text-primary" : "font-sans font-medium text-muted-foreground")}>
+                        {item.nabhNumber || "Not Provided"}
+                      </span>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right min-w-0">
                       <span className="text-muted-foreground text-[10px] block font-sans font-medium mb-0.5">CEA License</span>
-                      <span className="font-semibold text-foreground">{item.licenseNumber}</span>
+                      <span className="font-semibold text-foreground break-all">{item.licenseNumber || "Pending"}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Contact & Attached Certificate Card */}
-                <div className="p-3.5 rounded-xl bg-muted/20 border border-border/40 space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between gap-2">
+                <div className="p-3 sm:p-3.5 rounded-xl bg-muted/20 border border-border/40 space-y-2.5 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
                     <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Authorized Contact</span>
-                    <a href={`tel:${item.contactPhone}`} className="text-primary font-semibold hover:underline flex items-center gap-1 shrink-0">
-                      <HiOutlinePhone className="h-3.5 w-3.5" /> {item.contactPhone}
+                    <a href={`tel:${item.contactPhone}`} className="text-primary font-semibold hover:underline flex items-center gap-1 shrink-0 whitespace-nowrap">
+                      <HiOutlinePhone className="h-3.5 w-3.5 shrink-0" /> {item.contactPhone}
                     </a>
                   </div>
-                  <div className="font-semibold text-foreground text-xs leading-snug">
+                  <div className="font-semibold text-foreground text-xs leading-snug break-words">
                     {item.contactPerson}
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/40">
@@ -921,14 +1041,18 @@ function FacilityKYCAdmin() {
                 </div>
 
                 {/* Action Buttons Row */}
-                <div className="flex items-center gap-2 pt-1">
+                <div className={cn("pt-0.5", item.status === "pending" ? "grid grid-cols-3 gap-1.5 sm:gap-2" : "flex items-center gap-2")}>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => { setSelectedFacility(item); setSheetOpen(true); }}
-                    className="flex-1 h-9 text-xs font-bold rounded-xl border-border/80 hover:bg-muted shadow-none cursor-pointer"
+                    className={cn(
+                      "h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl border-border/80 hover:bg-muted shadow-none cursor-pointer gap-1 min-w-0",
+                      item.status !== "pending" && "flex-1"
+                    )}
                   >
-                    <HiOutlineEye className="h-4 w-4 mr-1 text-muted-foreground" /> Inspect
+                    <HiOutlineEye className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="truncate">Inspect</span>
                   </Button>
 
                   {item.status === "pending" && (
@@ -940,17 +1064,19 @@ function FacilityKYCAdmin() {
                           setSelectedFacility(item);
                           setRejectModalOpen(true);
                         }}
-                        className="h-9 px-3 text-xs font-bold rounded-xl text-rose-600 border-rose-300 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 gap-1 cursor-pointer"
+                        className="h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl text-rose-600 border-rose-300 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 gap-1 cursor-pointer min-w-0"
                       >
-                        <HiOutlineXMark className="h-4 w-4" /> Reject
+                        <HiOutlineXMark className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">Reject</span>
                       </Button>
 
                       <Button
                         size="sm"
                         onClick={() => handleVerify(item.id, item.name)}
-                        className="flex-1 h-9 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1 shadow-none transition-all active:scale-[0.98] cursor-pointer"
+                        className="h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1 shadow-none transition-all active:scale-[0.98] cursor-pointer min-w-0"
                       >
-                        <HiCheck className="h-4 w-4" /> Verify
+                        <HiCheck className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">Verify</span>
                       </Button>
                     </>
                   )}
@@ -970,18 +1096,18 @@ function FacilityKYCAdmin() {
 
       {/* Slide-over Inspection Sheet (Comprehensive Hospital & Facility Dossier) */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl p-0 flex flex-col h-full max-h-screen overflow-hidden gap-0">
-          <SheetHeader className="px-6 py-4.5 border-b border-border bg-card shrink-0 text-left">
-            <div className="flex items-start justify-between gap-4 pr-10">
+        <SheetContent side="right" className="w-full sm:max-w-2xl p-0 flex flex-col h-full max-h-[100dvh] overflow-hidden gap-0">
+          <SheetHeader className="px-4 sm:px-6 py-3.5 sm:py-4.5 border-b border-border bg-card shrink-0 text-left">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 sm:gap-4 pr-8">
               <div className="flex items-start gap-3 min-w-0">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary border border-primary/20 shrink-0 mt-0.5">
-                  <HiOutlineBuildingOffice2 className="h-5 w-5" />
+                <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-primary/10 text-primary border border-primary/20 shrink-0 mt-0.5">
+                  <HiOutlineBuildingOffice2 className="h-4 w-4 sm:h-5 sm:w-5" />
                 </span>
                 <div className="min-w-0">
-                  <SheetTitle className="text-base font-extrabold text-foreground leading-snug">
+                  <SheetTitle className="text-sm sm:text-base font-extrabold text-foreground leading-snug">
                     Hospital Accreditation Dossier
                   </SheetTitle>
-                  <SheetDescription className="text-xs text-muted-foreground mt-0.5">
+                  <SheetDescription className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
                     Statutory healthcare establishment audit, clinical licensing, and facility profile
                   </SheetDescription>
                 </div>
@@ -989,7 +1115,7 @@ function FacilityKYCAdmin() {
               {selectedFacility && (
                 <span
                   className={cn(
-                    "px-3 py-1 rounded-full text-xs font-bold border shrink-0 inline-flex items-center gap-1.5 mt-0.5 shadow-2xs",
+                    "px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold border shrink-0 w-fit inline-flex items-center gap-1.5 mt-0.5 shadow-2xs whitespace-nowrap",
                     selectedFacility.status === "verified"
                       ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                       : selectedFacility.status === "rejected"
@@ -1013,26 +1139,26 @@ function FacilityKYCAdmin() {
           {selectedFacility && (() => {
             const facilityDocs = getFacilityDocuments(selectedFacility);
             return (
-              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-5 sm:p-6 space-y-5">
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 sm:p-6 space-y-4 sm:space-y-5">
                 
                 {/* 1. Facility Identity, Branding & Description */}
-                <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-4 shadow-xs">
-                  <div className="flex items-start gap-4">
+                <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-4 shadow-xs">
+                  <div className="flex flex-col xs:flex-row sm:flex-row items-start gap-3 sm:gap-4">
                     {selectedFacility.logoUrl ? (
                       <img
                         src={selectedFacility.logoUrl}
                         alt={selectedFacility.name}
-                        className="h-16 w-16 rounded-2xl object-cover border border-border shadow-xs shrink-0"
+                        className="h-14 w-14 sm:h-16 sm:w-16 rounded-2xl object-cover border border-border shadow-xs shrink-0"
                       />
                     ) : (
-                      <div className="grid h-16 w-16 place-items-center rounded-2xl bg-primary/10 border border-primary/20 text-primary font-black text-xl shrink-0">
+                      <div className="grid h-14 w-14 sm:h-16 sm:w-16 place-items-center rounded-2xl bg-primary/10 border border-primary/20 text-primary font-black text-lg sm:text-xl shrink-0">
                         {selectedFacility.name.split(" ").map(n => n[0]).slice(0, 2).join("")}
                       </div>
                     )}
 
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-black text-foreground text-lg truncate">{selectedFacility.name}</h3>
+                    <div className="flex-1 min-w-0 w-full">
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                        <h3 className="font-black text-foreground text-base sm:text-lg leading-snug break-words">{selectedFacility.name}</h3>
                         <span className="rounded-md bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide border border-primary/20">
                           {selectedFacility.type}
                         </span>
@@ -1072,7 +1198,7 @@ function FacilityKYCAdmin() {
                   </div>
 
                   {/* Infrastructure Metric Strip (Beds & Capacity) */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-border/60 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-2.5 pt-2 border-t border-border/60 text-xs">
                     <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">Inpatient Beds</span>
                       <strong className="text-foreground text-xs font-bold">{selectedFacility.beds} Beds</strong>
@@ -1103,100 +1229,113 @@ function FacilityKYCAdmin() {
                   )}
                 </div>
 
-                {/* AI Institutional Accreditation & CEA Pre-Check Card */}
+                {/* Ally Institutional Accreditation & CEA Pre-Check Card */}
                 {(() => {
                   const audit = getFacilityAiAudit(selectedFacility);
-                  const isAuditing = runningAuditId === selectedFacility.id;
-                  const isClear = audit.isVerified;
+                  const isAuditing = Boolean(runningAuditIds[selectedFacility.id]);
+                  const isVerified = audit.status === "VERIFIED";
+                  const isFlagged = audit.status === "FLAGGED";
+                  const isError = audit.status === "ERROR";
 
                   return (
-                    <div
-                      className={cn(
-                        "rounded-2xl border p-4 sm:p-5 space-y-3.5 transition-all shadow-2xs",
-                        isClear
-                          ? "border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10"
-                          : "border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10"
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className={cn(
-                              "grid h-8 w-8 place-items-center rounded-xl shrink-0",
-                              isClear
-                                ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                                : "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                    <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3.5 sm:p-5 space-y-3 transition-all shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
+                            {isAuditing ? (
+                              <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <BotMessageSquare className="h-4 w-4" />
                             )}
-                          >
-                            <BotMessageSquare className="h-4 w-4" />
                           </div>
-                          <div>
-                            <h5
-                              className={cn(
-                                "font-extrabold text-xs uppercase tracking-wider",
-                                isClear ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
-                              )}
-                            >
-                              AI Institutional Accreditation Verdict
+                          <div className="min-w-0">
+                            <h5 className="font-extrabold text-xs uppercase tracking-wider text-primary leading-snug">
+                              Ally Institutional Pre-Check
                             </h5>
-                            <p className="text-[10px] text-muted-foreground">
-                              {isClear ? "Institutional Grade · Verified Active" : "Accreditation Discrepancy Flagged"} · {selectedFacility.city}
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {isAuditing
+                                ? "Running statutory CEA & accreditation checks..."
+                                : isVerified
+                                  ? "Institutional Grade · Verified Active"
+                                  : isFlagged
+                                    ? "Accreditation Discrepancy Flagged"
+                                    : isError
+                                      ? "Audit unavailable · Retry recommended"
+                                      : "Queued for automated Ally review"}{" "}
+                              · {selectedFacility.city}
                             </p>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
                           <span
                             className={cn(
-                              "text-[10px] font-black px-2 py-0.5 rounded-full border",
-                              isClear
-                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
-                                : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                              "text-[10px] font-black px-2 py-0.5 rounded-full border inline-flex items-center gap-1 whitespace-nowrap",
+                              isAuditing
+                                ? "bg-primary/10 text-primary border-primary/25"
+                                : isVerified
+                                  ? "bg-primary/10 text-primary border-primary/25"
+                                  : isFlagged
+                                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25"
+                                    : isError
+                                      ? "bg-destructive/10 text-destructive border-destructive/25"
+                                      : "bg-muted text-muted-foreground border-border/60"
                             )}
                           >
-                            Pre-Check: {audit.confidence.toFixed(1)}%
+                            {isAuditing
+                              ? "Ally Auditing..."
+                              : isVerified
+                                ? `Ally Verified · ${audit.confidence.toFixed(1)}%`
+                                : isFlagged
+                                  ? `Ally Flagged · ${audit.confidence.toFixed(1)}%`
+                                  : isError
+                                    ? "Ally Audit Retry"
+                                    : "Ally Audit Queued"}
                           </span>
                           <Button
                             size="sm"
                             variant="outline"
                             disabled={isAuditing}
                             onClick={() => handleRunAiAudit(selectedFacility)}
-                            className={cn(
-                              "h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 cursor-pointer",
-                              isClear
-                                ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
-                                : "border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
-                            )}
+                            className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
                           >
-                            <BotMessageSquare className={cn("h-3.5 w-3.5", isAuditing && "animate-spin")} />
-                            <span>{isAuditing ? "Auditing with AI..." : "Re-audit with AI"}</span>
+                            {isAuditing ? (
+                              <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                            ) : (
+                              <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
+                            )}
+                            <span>{isAuditing ? "Auditing with Ally..." : "Re-audit with Ally"}</span>
                           </Button>
                         </div>
                       </div>
 
-                      <div className="text-xs text-foreground/90 leading-relaxed space-y-2 pt-1 border-t border-border/40">
+                      <div className="max-h-36 sm:max-h-44 overflow-y-auto pr-1.5 [scrollbar-width:thin] text-xs text-foreground/90 leading-relaxed space-y-2 pt-2 border-t border-primary/15">
                         <p className="flex items-start gap-2">
                           <HiOutlineCheckBadge
-                            className={cn("h-4 w-4 shrink-0 mt-0.5", isClear ? "text-emerald-600" : "text-amber-600")}
+                            className={cn(
+                              "h-4 w-4 shrink-0 mt-0.5",
+                              isFlagged ? "text-amber-600 dark:text-amber-400" : isError ? "text-destructive" : "text-primary"
+                            )}
                           />
-                          <span>{audit.licenseSentence}</span>
+                          <span className="break-words min-w-0">{audit.licenseSentence}</span>
                         </p>
                         <p className="flex items-start gap-2">
                           <HiOutlineCheckBadge
-                            className={cn("h-4 w-4 shrink-0 mt-0.5", isClear ? "text-emerald-600" : "text-amber-600")}
+                            className={cn(
+                              "h-4 w-4 shrink-0 mt-0.5",
+                              isFlagged ? "text-amber-600 dark:text-amber-400" : isError ? "text-destructive" : "text-primary"
+                            )}
                           />
-                          <span>{audit.infraSentence}</span>
+                          <span className="break-words min-w-0">{audit.infraSentence}</span>
                         </p>
                         <p
                           className={cn(
-                            "text-[11px] font-semibold pt-1.5 border-t flex items-start gap-2",
-                            isClear
-                              ? "text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                              : "text-amber-700 dark:text-amber-300 border-amber-500/20"
+                            "text-[11px] font-semibold pt-2 border-t border-primary/15 flex items-start gap-2",
+                            isFlagged ? "text-amber-700 dark:text-amber-300" : isError ? "text-destructive" : "text-primary"
                           )}
                         >
                           <HiOutlineSparkles className="h-4 w-4 shrink-0 mt-0.5" />
-                          <span>{audit.recSentence}</span>
+                          <span className="break-words min-w-0">{audit.recSentence}</span>
                         </p>
                       </div>
                     </div>
@@ -1204,8 +1343,8 @@ function FacilityKYCAdmin() {
                 })()}
 
                 {/* 2. Statutory Accreditation & Licensing Audit */}
-                <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3.5 shadow-xs">
-                  <div className="flex items-center justify-between">
+                <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3.5 shadow-xs">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                       <HiOutlineShieldCheck className="h-4 w-4 text-primary" />
                       <span>Statutory Accreditations & Licenses</span>
@@ -1259,10 +1398,10 @@ function FacilityKYCAdmin() {
                 </div>
 
                 {/* 3. UPLOADED VERIFICATION DOCUMENTS (Dossier) */}
-                <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-4 shadow-xs">
-                  <div className="flex items-center justify-between">
+                <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-4 shadow-xs">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary">
+                      <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
                         <HiOutlineDocumentCheck className="h-4 w-4" />
                       </span>
                       <span className="text-xs font-bold uppercase tracking-wider text-foreground">
@@ -1286,9 +1425,9 @@ function FacilityKYCAdmin() {
                       return (
                         <div
                           key={doc.id || idx}
-                          className="rounded-xl border border-border/80 bg-muted/20 hover:bg-muted/40 p-3 sm:p-3.5 transition-all flex items-center justify-between gap-3 group"
+                          className="rounded-xl border border-border/80 bg-muted/20 hover:bg-muted/40 p-3 sm:p-3.5 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
                         >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1 w-full">
                             <span
                               className={cn(
                                 "grid h-10 w-10 place-items-center rounded-xl shrink-0 font-bold text-xs border shadow-2xs",
@@ -1305,17 +1444,17 @@ function FacilityKYCAdmin() {
                             </span>
 
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 truncate max-w-[200px]">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 truncate max-w-full sm:max-w-[200px]">
                                   {formatFacilityDocType(doc.documentType)}
                                 </span>
                                 {selectedFacility.status === "verified" && (
-                                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.2 rounded shrink-0">
+                                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded shrink-0">
                                     Verified
                                   </span>
                                 )}
                               </div>
-                              <p className="font-bold text-foreground text-xs truncate mt-1 group-hover:text-primary transition-colors max-w-[240px] sm:max-w-[300px]">
+                              <p className="font-bold text-foreground text-xs break-all sm:truncate mt-1 group-hover:text-primary transition-colors">
                                 {doc.originalFileName}
                               </p>
                               <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -1325,11 +1464,11 @@ function FacilityKYCAdmin() {
                           </div>
 
                           {/* Button Group */}
-                          <div className="flex items-center gap-1.5 shrink-0">
+                          <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-border/40">
                             <Button
                               size="sm"
                               onClick={() => setPreviewDoc(doc)}
-                              className="h-8 px-2.5 text-xs font-bold rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-white border border-primary/20 transition-all gap-1 shadow-none cursor-pointer"
+                              className="flex-1 sm:flex-initial h-8 px-2.5 text-xs font-bold rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-white border border-primary/20 transition-all gap-1 shadow-none cursor-pointer"
                               title="Preview document inline"
                             >
                               <HiOutlineEye className="h-3.5 w-3.5" />
@@ -1341,7 +1480,7 @@ function FacilityKYCAdmin() {
                               variant="outline"
                               type="button"
                               onClick={() => handleOpenInNewTab(doc)}
-                              className="inline-flex items-center justify-center h-8 px-2.5 text-xs font-bold rounded-lg border border-border bg-card hover:bg-muted text-foreground gap-1 transition-colors cursor-pointer"
+                              className="flex-1 sm:flex-initial inline-flex items-center justify-center h-8 px-2.5 text-xs font-bold rounded-lg border border-border bg-card hover:bg-muted text-foreground gap-1 transition-colors cursor-pointer"
                               title="Open document in new tab"
                             >
                               <HiOutlineArrowTopRightOnSquare className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1353,7 +1492,7 @@ function FacilityKYCAdmin() {
                               variant="outline"
                               type="button"
                               onClick={() => handleDownloadDoc(doc)}
-                              className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-0"
+                              className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer p-0 shrink-0"
                               title="Download document"
                             >
                               <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
@@ -1366,13 +1505,13 @@ function FacilityKYCAdmin() {
                 </div>
 
                 {/* 4. Authorized Administrative Representative */}
-                <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3.5 shadow-xs">
+                <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3.5 shadow-xs">
                   <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                     <HiOutlineUser className="h-4 w-4 text-primary" />
                     <span>Authorized Administrative Contact</span>
                   </h4>
 
-                  <div className="flex items-start justify-between gap-4 p-3.5 rounded-xl bg-muted/30 border border-border/50">
+                  <div className="flex flex-wrap sm:flex-nowrap items-start justify-between gap-2.5 sm:gap-4 p-3 sm:p-3.5 rounded-xl bg-muted/30 border border-border/50">
                     <div className="space-y-1 min-w-0">
                       <div className="font-bold text-foreground text-sm">{selectedFacility.contactPerson}</div>
                       <p className="text-xs text-muted-foreground font-medium">{selectedFacility.designation || "Hospital Superintendent / Administrator"}</p>
@@ -1406,8 +1545,8 @@ function FacilityKYCAdmin() {
                 </div>
 
                 {/* 5. Clinical Departments */}
-                <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3 shadow-xs">
-                  <div className="flex items-center justify-between">
+                <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3 shadow-xs">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                       <HiOutlineBuildingOffice2 className="h-4 w-4 text-primary" />
                       <span>Clinical Departments & Specialties</span>
@@ -1441,8 +1580,8 @@ function FacilityKYCAdmin() {
                 </div>
 
                 {/* 6. Active Recruitment & Hiring Needs */}
-                <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3 shadow-xs">
-                  <div className="flex items-center justify-between">
+                <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3 shadow-xs">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                       <HiOutlineIdentification className="h-4 w-4 text-primary" />
                       <span>Active Clinical Hiring Requirements</span>
@@ -1477,11 +1616,11 @@ function FacilityKYCAdmin() {
 
                 {/* 7. Facility Photos (if present) */}
                 {selectedFacility.facilityPhotos && selectedFacility.facilityPhotos.length > 0 && (
-                  <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3 shadow-xs">
+                  <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3 shadow-xs">
                     <h4 className="font-bold text-foreground text-xs uppercase tracking-wider">
                       Infrastructure & Facility Gallery
                     </h4>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2.5">
                       {selectedFacility.facilityPhotos.map((photo, idx) => (
                         <img
                           key={idx}
@@ -1573,9 +1712,9 @@ function FacilityKYCAdmin() {
                   <Button
                     size="sm"
                     onClick={() => handleVerify(selectedFacility.id, selectedFacility.name)}
-                    className="bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1 rounded-xl shadow-none"
+                    className="flex-1 sm:flex-initial bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1 rounded-xl shadow-none whitespace-nowrap"
                   >
-                    <HiCheck className="h-3.5 w-3.5" /> Approve & Issue Verified Badge
+                    <HiCheck className="h-3.5 w-3.5 shrink-0" /> Approve & Issue Verified Badge
                   </Button>
                 </>
               )}
@@ -1619,7 +1758,7 @@ function FacilityKYCAdmin() {
       {/* Full Document Viewer Modal (Inline PDF Preview with Download & Full Tab, Exactly like Candidate) */}
       <Dialog open={Boolean(previewDoc)} onOpenChange={(open) => !open && setPreviewDoc(null)}>
         <DialogContent
-          className="max-w-4xl w-[95vw] h-[88vh] p-0 flex flex-col gap-0 overflow-hidden rounded-2xl border-border bg-card"
+          className="w-full sm:w-[94vw] max-w-4xl h-[90dvh] sm:h-[88vh] max-h-[92dvh] sm:max-h-[88vh] p-0 flex flex-col gap-0 overflow-hidden rounded-t-3xl rounded-b-none sm:rounded-2xl border-border bg-card"
           aria-describedby="facility-dialog-desc"
         >
           <span id="facility-dialog-desc" className="sr-only">
@@ -1627,24 +1766,24 @@ function FacilityKYCAdmin() {
           </span>
 
           {/* Modal Header */}
-          <DialogHeader className="px-5 py-3.5 border-b border-border bg-card shrink-0 flex flex-row items-center justify-between">
-            <div className="flex items-center justify-between w-full pr-8">
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary border border-primary/20 shrink-0">
-                  <HiOutlineDocumentText className="h-5 w-5" />
+          <DialogHeader className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card shrink-0 text-left">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 w-full pr-8">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-primary/10 text-primary border border-primary/20 shrink-0">
+                  <HiOutlineDocumentText className="h-4 w-4 sm:h-5 sm:w-5" />
                 </span>
-                <div className="min-w-0">
-                  <DialogTitle className="text-sm font-bold text-foreground truncate max-w-[280px] sm:max-w-md">
+                <div className="min-w-0 flex-1">
+                  <DialogTitle className="text-xs sm:text-sm font-bold text-foreground truncate">
                     {previewDoc?.originalFileName}
                   </DialogTitle>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
                     {formatFacilityDocType(previewDoc?.documentType)} • {formatBytes(previewDoc?.fileSizeBytes)}
                   </p>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
                 {previewDoc && (
                   <>
                     <Button

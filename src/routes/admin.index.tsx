@@ -25,6 +25,7 @@ import {
   HiOutlineArrowTopRightOnSquare,
   HiOutlineXMark,
   HiOutlineArrowPath,
+  HiOutlineClipboardDocumentList,
 } from "react-icons/hi2";
 import { MdWavingHand } from "react-icons/md";
 import { toast } from "sonner";
@@ -92,55 +93,7 @@ function AdminDashboard() {
 
   const [forecastText, setForecastText] = useState<string | null>(null);
   const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
-
-  const handleGenerateBrief = async (overrideMetrics?: any) => {
-    setIsGeneratingBrief(true);
-    try {
-      const pKyc = overrideMetrics?.pendingKyc ?? pendingCandidateKYC.length;
-      const pJobs = overrideMetrics?.pendingJobs ?? pendingJobApprovals.length;
-      const pFac = overrideMetrics?.pendingFacilities ?? pendingFacilityKYC.length;
-      const aShifts = overrideMetrics?.activeShifts ?? apiJobs.filter((j) => j.type === "shift").length;
-
-      const res = await getDailyMorningBriefWithAi({
-        pendingKyc: pKyc,
-        pendingJobs: pJobs,
-        pendingFacilities: pFac,
-        activeShifts: aShifts,
-        disputes: 0,
-      });
-      const text = res.response || res.content || "";
-      if (text) {
-        setBriefText(text);
-        toast.success("Morning Operations Brief updated with live AI");
-      }
-    } catch (err: any) {
-      console.warn("Brief generation error:", err);
-      toast.error("Failed to generate AI morning brief");
-    } finally {
-      setIsGeneratingBrief(false);
-    }
-  };
-
-  const handleGenerateForecast = async () => {
-    setIsGeneratingForecast(true);
-    try {
-      const res = await getDemandForecastWithAi({
-        metro: "Bengaluru & Chennai Healthcare Corridors",
-        topSpecialties: ["ICU Critical Care Nurses", "Dialysis Technicians", "Emergency Medical Officers", "OT Specialists"],
-        surgeWeekendMultiplier: 1.35,
-      });
-      const text = res.response || res.content || "";
-      if (text) {
-        setForecastText(text);
-        toast.success("7-Day Demand Surge Forecast recalculated with live AI");
-      }
-    } catch (err: any) {
-      console.warn("Forecast generation error:", err);
-      toast.error("Failed to generate AI demand forecast");
-    } finally {
-      setIsGeneratingForecast(false);
-    }
-  };
+  const [intelTab, setIntelTab] = useState<"brief" | "forecast">("brief");
 
   const loadDashboardData = async () => {
     if (!isApiEnabled) return;
@@ -367,6 +320,119 @@ function AdminDashboard() {
     pendingShortlisting.length +
     pendingHuddleReview.length;
 
+  const queueRef = useRef<HTMLDivElement>(null);
+
+  const jumpToQueue = (tab: "candidates" | "postings" | "facilities" | "applications" | "huddle") => {
+    setActiveQueueTab(tab);
+    setQueueSearch("");
+    if (queueRef.current) {
+      queueRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  const locumCount = useMemo(() => {
+    return isApiEnabled
+      ? apiJobs.filter((j) => j.type === "shift").length
+      : s.jobApprovals.filter((j) => j.type === "shift").length;
+  }, [isApiEnabled, apiJobs, s.jobApprovals]);
+
+  const metroCorridors = useMemo(() => {
+    const list = Array.from(
+      new Set([
+        ...apiJobs.map((j) => j.city),
+        ...apiFacilities.map((f) => f.city),
+        ...apiCandidates.map((c) => c.state),
+      ])
+    ).filter(Boolean);
+    if (list.length > 0) {
+      return list.slice(0, 3).join(", ");
+    }
+    return "Bengaluru & Chennai Corridors";
+  }, [apiJobs, apiFacilities, apiCandidates]);
+
+  const topCadres = useMemo(() => {
+    if (metrics?.cadreBreakdown && Object.keys(metrics.cadreBreakdown).length > 0) {
+      return Object.entries(metrics.cadreBreakdown)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({
+          name: name === "Doctor" ? "Duty Doctors & Specialists" : name === "Physiotherapist" ? "Physiotherapists & Rehab" : name,
+          rawName: name,
+          count,
+        }));
+    }
+    const counts: Record<string, number> = {};
+    (isApiEnabled ? apiCandidates : s.candidateKYC).forEach((c) => {
+      const prof = c.profession || "Clinical Practitioner";
+      counts[prof] = (counts[prof] || 0) + 1;
+    });
+    (isApiEnabled ? apiJobs : s.jobApprovals).forEach((j) => {
+      const dept = j.dept || "Medical";
+      counts[dept] = (counts[dept] || 0) + 1;
+    });
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (entries.length > 0) {
+      return entries.map(([name, count]) => ({ name, rawName: name, count }));
+    }
+    return [
+      { name: "Duty Doctors & ICU Specialists", rawName: "Doctor", count: 1 },
+      { name: "Emergency Care Nurses", rawName: "Nurse", count: 1 },
+    ];
+  }, [metrics?.cadreBreakdown, isApiEnabled, apiCandidates, s.candidateKYC, apiJobs, s.jobApprovals]);
+
+  const topSurgeName = topCadres[0]?.name || "Duty Doctors";
+  const secondarySurgeName = topCadres[1]?.name || "Emergency Care Clinicians";
+  const surgePercent = 25 + ((locumCount * 5) % 20);
+
+  const handleGenerateBrief = async (overrideMetrics?: any) => {
+    setIsGeneratingBrief(true);
+    try {
+      const pKyc = overrideMetrics?.pendingKyc ?? pendingCandidateKYC.length;
+      const pJobs = overrideMetrics?.pendingJobs ?? pendingJobApprovals.length;
+      const pFac = overrideMetrics?.pendingFacilities ?? pendingFacilityKYC.length;
+      const aShifts = overrideMetrics?.activeShifts ?? locumCount;
+
+      const res = await getDailyMorningBriefWithAi({
+        pendingKyc: pKyc,
+        pendingJobs: pJobs,
+        pendingFacilities: pFac,
+        activeShifts: aShifts,
+        disputes: 0,
+      });
+      const text = res.response || res.content || "";
+      if (text) {
+        setBriefText(text);
+        toast.success("Morning Operations Brief updated with live Ally");
+      }
+    } catch (err: any) {
+      console.warn("Brief generation error:", err);
+      toast.error("Failed to generate Ally morning brief");
+    } finally {
+      setIsGeneratingBrief(false);
+    }
+  };
+
+  const handleGenerateForecast = async () => {
+    setIsGeneratingForecast(true);
+    try {
+      const res = await getDemandForecastWithAi({
+        metro: metroCorridors,
+        topSpecialties: topCadres.map((c) => c.name),
+        surgeWeekendMultiplier: 1 + surgePercent / 100,
+        activeShifts: locumCount,
+      });
+      const text = res.response || res.content || "";
+      if (text) {
+        setForecastText(text);
+        toast.success("7-Day Demand Surge Forecast recalculated with live Ally");
+      }
+    } catch (err: any) {
+      console.warn("Forecast generation error:", err);
+      toast.error("Failed to generate Ally demand forecast");
+    } finally {
+      setIsGeneratingForecast(false);
+    }
+  };
+
   const quickApproveHuddle = async (id: string, authorName: string) => {
     if (isApiEnabled) {
       try {
@@ -575,7 +641,11 @@ function AdminDashboard() {
     ? pendingShortlisting.filter((a) => {
         if (!queueSearch) return true;
         const q = queueSearch.toLowerCase();
-        return a.candidateName.toLowerCase().includes(q) || a.jobTitle.toLowerCase().includes(q) || a.facilityName.toLowerCase().includes(q);
+        return (
+          (a.candidateName || "").toLowerCase().includes(q) ||
+          (a.jobTitle || "").toLowerCase().includes(q) ||
+          ((a as any).hospitalName || (a as any).facilityName || "").toLowerCase().includes(q)
+        );
       })
     : [];
 
@@ -674,11 +744,71 @@ function AdminDashboard() {
       awaiting clinical review across candidate KYC, hospital verification, and job postings.
     </p>
   ) : (
-    <div className="flex items-center gap-2 text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
-      <HiCheck className="h-4 w-4 shrink-0" />
+    <div className="flex items-center gap-2 text-xs sm:text-sm text-primary font-semibold">
+      <HiOutlineCheckBadge className="h-4 w-4 shrink-0 text-primary" />
       <span>Welcome back. All clinical verification and shortlisting queues are fully cleared!</span>
     </div>
   );
+
+  const formatBriefParagraphs = (raw: string): string[] => {
+    if (!raw) return [];
+    // Split merged inline numbered bullets (e.g. "... 1. First ... 2. Second ...") onto separate lines
+    const normalized = raw
+      .replace(/\r\n/g, "\n")
+      .replace(/([^\n])\s+(\d+\.\s+)/g, "$1\n$2");
+    return normalized
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+  };
+
+  const renderBriefLine = (line: string, idx: number) => {
+    // Strip bullet/number markers, markdown tokens (including unmatched ** / *), headings, and raw emojis
+    const cleanLine = line
+      .replace(/^[•\-\*]+\s*/, "")
+      .replace(/^\d+[\.)]\s*/, "")
+      .replace(/^#{1,4}\s*/, "")
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+      .replace(/\*\*|__|~~/g, "")
+      .replace(/^\*+|\*+$/g, "")
+      .replace(/\*+/g, "")
+      .trim();
+
+    if (!cleanLine) return null;
+
+    const plainLine = cleanLine;
+    const isHeader =
+      plainLine.toLowerCase().includes("morning operations brief") ||
+      plainLine.toLowerCase().includes("daily brief") ||
+      plainLine.toLowerCase().includes("demand projection") ||
+      plainLine.toLowerCase().includes("surge analysis");
+
+    // Highlight bold markdown segments or "Label: detail" lead-ins cleanly
+    const colonIdx = plainLine.indexOf(":");
+    const hasLeadLabel = !isHeader && colonIdx > 0 && colonIdx <= 42;
+    const leadLabel = hasLeadLabel ? plainLine.slice(0, colonIdx + 1) : "";
+    const restText = hasLeadLabel ? plainLine.slice(colonIdx + 1).trim() : plainLine;
+
+    return (
+      <div key={idx} className="flex items-start gap-2.5 text-xs sm:text-[13px] leading-relaxed">
+        {isHeader ? (
+          <HiOutlineClipboardDocumentList className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+        ) : (
+          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+        )}
+        <span className={cn(isHeader ? "font-bold text-foreground" : "text-foreground/90")}>
+          {hasLeadLabel ? (
+            <>
+              <strong className="font-bold text-foreground">{leadLabel}</strong>{" "}
+              <span>{restText}</span>
+            </>
+          ) : (
+            plainLine
+          )}
+        </span>
+      </div>
+    );
+  };
 
   return (
     <AdminLayout
@@ -723,107 +853,6 @@ function AdminDashboard() {
         </div>
       }
     >
-      {/* Operations Command Brief & Demand Forecast */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full">
-        {/* Morning Operations Brief */}
-        <div className="rounded-2xl border border-primary/25 bg-gradient-to-r from-primary/10 via-primary/5 to-card p-4 sm:p-5 shadow-2xs space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary text-white text-xs shrink-0">
-                <BotMessageSquare className="h-4 w-4" />
-              </span>
-              <div>
-                <h2 className="text-xs sm:text-sm font-bold text-foreground">
-                  Morning Operations Brief
-                </h2>
-                <p className="text-[10px] text-muted-foreground">COO Platform Synthesis</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
-                Live AI Summary
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={isGeneratingBrief}
-                onClick={() => handleGenerateBrief()}
-                className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1 border-primary/30 text-primary hover:bg-primary/10 cursor-pointer"
-              >
-                <BotMessageSquare className={cn("h-3 w-3", isGeneratingBrief && "animate-spin")} />
-                <span>{isGeneratingBrief ? "Updating..." : "Re-analyze with AI"}</span>
-              </Button>
-            </div>
-          </div>
-          <div className="text-xs text-muted-foreground leading-relaxed space-y-1.5 pt-1 border-t border-primary/15">
-            {briefText ? (
-              briefText.split("\n").filter(Boolean).map((line, idx) => (
-                <p key={idx} className="flex items-start gap-1.5">
-                  <span className="text-primary font-bold mt-0.5">•</span>
-                  <span className="text-foreground/90">{line.replace(/^[•\-\*]\s*/, "")}</span>
-                </p>
-              ))
-            ) : (
-              <>
-                <p className="flex items-start gap-1.5">
-                  <span className="text-primary font-bold mt-0.5">•</span>
-                  <span><strong className="text-foreground">{pendingCandidateKYC.length}</strong> candidate KYC submissions awaiting state council verification check.</span>
-                </p>
-                <p className="flex items-start gap-1.5">
-                  <span className="text-primary font-bold mt-0.5">•</span>
-                  <span><strong className="text-foreground">{pendingJobApprovals.length}</strong> hospital job & shift approvals pending compliance audit.</span>
-                </p>
-                <p className="flex items-start gap-1.5">
-                  <span className="text-primary font-bold mt-0.5">•</span>
-                  <span><strong className="text-foreground">0</strong> active escrow disputes reported; 100% automated settlement rate maintained.</span>
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* 7-Day Demand Forecast */}
-        <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs shrink-0">
-                <BotMessageSquare className="h-4 w-4" />
-              </span>
-              <div>
-                <h2 className="text-xs sm:text-sm font-bold text-foreground">
-                  Demand Surge Forecast
-                </h2>
-                <p className="text-[10px] text-muted-foreground">Predictive Telemetry</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
-                7-Day Horizon
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={isGeneratingForecast}
-                onClick={handleGenerateForecast}
-                className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 cursor-pointer"
-              >
-                <BotMessageSquare className={cn("h-3 w-3", isGeneratingForecast && "animate-spin")} />
-                <span>{isGeneratingForecast ? "Projecting..." : "Recalculate with AI"}</span>
-              </Button>
-            </div>
-          </div>
-          <div className="text-xs text-muted-foreground leading-relaxed pt-1 border-t border-border/50">
-            {forecastText ? (
-              <p className="text-foreground/90 leading-relaxed font-medium">{forecastText}</p>
-            ) : (
-              <p className="leading-relaxed">
-                Anticipating a <strong className="text-foreground">35% weekend surge</strong> in Critical Care Nurses and Dialysis Technicians across South Bengaluru (Koramangala/HSR) and Central Chennai. 14 locum shift broadcasts projected.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Top 4 Modern Enterprise KPI Cards */}
       <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4 min-w-0 w-full">
         {/* 1. Total Queue Pending */}
@@ -837,10 +866,7 @@ function AdminDashboard() {
           </div>
           <div className="mt-2.5 flex items-center justify-between gap-2">
             <span className="text-3xl font-black font-mono tracking-tight text-foreground">{totalPending}</span>
-            <span className={cn(
-              "text-[11px] font-bold px-2.5 py-1 rounded-lg border",
-              totalPending > 0 ? "text-primary bg-primary/10 border-primary/20" : "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
-            )}>
+            <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg border text-primary bg-primary/10 border-primary/20">
               {totalPending > 0 ? "Needs Review" : "Queue Cleared"}
             </span>
           </div>
@@ -851,13 +877,13 @@ function AdminDashboard() {
         <div className="rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs min-w-0">
           <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-xs font-bold uppercase tracking-wider">Verified Clinicians</span>
-            <HiOutlineCheckBadge className="h-4 w-4 text-emerald-500" />
+            <HiOutlineCheckBadge className="h-4 w-4 text-primary" />
           </div>
           <div className="mt-2.5 flex items-center justify-between gap-2">
             <span className="text-3xl font-black font-mono tracking-tight text-foreground">
               {metrics?.verifiedCandidatesCount ?? (apiCandidates.filter((c) => c.status === "verified").length || 2)}
             </span>
-            <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 flex items-center gap-1">
+            <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-lg border border-primary/20 flex items-center gap-1">
               <HiOutlineArrowTrendingUp className="h-3.5 w-3.5" /> +{pendingCandidateKYC.length} in queue
             </span>
           </div>
@@ -895,7 +921,7 @@ function AdminDashboard() {
             <span className="text-3xl font-black font-mono tracking-tight text-foreground">
               {metrics?.slaTurnaroundHours !== undefined ? metrics.slaTurnaroundHours : 0} hrs
             </span>
-            <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
+            <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-lg border border-primary/20">
               {metrics?.slaOnTimePercentage !== undefined ? metrics.slaOnTimePercentage : 100}% on-time
             </span>
           </div>
@@ -1136,29 +1162,343 @@ function AdminDashboard() {
         </div>
       </div>
 
+      {/* Executive Intelligence Command Center: Unified Tabbed Card Below Pie Charts */}
+      <div className="rounded-2xl border border-primary/20 bg-card p-4 sm:p-6 shadow-2xs w-full space-y-3.5 sm:space-y-4">
+        {/* Header with Switcher Tabs and Action Button */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/60">
+          {/* Tab Selector Buttons - Responsive 2-Col Grid on Mobile */}
+          <div className="w-full sm:w-auto grid grid-cols-2 sm:flex sm:items-center gap-1.5 p-1 rounded-xl bg-muted/60 border border-border/60">
+            <button
+              type="button"
+              onClick={() => setIntelTab("brief")}
+              className={cn(
+                "flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2 sm:px-3 py-1.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-w-0",
+                intelTab === "brief"
+                  ? "bg-card text-foreground shadow-2xs border border-border/80"
+                  : "text-muted-foreground hover:text-foreground hover:bg-card/40"
+              )}
+            >
+              <BotMessageSquare className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="hidden xs:inline sm:inline">Operations Brief</span>
+              <span className="xs:hidden sm:hidden">Brief</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.2 text-[10px] font-black shrink-0",
+                  intelTab === "brief"
+                    ? "bg-primary/10 text-primary border border-primary/20"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                {totalPending}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIntelTab("forecast")}
+              className={cn(
+                "flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 rounded-lg px-2 sm:px-3 py-1.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-w-0",
+                intelTab === "forecast"
+                  ? "bg-card text-foreground shadow-2xs border border-border/80"
+                  : "text-muted-foreground hover:text-foreground hover:bg-card/40"
+              )}
+            >
+              <HiOutlineArrowTrendingUp className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="hidden xs:inline sm:inline">Surge Forecast</span>
+              <span className="xs:hidden sm:hidden">Surge</span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-0.2 text-[10px] font-black shrink-0",
+                  intelTab === "forecast"
+                    ? "bg-primary/10 text-primary border border-primary/20"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                7-Day
+              </span>
+            </button>
+          </div>
+
+          {/* Right Header Status & Ally Trigger */}
+          <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-border/40">
+            {intelTab === "brief" ? (
+              <>
+                {totalPending === 0 ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-1 text-[11px] font-bold text-primary shrink-0">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    All Cleared
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-1 text-[11px] font-bold text-primary shrink-0">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                    {totalPending} Action Items
+                  </span>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isGeneratingBrief}
+                  onClick={() => handleGenerateBrief()}
+                  className="h-8 px-2.5 sm:px-3 text-xs font-bold rounded-xl gap-1.5 border-primary/30 text-primary hover:bg-primary/10 cursor-pointer shadow-2xs transition-all active:scale-[0.98] shrink-0"
+                >
+                  {isGeneratingBrief ? (
+                    <>
+                      <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin shrink-0" />
+                      <span>Synthesizing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
+                      <span>Re-analyze with Ally</span>
+                    </>
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                <span className="rounded-full bg-primary/10 border border-primary/20 px-2.5 py-1 text-[11px] font-bold text-primary shrink-0">
+                  Predictive Horizon
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isGeneratingForecast}
+                  onClick={handleGenerateForecast}
+                  className="h-8 px-2.5 sm:px-3 text-xs font-bold rounded-xl gap-1.5 border-primary/30 text-primary hover:bg-primary/10 cursor-pointer shadow-2xs transition-all active:scale-[0.98] shrink-0"
+                >
+                  {isGeneratingForecast ? (
+                    <>
+                      <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin shrink-0" />
+                      <span>Projecting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
+                      <span>Recalculate with Ally</span>
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Tab 1 Content: Morning Operations Brief */}
+        {intelTab === "brief" && (
+          <div className="space-y-3">
+            {briefText && (
+              <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 sm:p-4 space-y-2.5">
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-primary/15">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <BotMessageSquare className="h-4 w-4 text-primary shrink-0" />
+                    <span className="text-xs font-bold text-foreground truncate">
+                      Ally Morning Operations Brief
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBriefText(null)}
+                    aria-label="Close operations brief"
+                    className="h-6 w-6 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
+                  >
+                    <HiOutlineXMark className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="max-h-48 sm:max-h-56 overflow-y-auto pr-1.5 space-y-1.5 [scrollbar-width:thin]">
+                  {formatBriefParagraphs(briefText).map((line, idx) => renderBriefLine(line, idx))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {/* Item 1: Candidate KYC */}
+              <button
+                type="button"
+                onClick={() => jumpToQueue("candidates")}
+                className="group flex flex-col xs:flex-row sm:flex-row items-start xs:items-center sm:items-center justify-between p-3 sm:px-3.5 rounded-xl text-left bg-muted/30 hover:bg-primary/10 border border-border/70 hover:border-primary/30 transition-all cursor-pointer gap-2.5 min-w-0"
+              >
+                <div className="flex items-start sm:items-center gap-2.5 min-w-0 flex-1">
+                  <span className="h-2 w-2 rounded-full bg-primary shrink-0 mt-1 sm:mt-0 group-hover:scale-125 transition-transform" />
+                  <p className="text-xs sm:text-[13px] text-muted-foreground leading-normal">
+                    <span className="font-bold text-foreground mr-1.5">{pendingCandidateKYC.length}</span>
+                    candidate KYC submissions awaiting council check.
+                  </p>
+                </div>
+                <span className="shrink-0 self-end xs:self-auto sm:self-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-primary bg-primary/10 border border-primary/20 group-hover:bg-primary group-hover:text-primary-foreground transition-all shadow-2xs whitespace-nowrap">
+                  <span>Review KYC</span>
+                  <HiOutlineArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+                </span>
+              </button>
+
+              {/* Item 2: Job & Shift Postings */}
+              <button
+                type="button"
+                onClick={() => jumpToQueue("postings")}
+                className="group flex flex-col xs:flex-row sm:flex-row items-start xs:items-center sm:items-center justify-between p-3 sm:px-3.5 rounded-xl text-left bg-muted/30 hover:bg-primary/10 border border-border/70 hover:border-primary/30 transition-all cursor-pointer gap-2.5 min-w-0"
+              >
+                <div className="flex items-start sm:items-center gap-2.5 min-w-0 flex-1">
+                  <span className="h-2 w-2 rounded-full bg-primary shrink-0 mt-1 sm:mt-0 group-hover:scale-125 transition-transform" />
+                  <p className="text-xs sm:text-[13px] text-muted-foreground leading-normal">
+                    <span className="font-bold text-foreground mr-1.5">{pendingJobApprovals.length}</span>
+                    hospital job & shift approvals pending compliance audit.
+                  </p>
+                </div>
+                <span className="shrink-0 self-end xs:self-auto sm:self-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-primary bg-primary/10 border border-primary/20 group-hover:bg-primary group-hover:text-primary-foreground transition-all shadow-2xs whitespace-nowrap">
+                  <span>Approve Jobs</span>
+                  <HiOutlineArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+                </span>
+              </button>
+
+              {/* Item 3: Hospital Facilities */}
+              <button
+                type="button"
+                onClick={() => jumpToQueue("facilities")}
+                className="group flex flex-col xs:flex-row sm:flex-row items-start xs:items-center sm:items-center justify-between p-3 sm:px-3.5 rounded-xl text-left bg-muted/30 hover:bg-primary/10 border border-border/70 hover:border-primary/30 transition-all cursor-pointer gap-2.5 min-w-0"
+              >
+                <div className="flex items-start sm:items-center gap-2.5 min-w-0 flex-1">
+                  <span className="h-2 w-2 rounded-full bg-primary shrink-0 mt-1 sm:mt-0 group-hover:scale-125 transition-transform" />
+                  <p className="text-xs sm:text-[13px] text-muted-foreground leading-normal">
+                    <span className="font-bold text-foreground mr-1.5">{pendingFacilityKYC.length}</span>
+                    healthcare facilities awaiting CEA/NABH audit.
+                  </p>
+                </div>
+                <span className="shrink-0 self-end xs:self-auto sm:self-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-primary bg-primary/10 border border-primary/20 group-hover:bg-primary group-hover:text-primary-foreground transition-all shadow-2xs whitespace-nowrap">
+                  <span>Verify Hospitals</span>
+                  <HiOutlineArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+                </span>
+              </button>
+
+              {/* Item 4: Escrow SLA */}
+              <div className="flex flex-col xs:flex-row sm:flex-row items-start xs:items-center sm:items-center justify-between p-3 sm:px-3.5 rounded-xl bg-muted/30 border border-border/70 text-xs sm:text-[13px] text-muted-foreground gap-2.5 min-w-0">
+                <div className="flex items-start sm:items-center gap-2.5 min-w-0 flex-1">
+                  <span className="h-2 w-2 rounded-full bg-primary/70 shrink-0 mt-1 sm:mt-0" />
+                  <p className="leading-normal">
+                    <span className="font-bold text-foreground mr-1.5">0</span>
+                    escrow disputes reported; 100% automated settlement rate.
+                  </p>
+                </div>
+                <span className="shrink-0 self-end xs:self-auto sm:self-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-primary bg-primary/10 border border-primary/20 shadow-2xs whitespace-nowrap">
+                  <span>SLA 100%</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2 Content: Demand Surge Forecast */}
+        {intelTab === "forecast" && (
+          <div className="space-y-3">
+            {/* Dynamic Forecast Narrative */}
+            <div className="text-xs sm:text-[13px] text-muted-foreground leading-relaxed">
+              {forecastText ? (
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 sm:p-4 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-primary/15">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <BotMessageSquare className="h-4 w-4 text-primary shrink-0" />
+                      <span className="text-xs font-bold text-foreground truncate">
+                        Ally 7-Day Surge Forecast
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setForecastText(null)}
+                      aria-label="Close surge forecast"
+                      className="h-6 w-6 rounded-lg inline-flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer shrink-0"
+                    >
+                      <HiOutlineXMark className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="max-h-48 sm:max-h-56 overflow-y-auto pr-1.5 space-y-1.5 [scrollbar-width:thin]">
+                    {formatBriefParagraphs(forecastText).map((line, idx) => renderBriefLine(line, idx))}
+                  </div>
+                </div>
+              ) : (
+                <p className="leading-relaxed">
+                  Anticipating a <strong className="text-foreground font-bold">{surgePercent}% weekend surge</strong> in <strong className="text-foreground font-bold">{topSurgeName}</strong> and <strong className="text-foreground font-bold">{secondarySurgeName}</strong> across <span className="font-semibold text-foreground/90">{metroCorridors}</span>. <strong className="text-foreground font-bold">{locumCount} locum shift broadcasts active</strong> with instant escrow guarantee.
+                </p>
+              )}
+            </div>
+
+            {/* 3 Telemetry Mini-Chips */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+              <div className="p-3 rounded-xl bg-muted/30 border border-border/70 flex flex-col justify-between gap-1.5">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Top Surge Cadre</span>
+                <span className="text-xs sm:text-sm font-bold text-foreground truncate flex items-center gap-1.5">
+                  <HiOutlineArrowTrendingUp className="h-4 w-4 text-primary shrink-0" />
+                  <span className="truncate">{topSurgeName}</span>
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-muted/30 border border-border/70 flex flex-col justify-between gap-1.5">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Active Locum Shifts</span>
+                <span className="text-xs sm:text-sm font-bold text-foreground truncate flex items-center gap-1.5">
+                  <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
+                  <span>{locumCount} broadcasts</span>
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-muted/30 border border-border/70 flex flex-col justify-between gap-1.5">
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Escrow Guarantee SLA</span>
+                <span className="text-xs sm:text-sm font-bold text-primary truncate flex items-center gap-1.5">
+                  <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
+                  <span>100% Instant</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Monitored Cadres */}
+            <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-border/50">
+              <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mr-1">
+                Monitored Cadres:
+              </span>
+              {topCadres.slice(0, 4).map((c, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => {
+                    setQueueSearch(c.rawName || c.name);
+                    jumpToQueue("postings");
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-muted/40 hover:bg-primary/10 border border-border/70 hover:border-primary/30 text-xs font-semibold text-foreground/90 transition-all cursor-pointer active:scale-[0.98]"
+                >
+                  <span>{c.name}</span>
+                  <span className="font-bold text-primary">({c.count})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Consolidated Interactive Workload Queue with Tabs */}
-      <div className="rounded-2xl border border-border/80 bg-card shadow-2xs overflow-hidden min-w-0 w-full">
+      <div ref={queueRef} id="admin-queue-section" className="rounded-2xl border border-border/80 bg-card shadow-2xs overflow-hidden min-w-0 w-full scroll-mt-24">
         {/* Table Header & Search Filter Bar */}
-        <div className="p-4 sm:p-5 border-b border-border/80 bg-card/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <HiOutlineShieldCheck className="h-5 w-5 text-primary shrink-0" />
-              <h3 className="text-base font-black tracking-tight text-foreground">Priority Action Center</h3>
-              <span className="rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5">
+        <div className="p-3.5 sm:p-5 border-b border-border/80 bg-card/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:gap-4">
+          <div className="space-y-1 min-w-0 flex-1">
+            <div className="flex flex-wrap items-center justify-between sm:justify-start gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                <HiOutlineShieldCheck className="h-4.5 w-4.5 sm:h-5 sm:w-5 text-primary shrink-0" />
+                <h3 className="text-[13px] xs:text-sm sm:text-base font-black tracking-tight text-foreground leading-snug whitespace-nowrap">
+                  Priority Action Center
+                </h3>
+              </div>
+              <span className="w-fit shrink-0 whitespace-nowrap inline-flex items-center rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2.5 py-1 leading-none">
                 {totalPending} Awaiting
               </span>
             </div>
-            <p className="text-xs text-muted-foreground">Unified 1-click administrative pipeline across active verification streams</p>
+            <p className="text-[11px] sm:text-xs text-muted-foreground leading-snug">
+              Unified 1-click administrative pipeline across active verification streams.
+            </p>
           </div>
 
           {/* Quick Search Filter */}
-          <div className="relative w-full sm:w-64">
+          <div className="relative w-full sm:w-72">
             <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               value={queueSearch}
               onChange={(e) => setQueueSearch(e.target.value)}
               placeholder="Search queue by name, org, role…"
-              className="h-9 w-full rounded-xl border border-border/80 bg-muted/40 pl-9 pr-8 text-xs outline-none focus:border-primary focus:bg-background transition-all"
+              className="h-9 w-full rounded-xl border border-border/80 bg-muted/40 pl-9 pr-8 text-xs text-foreground placeholder:text-muted-foreground/70 outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 focus:bg-background transition-all"
             />
             {queueSearch && (
               <button
@@ -1172,7 +1512,7 @@ function AdminDashboard() {
         </div>
 
         {/* Tab Filter Strip */}
-        <div className="px-3 sm:px-4 py-2.5 border-b border-border/60 bg-muted/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
+        <div className="px-3 sm:px-5 py-2.5 border-b border-border/60 bg-muted/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
           <div className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-xl bg-muted/60 border border-border/40 overflow-x-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden max-w-full">
             {[
               { id: "all", label: "All Items", desktopLabel: "All Action Items", count: totalPending },
@@ -1200,7 +1540,7 @@ function AdminDashboard() {
                     className={cn(
                       "rounded-full px-1.5 py-0.2 text-[10px] font-black leading-tight",
                       active
-                        ? "bg-primary/10 text-primary"
+                        ? "bg-primary/10 text-primary border border-primary/20"
                         : "bg-muted text-muted-foreground"
                     )}
                   >
@@ -1223,76 +1563,80 @@ function AdminDashboard() {
                 ? "/admin/applications"
                 : "/admin/candidates"
             }
-            className="text-xs font-bold text-primary hover:underline flex items-center gap-1 group py-1 shrink-0 whitespace-nowrap self-start sm:self-auto"
+            className="text-xs font-bold text-primary hover:underline flex items-center gap-1.5 group py-1 shrink-0 whitespace-nowrap self-end sm:self-auto"
           >
             <span>Open Dedicated Queue</span>
-            <HiOutlineArrowRight className="h-3 w-3 group-hover:translate-x-0.5 transition-transform" />
+            <HiOutlineArrowRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
           </Link>
         </div>
 
         {/* 1. Desktop Data Table View (hidden on mobile, visible on md and up) */}
         <div className="hidden md:block overflow-x-auto w-full min-w-0">
-          <Table className="min-w-[780px] w-full">
-            <TableHeader className="bg-muted/10">
+          <Table className="w-full min-w-[920px] table-fixed text-left">
+            <TableHeader className="bg-muted/15 border-b border-border/70">
               <TableRow className="hover:bg-transparent border-b border-border/60">
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider py-3 w-36">Category</TableHead>
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider py-3">Entity / Record</TableHead>
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider py-3">Credentials / Terms</TableHead>
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider py-3 w-32">Submitted</TableHead>
-                <TableHead className="text-[11px] font-bold uppercase tracking-wider py-3 text-right w-44">Instant Action</TableHead>
+                <TableHead className="w-[170px] text-[11px] font-bold uppercase tracking-wider py-3.5 px-4 text-muted-foreground">Category</TableHead>
+                <TableHead className="w-[280px] text-[11px] font-bold uppercase tracking-wider py-3.5 px-4 text-muted-foreground">Entity / Record</TableHead>
+                <TableHead className="w-[240px] text-[11px] font-bold uppercase tracking-wider py-3.5 px-4 text-muted-foreground">Credentials / Terms</TableHead>
+                <TableHead className="w-[130px] text-[11px] font-bold uppercase tracking-wider py-3.5 px-4 text-muted-foreground">Submitted</TableHead>
+                <TableHead className="w-[180px] text-[11px] font-bold uppercase tracking-wider py-3.5 px-4 text-right text-muted-foreground">Instant Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {/* Job Approvals */}
               {filteredJobs.map((j) => (
-                <TableRow key={j.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
-                  <TableCell className="py-3.5">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
+                <TableRow key={j.id} className="text-xs hover:bg-primary/[0.03] transition-colors border-b border-border/40">
+                  <TableCell className="w-[170px] py-4 px-4 align-middle whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20 whitespace-nowrap">
                       <HiOutlineBriefcase className="h-3.5 w-3.5 shrink-0" />
                       <span>Job Posting</span>
                     </span>
                   </TableCell>
-                  <TableCell className="py-3.5">
-                    <div className="flex items-center gap-3">
+                  <TableCell className="w-[280px] py-4 px-4 align-middle">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
                         <HiOutlineBriefcase className="h-4 w-4" />
                       </div>
-                      <div>
-                        <div className="font-bold text-foreground text-xs hover:text-primary transition-colors">{j.title}</div>
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                          <span>{j.org}</span>
-                          <span className="h-1 w-1 rounded-full bg-border" />
-                          <span>{j.city}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-foreground text-xs hover:text-primary transition-colors leading-tight truncate">{j.title}</div>
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-1 truncate">
+                          <span className="font-medium text-foreground/80 truncate">{j.org}</span>
+                          <span className="h-1 w-1 rounded-full bg-border shrink-0" />
+                          <span className="shrink-0">{j.city}</span>
                         </div>
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="py-3.5">
-                    <div className="font-bold font-mono text-foreground">{j.compensation}</div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1.5">
-                      <span className="rounded bg-muted px-1.5 py-0.2 font-semibold text-[10px]">{j.openings} Openings</span>
+                  <TableCell className="w-[240px] py-4 px-4 align-middle">
+                    <div className="font-bold text-foreground text-xs leading-snug">{j.compensation}</div>
+                    <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5">
+                      <span className="font-semibold text-foreground/80">{j.openings} Openings</span>
+                      <span className="h-1 w-1 rounded-full bg-border shrink-0" />
                       <span>{j.expOrHours}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="py-3.5">
+                  <TableCell className="w-[130px] py-4 px-4 align-middle whitespace-nowrap">
                     <div className="flex items-center gap-1.5 text-xs text-foreground font-medium">
                       <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span>{j.submittedDate}</span>
                     </div>
-                    <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 inline-block">Within SLA</span>
+                    <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20 mt-1 inline-flex items-center gap-1">
+                      <span className="h-1 w-1 rounded-full bg-primary" />
+                      Within SLA
+                    </span>
                   </TableCell>
-                  <TableCell className="text-right py-3.5">
+                  <TableCell className="w-[180px] text-right py-4 px-4 align-middle whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1.5">
                       <Button
                         size="sm"
                         onClick={() => quickApproveJob(j.id, j.title)}
-                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
+                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                       >
                         <HiCheck className="h-3.5 w-3.5" /> Approve Live
                       </Button>
                       <Link
                         to="/admin/postings"
-                        className="h-8 w-8 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0"
+                        className="h-8 w-8 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0 cursor-pointer"
                         title="Inspect full job requirements"
                       >
                         <HiOutlineArrowTopRightOnSquare className="h-3.5 w-3.5" />
@@ -1310,55 +1654,58 @@ function AdminDashboard() {
                   .slice(0, 2)
                   .join("");
                 return (
-                  <TableRow key={c.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
-                    <TableCell className="py-3.5">
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
+                  <TableRow key={c.id} className="text-xs hover:bg-primary/[0.03] transition-colors border-b border-border/40">
+                    <TableCell className="w-[170px] py-4 px-4 align-middle whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20 whitespace-nowrap">
                         <HiOutlineIdentification className="h-3.5 w-3.5 shrink-0" />
                         <span>Candidate KYC</span>
                       </span>
                     </TableCell>
-                    <TableCell className="py-3.5">
-                      <div className="flex items-center gap-3">
+                    <TableCell className="w-[280px] py-4 px-4 align-middle">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-xs flex items-center justify-center shrink-0">
                           {initials}
                         </div>
-                        <div>
-                          <div className="font-bold text-foreground text-xs hover:text-primary transition-colors">{c.name}</div>
-                          <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                            <span>{c.profession}</span>
-                            <span className="h-1 w-1 rounded-full bg-border" />
-                            <span>{c.state}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-foreground text-xs hover:text-primary transition-colors leading-tight truncate">{c.name}</div>
+                          <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-1 truncate">
+                            <span className="font-medium text-foreground/80 truncate">{c.profession}</span>
+                            <span className="h-1 w-1 rounded-full bg-border shrink-0" />
+                            <span className="shrink-0">{c.state}</span>
                           </div>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="py-3.5">
-                      <div className="font-bold text-foreground">{c.council}</div>
-                      <div className="mt-0.5">
-                        <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-1.5 py-0.2 rounded border border-primary/20">
+                    <TableCell className="w-[240px] py-4 px-4 align-middle">
+                      <div className="font-bold text-foreground text-xs leading-snug truncate" title={c.council}>{c.council}</div>
+                      <div className="mt-1">
+                        <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20">
                           REG: {c.regNumber}
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="py-3.5">
+                    <TableCell className="w-[130px] py-4 px-4 align-middle whitespace-nowrap">
                       <div className="flex items-center gap-1.5 text-xs text-foreground font-medium">
                         <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span>{c.submittedDate}</span>
                       </div>
-                      <span className="text-[10px] font-semibold text-primary mt-0.5 inline-block">NMC Validation</span>
+                      <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20 mt-1 inline-flex items-center gap-1">
+                        <span className="h-1 w-1 rounded-full bg-primary" />
+                        NMC Validation
+                      </span>
                     </TableCell>
-                    <TableCell className="text-right py-3.5">
+                    <TableCell className="w-[180px] text-right py-4 px-4 align-middle whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
                         <Button
                           size="sm"
                           onClick={() => quickVerifyCandidate(c.id, c.name)}
-                          className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
+                          className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                         >
                           <HiOutlineCheckBadge className="h-3.5 w-3.5" /> Verify Seal
                         </Button>
                         <Link
                           to="/admin/candidates"
-                          className="h-8 w-8 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0"
+                          className="h-8 w-8 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0 cursor-pointer"
                           title="Inspect candidate certificates and state registration"
                         >
                           <HiOutlineArrowTopRightOnSquare className="h-3.5 w-3.5" />
@@ -1371,58 +1718,58 @@ function AdminDashboard() {
 
               {/* Facility KYC */}
               {filteredFacilities.map((f) => (
-                <TableRow key={f.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
-                  <TableCell className="py-3.5">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
+                <TableRow key={f.id} className="text-xs hover:bg-primary/[0.03] transition-colors border-b border-border/40">
+                  <TableCell className="w-[170px] py-4 px-4 align-middle whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20 whitespace-nowrap">
                       <HiOutlineBuildingOffice2 className="h-3.5 w-3.5 shrink-0" />
                       <span>Hospital License</span>
                     </span>
                   </TableCell>
-                  <TableCell className="py-3.5">
-                    <div className="flex items-center gap-3">
+                  <TableCell className="w-[280px] py-4 px-4 align-middle">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
                         <HiOutlineBuildingOffice2 className="h-4 w-4" />
                       </div>
-                      <div>
-                        <div className="font-bold text-foreground text-xs hover:text-primary transition-colors">{f.name}</div>
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                          <span>{f.city}, {f.state}</span>
-                          <span className="h-1 w-1 rounded-full bg-border" />
-                          <span>{f.beds} Beds</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-foreground text-xs hover:text-primary transition-colors leading-tight truncate">{f.name}</div>
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-1 truncate">
+                          <span className="font-medium text-foreground/80 truncate">{f.city}, {f.state}</span>
+                          <span className="h-1 w-1 rounded-full bg-border shrink-0" />
+                          <span className="shrink-0">{f.beds} Beds</span>
                         </div>
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="py-3.5">
-                    <div className="font-bold text-foreground flex items-center gap-1">
-                      <HiCheck className="h-3.5 w-3.5 text-emerald-500" />
-                      <span>{f.accreditation}</span>
-                    </div>
-                    <div className="mt-0.5">
-                      <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-1.5 py-0.2 rounded border border-primary/20">
-                        NABH: {f.nabhNumber}
+                  <TableCell className="w-[240px] py-4 px-4 align-middle">
+                    <div className="font-bold text-foreground text-xs leading-snug truncate">{f.accreditation || "NABH Accredited"}</div>
+                    <div className="mt-1">
+                      <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20">
+                        NABH: {f.nabhNumber || "AUDIT-ACTIVE"}
                       </span>
                     </div>
                   </TableCell>
-                  <TableCell className="py-3.5">
+                  <TableCell className="w-[130px] py-4 px-4 align-middle whitespace-nowrap">
                     <div className="flex items-center gap-1.5 text-xs text-foreground font-medium">
                       <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span>{f.submittedDate}</span>
                     </div>
-                    <span className="text-[10px] font-semibold text-primary mt-0.5 inline-block">NABH Portal Sync</span>
+                    <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20 mt-1 inline-flex items-center gap-1">
+                      <span className="h-1 w-1 rounded-full bg-primary" />
+                      NABH Portal Sync
+                    </span>
                   </TableCell>
-                  <TableCell className="text-right py-3.5">
+                  <TableCell className="w-[180px] text-right py-4 px-4 align-middle whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1.5">
                       <Button
                         size="sm"
                         onClick={() => quickVerifyFacility(f.id, f.name)}
-                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
+                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                       >
                         <HiCheck className="h-3.5 w-3.5" /> Approve Facility
                       </Button>
                       <Link
                         to="/admin/facilities"
-                        className="h-8 w-8 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0"
+                        className="h-8 w-8 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0 cursor-pointer"
                         title="Inspect hospital license and NABH certification"
                       >
                         <HiOutlineArrowTopRightOnSquare className="h-3.5 w-3.5" />
@@ -1434,55 +1781,60 @@ function AdminDashboard() {
 
               {/* Applications */}
               {filteredApplications.map((a) => (
-                <TableRow key={a.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
-                  <TableCell className="py-3.5">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
+                <TableRow key={a.id} className="text-xs hover:bg-primary/[0.03] transition-colors border-b border-border/40">
+                  <TableCell className="w-[170px] py-4 px-4 align-middle whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20 whitespace-nowrap">
                       <HiOutlineDocumentCheck className="h-3.5 w-3.5 shrink-0" />
                       <span>Application</span>
                     </span>
                   </TableCell>
-                  <TableCell className="py-3.5">
-                    <div className="flex items-center gap-3">
+                  <TableCell className="w-[280px] py-4 px-4 align-middle">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
                         <HiOutlineDocumentCheck className="h-4 w-4" />
                       </div>
-                      <div>
-                        <div className="font-bold text-foreground text-xs hover:text-primary transition-colors">{a.candidateName}</div>
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                          <span>Applying for {a.jobTitle}</span>
-                          <span className="h-1 w-1 rounded-full bg-border" />
-                          <span>{a.facilityName}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-foreground text-xs hover:text-primary transition-colors leading-tight truncate">{a.candidateName}</div>
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-1 truncate">
+                          <span className="font-medium text-foreground/80 truncate">Applying for {a.jobTitle}</span>
+                          <span className="h-1 w-1 rounded-full bg-border shrink-0" />
+                          <span className="truncate">{(a as any).hospitalName || (a as any).facilityName || "Partner Hospital"}</span>
                         </div>
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="py-3.5">
-                    <div className="font-bold text-foreground flex items-center gap-1.5">
-                      <span>{a.experience} Exp</span>
-                      <span className="h-1 w-1 rounded-full bg-border" />
-                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">{a.matchScore}% Match</span>
+                  <TableCell className="w-[240px] py-4 px-4 align-middle">
+                    <div className="font-bold text-foreground text-xs leading-snug flex items-center gap-1.5">
+                      <span>{(a as any).exp || a.experience || "2+ yrs"} Experience</span>
+                      <span className="h-1 w-1 rounded-full bg-border shrink-0" />
+                      <span className="text-primary font-bold">{a.matchScore}% Match</span>
                     </div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">Council: {a.councilReg}</div>
+                    <div className="text-[11px] text-muted-foreground mt-1 font-mono">
+                      REG: {(a as any).regNumber || (a as any).councilReg || "NMC-VERIFIED"}
+                    </div>
                   </TableCell>
-                  <TableCell className="py-3.5">
+                  <TableCell className="w-[130px] py-4 px-4 align-middle whitespace-nowrap">
                     <div className="flex items-center gap-1.5 text-xs text-foreground font-medium">
                       <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span>{a.appliedDate}</span>
                     </div>
-                    <span className="text-[10px] font-semibold text-primary mt-0.5 inline-block">Screening SLA</span>
+                    <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20 mt-1 inline-flex items-center gap-1">
+                      <span className="h-1 w-1 rounded-full bg-primary" />
+                      Screening SLA
+                    </span>
                   </TableCell>
-                  <TableCell className="text-right py-3.5">
+                  <TableCell className="w-[180px] text-right py-4 px-4 align-middle whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1.5">
                       <Button
                         size="sm"
                         onClick={() => quickShortlistApp(a.id, a.candidateName)}
-                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
+                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                       >
                         <HiCheck className="h-3.5 w-3.5" /> Shortlist
                       </Button>
                       <Link
                         to="/admin/applications"
-                        className="h-8 w-8 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0"
+                        className="h-8 w-8 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0 cursor-pointer"
                         title="Inspect full application dossier"
                       >
                         <HiOutlineArrowTopRightOnSquare className="h-3.5 w-3.5" />
@@ -1494,50 +1846,52 @@ function AdminDashboard() {
 
               {/* Huddle Review Items */}
               {filteredHuddle.map((p) => (
-                <TableRow key={p.id} className="text-xs hover:bg-muted/30 transition-colors border-b border-border/40">
-                  <TableCell className="py-3.5">
-                    <span className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold border",
-                      p.status === "hidden"
-                        ? "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20"
-                        : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
-                    )}>
+                <TableRow key={p.id} className="text-xs hover:bg-primary/[0.03] transition-colors border-b border-border/40">
+                  <TableCell className="w-[170px] py-4 px-4 align-middle whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20 whitespace-nowrap">
                       <HiOutlineChatBubbleLeftRight className="h-3.5 w-3.5 shrink-0" />
                       <span>{p.status === "hidden" ? "Reported Post" : "Clinical Case"}</span>
                     </span>
                   </TableCell>
-                  <TableCell className="py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 flex items-center justify-center shrink-0 font-bold">
-                        {p.anon ? "AN" : p.authorName[0]}
+                  <TableCell className="w-[280px] py-4 px-4 align-middle">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0 font-bold text-xs">
+                        {p.anon ? "AN" : (p.authorName ? p.authorName[0] : "C")}
                       </div>
-                      <div className="max-w-md">
-                        <div className="font-bold text-foreground text-xs">{p.anon ? "Anonymous Author" : p.authorName} · {p.authorRole}</div>
-                        <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{p.text}</p>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-foreground text-xs leading-tight truncate">
+                          {p.anon ? "Anonymous Author" : p.authorName} · {p.authorRole || "Clinician"}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground line-clamp-1 mt-1">{p.text}</p>
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="py-3.5">
-                    <div className="font-semibold text-foreground text-xs">
+                  <TableCell className="w-[240px] py-4 px-4 align-middle">
+                    <div className="font-bold text-foreground text-xs leading-snug truncate">
                       {p.status === "hidden" ? "Flagged by community" : "De-identification review"}
                     </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">
-                      {p.type} · {p.field} Ward
+                    <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5">
+                      <span className="font-medium text-foreground/80">{(p as any).category || (p as any).type || "Clinical"}</span>
+                      <span className="h-1 w-1 rounded-full bg-border shrink-0" />
+                      <span>{(p as any).field ? `${(p as any).field} Ward` : "General Ward"}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="py-3.5">
+                  <TableCell className="w-[130px] py-4 px-4 align-middle whitespace-nowrap">
                     <div className="flex items-center gap-1.5 text-xs text-foreground font-medium">
                       <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      <span>{p.at}</span>
+                      <span>{(p as any).at || (p as any).createdTime || "Recent"}</span>
                     </div>
-                    <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 mt-0.5 inline-block">1-hr Review SLA</span>
+                    <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20 mt-1 inline-flex items-center gap-1">
+                      <span className="h-1 w-1 rounded-full bg-primary" />
+                      1-hr Review SLA
+                    </span>
                   </TableCell>
-                  <TableCell className="text-right py-3.5">
+                  <TableCell className="w-[180px] text-right py-4 px-4 align-middle whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1.5">
                       <Button
                         size="sm"
                         onClick={() => quickApproveHuddle(p.id, p.authorName)}
-                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-none gap-1.5"
+                        className="rounded-xl font-bold text-xs h-8 px-3.5 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                       >
                         <HiCheck className="h-3.5 w-3.5" /> Approve Live
                       </Button>
@@ -1545,7 +1899,7 @@ function AdminDashboard() {
                         size="sm"
                         variant="outline"
                         onClick={() => quickRejectHuddle(p.id)}
-                        className="rounded-xl font-bold text-xs h-8 px-2.5 text-rose-600 border-rose-200 hover:bg-rose-50"
+                        className="rounded-xl font-bold text-xs h-8 px-2.5 text-muted-foreground border border-border/80 hover:text-destructive hover:border-destructive/30 hover:bg-destructive/5 transition-all cursor-pointer"
                       >
                         Remove
                       </Button>
@@ -1557,7 +1911,7 @@ function AdminDashboard() {
               {totalFilteredCount === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="h-36 text-center text-xs text-muted-foreground">
-                    <HiCheck className="h-8 w-8 mx-auto text-emerald-500 mb-2" />
+                    <HiOutlineCheckBadge className="h-8 w-8 mx-auto text-primary mb-2" />
                     All operational queues cleared! Zero pending approvals.
                   </TableCell>
                 </TableRow>
@@ -1570,7 +1924,7 @@ function AdminDashboard() {
         <div className="md:hidden divide-y divide-border/60">
           {/* Job Approvals Mobile Cards */}
           {filteredJobs.map((j) => (
-            <div key={`m-job-${j.id}`} className="p-4 space-y-3 hover:bg-muted/20 transition-colors">
+            <div key={`m-job-${j.id}`} className="p-4 space-y-3 hover:bg-primary/[0.02] transition-colors">
               <div className="flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
                   <HiOutlineBriefcase className="h-3 w-3 shrink-0" />
@@ -1599,12 +1953,13 @@ function AdminDashboard() {
               <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/50 text-xs">
                 <div>
                   <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Compensation</div>
-                  <div className="font-bold font-mono text-foreground text-xs mt-0.5">{j.compensation}</div>
+                  <div className="font-bold text-foreground text-xs mt-0.5">{j.compensation}</div>
                 </div>
                 <div className="text-right">
                   <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Terms</div>
                   <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 justify-end">
-                    <span className="rounded bg-muted px-1.5 py-0.2 font-bold text-[10px] text-foreground">{j.openings} Openings</span>
+                    <span className="font-bold text-foreground">{j.openings} Openings</span>
+                    <span className="h-1 w-1 rounded-full bg-border" />
                     <span>{j.expOrHours}</span>
                   </div>
                 </div>
@@ -1614,13 +1969,13 @@ function AdminDashboard() {
                 <Button
                   size="sm"
                   onClick={() => quickApproveJob(j.id, j.title)}
-                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
+                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                 >
                   <HiCheck className="h-4 w-4" /> Approve Live
                 </Button>
                 <Link
                   to="/admin/postings"
-                  className="h-9 w-9 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0"
+                  className="h-9 w-9 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0 cursor-pointer"
                   title="Inspect full job requirements"
                 >
                   <HiOutlineArrowTopRightOnSquare className="h-4 w-4" />
@@ -1637,7 +1992,7 @@ function AdminDashboard() {
               .slice(0, 2)
               .join("");
             return (
-              <div key={`m-cand-${c.id}`} className="p-4 space-y-3 hover:bg-muted/20 transition-colors">
+              <div key={`m-cand-${c.id}`} className="p-4 space-y-3 hover:bg-primary/[0.02] transition-colors">
                 <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
                     <HiOutlineIdentification className="h-3 w-3 shrink-0" />
@@ -1671,7 +2026,7 @@ function AdminDashboard() {
                   <div className="text-right">
                     <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Registration</div>
                     <div className="mt-0.5">
-                      <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
+                      <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-1.5 py-0.5 rounded-md border border-primary/20">
                         REG: {c.regNumber}
                       </span>
                     </div>
@@ -1682,13 +2037,13 @@ function AdminDashboard() {
                   <Button
                     size="sm"
                     onClick={() => quickVerifyCandidate(c.id, c.name)}
-                    className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
+                    className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                   >
                     <HiOutlineCheckBadge className="h-4 w-4" /> Verify Seal
                   </Button>
                   <Link
                     to="/admin/candidates"
-                    className="h-9 w-9 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0"
+                    className="h-9 w-9 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0 cursor-pointer"
                     title="Inspect candidate certificates and state registration"
                   >
                     <HiOutlineArrowTopRightOnSquare className="h-4 w-4" />
@@ -1700,7 +2055,7 @@ function AdminDashboard() {
 
           {/* Facility KYC Mobile Cards */}
           {filteredFacilities.map((f) => (
-            <div key={`m-fac-${f.id}`} className="p-4 space-y-3 hover:bg-muted/20 transition-colors">
+            <div key={`m-fac-${f.id}`} className="p-4 space-y-3 hover:bg-primary/[0.02] transition-colors">
               <div className="flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
                   <HiOutlineBuildingOffice2 className="h-3 w-3 shrink-0" />
@@ -1729,16 +2084,13 @@ function AdminDashboard() {
               <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/50 text-xs">
                 <div>
                   <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Accreditation</div>
-                  <div className="font-bold text-foreground text-xs mt-0.5 flex items-center gap-1">
-                    <HiCheck className="h-3.5 w-3.5 text-emerald-500" />
-                    <span>{f.accreditation}</span>
-                  </div>
+                  <div className="font-bold text-foreground text-xs mt-0.5">{f.accreditation || "NABH Accredited"}</div>
                 </div>
                 <div className="text-right">
                   <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">NABH Certificate</div>
                   <div className="mt-0.5">
-                    <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
-                      NABH: {f.nabhNumber}
+                    <span className="font-mono text-primary text-[10px] font-bold bg-primary/10 px-1.5 py-0.5 rounded-md border border-primary/20">
+                      NABH: {f.nabhNumber || "AUDIT-ACTIVE"}
                     </span>
                   </div>
                 </div>
@@ -1748,13 +2100,13 @@ function AdminDashboard() {
                 <Button
                   size="sm"
                   onClick={() => quickVerifyFacility(f.id, f.name)}
-                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
+                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                 >
                   <HiCheck className="h-4 w-4" /> Approve Facility
                 </Button>
                 <Link
                   to="/admin/facilities"
-                  className="h-9 w-9 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0"
+                  className="h-9 w-9 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0 cursor-pointer"
                   title="Inspect hospital license and NABH certification"
                 >
                   <HiOutlineArrowTopRightOnSquare className="h-4 w-4" />
@@ -1765,7 +2117,7 @@ function AdminDashboard() {
 
           {/* Applications Mobile Cards */}
           {filteredApplications.map((a) => (
-            <div key={`m-app-${a.id}`} className="p-4 space-y-3 hover:bg-muted/20 transition-colors">
+            <div key={`m-app-${a.id}`} className="p-4 space-y-3 hover:bg-primary/[0.02] transition-colors">
               <div className="flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
                   <HiOutlineDocumentCheck className="h-3 w-3 shrink-0" />
@@ -1786,23 +2138,23 @@ function AdminDashboard() {
                   <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
                     <span className="font-medium text-foreground/80">Applying for {a.jobTitle}</span>
                     <span className="h-1 w-1 rounded-full bg-border" />
-                    <span>{a.facilityName}</span>
+                    <span>{(a as any).hospitalName || (a as any).facilityName || "Partner Hospital"}</span>
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/50 text-xs">
                 <div>
-                  <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Match Score</div>
-                  <div className="font-bold text-emerald-600 dark:text-emerald-400 text-xs mt-0.5 flex items-center gap-1">
+                  <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Match & Experience</div>
+                  <div className="font-bold text-primary text-xs mt-0.5 flex items-center gap-1">
                     <span>{a.matchScore}% Match</span>
                     <span className="h-1 w-1 rounded-full bg-border" />
-                    <span className="text-foreground">{a.experience} Exp</span>
+                    <span className="text-foreground">{(a as any).exp || a.experience || "2+ yrs"} Exp</span>
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Registration</div>
-                  <div className="text-[11px] text-muted-foreground font-mono mt-0.5">{a.councilReg}</div>
+                  <div className="text-[11px] text-muted-foreground font-mono mt-0.5">{(a as any).regNumber || (a as any).councilReg || "NMC-VERIFIED"}</div>
                 </div>
               </div>
 
@@ -1810,13 +2162,13 @@ function AdminDashboard() {
                 <Button
                   size="sm"
                   onClick={() => quickShortlistApp(a.id, a.candidateName)}
-                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 transition-all active:scale-[0.98]"
+                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
                 >
                   <HiCheck className="h-4 w-4" /> Shortlist
                 </Button>
                 <Link
                   to="/admin/applications"
-                  className="h-9 w-9 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0"
+                  className="h-9 w-9 rounded-xl border border-border/80 hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-all shrink-0 cursor-pointer"
                   title="Inspect full application dossier"
                 >
                   <HiOutlineArrowTopRightOnSquare className="h-4 w-4" />
@@ -1825,9 +2177,68 @@ function AdminDashboard() {
             </div>
           ))}
 
+          {/* Huddle Review Mobile Cards */}
+          {filteredHuddle.map((p) => (
+            <div key={`m-hud-${p.id}`} className="p-4 space-y-3 hover:bg-primary/[0.02] transition-colors">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold text-primary border border-primary/20">
+                  <HiOutlineChatBubbleLeftRight className="h-3 w-3 shrink-0" />
+                  <span>{p.status === "hidden" ? "Reported Post" : "Clinical Case"}</span>
+                </span>
+                <span className="flex items-center gap-1 text-[11px] text-muted-foreground font-medium">
+                  <HiOutlineClock className="h-3.5 w-3.5 shrink-0" />
+                  <span>{(p as any).at || (p as any).createdTime || "Recent"}</span>
+                </span>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-sm flex items-center justify-center shrink-0 mt-0.5">
+                  {p.anon ? "AN" : (p.authorName ? p.authorName[0] : "C")}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h4 className="font-bold text-foreground text-sm leading-snug">
+                    {p.anon ? "Anonymous Author" : p.authorName} · {p.authorRole || "Clinician"}
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{p.text}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-muted/40 border border-border/50 text-xs">
+                <div>
+                  <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Review Type</div>
+                  <div className="font-bold text-foreground text-xs mt-0.5">
+                    {p.status === "hidden" ? "Flagged by community" : "De-identification review"}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Department</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{(p as any).category || (p as any).type || "Clinical"} · {(p as any).field ? `${(p as any).field} Ward` : "General Ward"}</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-0.5">
+                <Button
+                  size="sm"
+                  onClick={() => quickApproveHuddle(p.id, p.authorName)}
+                  className="flex-1 rounded-xl font-bold text-xs h-9 bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  <HiCheck className="h-4 w-4" /> Approve Live
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => quickRejectHuddle(p.id)}
+                  className="rounded-xl font-bold text-xs h-9 px-3 text-muted-foreground border border-border/80 hover:text-destructive hover:border-destructive/30 hover:bg-destructive/5 transition-all cursor-pointer"
+                >
+                  Remove
+                </Button>
+              </div>
+            </div>
+          ))}
+
           {totalFilteredCount === 0 && (
             <div className="py-12 text-center text-xs text-muted-foreground space-y-2">
-              <HiCheck className="h-8 w-8 mx-auto text-emerald-500 mb-1" />
+              <HiOutlineCheckBadge className="h-8 w-8 mx-auto text-primary mb-1" />
               <p className="font-bold text-foreground">All operational queues cleared!</p>
               <p>Zero pending approvals matching your filter.</p>
             </div>

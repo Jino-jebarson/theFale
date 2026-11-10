@@ -7,8 +7,8 @@ import {
   HiIdentification,
   HiOutlineBuildingOffice2,
   HiBuildingOffice2,
-  HiOutlineDocumentCheck,
-  HiDocumentCheck,
+  HiOutlineBriefcase,
+  HiBriefcase,
   HiOutlineUserGroup,
   HiUserGroup,
   HiOutlineShieldCheck,
@@ -21,8 +21,8 @@ import {
   HiOutlineBell,
   HiOutlineChatBubbleLeftRight,
   HiChatBubbleLeftRight,
-  HiOutlineLifebuoy,
-  HiLifebuoy,
+  HiOutlineTicket,
+  HiTicket,
 } from "react-icons/hi2";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
@@ -33,6 +33,12 @@ import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { getAdminDashboardMetrics, getAdminSupportTickets, type AdminDashboardMetricsDto } from "@/lib/adapters/adminAdapter";
 import { logout } from "@/lib/adapters/authAdapter";
+import {
+  getUnseenCount,
+  readAdminSeenCounts,
+  syncAdminSeenCounts,
+  type AdminRouteCounts,
+} from "@/lib/adminSeenCounts";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,6 +70,8 @@ export function AdminLayout({
 
   const [metrics, setMetrics] = useState<AdminDashboardMetricsDto | null>(null);
   const [openTicketsCount, setOpenTicketsCount] = useState<number>(0);
+  const [ticketsLoaded, setTicketsLoaded] = useState<boolean>(!isApiEnabled);
+  const [seenCounts, setSeenCounts] = useState<AdminRouteCounts>(() => readAdminSeenCounts());
 
   useEffect(() => {
     if (!isApiEnabled) return;
@@ -76,7 +84,10 @@ export function AdminLayout({
       });
 
     getAdminSupportTickets("OPEN")
-      .then((t) => setOpenTicketsCount(t.length))
+      .then((t) => {
+        setOpenTicketsCount(t.length);
+        setTicketsLoaded(true);
+      })
       .catch(() => {});
   }, [path]);
 
@@ -102,12 +113,41 @@ export function AdminLayout({
         (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
       ).length;
 
-  const totalPending =
-    pendingCandidateKYC +
-    pendingFacilityKYC +
-    pendingJobApprovals +
-    pendingShortlisting +
-    pendingHuddleModeration;
+  const metricsReady = !isApiEnabled || metrics !== null;
+  const ticketsReady = !isApiEnabled || ticketsLoaded;
+
+  useEffect(() => {
+    const updated = syncAdminSeenCounts(
+      path,
+      {
+        "/admin/candidates": pendingCandidateKYC,
+        "/admin/facilities": pendingFacilityKYC,
+        "/admin/postings": pendingJobApprovals,
+        "/admin/applications": pendingShortlisting,
+        "/admin/huddle": pendingHuddleModeration,
+        "/admin/support": openTicketsCount,
+      },
+      {
+        "/admin/candidates": metricsReady,
+        "/admin/facilities": metricsReady,
+        "/admin/postings": metricsReady,
+        "/admin/applications": metricsReady,
+        "/admin/huddle": metricsReady,
+        "/admin/support": ticketsReady,
+      }
+    );
+    setSeenCounts(updated);
+  }, [
+    path,
+    metricsReady,
+    ticketsReady,
+    pendingCandidateKYC,
+    pendingFacilityKYC,
+    pendingJobApprovals,
+    pendingShortlisting,
+    pendingHuddleModeration,
+    openTicketsCount,
+  ]);
 
   const adminNav = [
     {
@@ -116,7 +156,8 @@ export function AdminLayout({
       shortLabel: "Overview",
       icon: HiOutlineSquares2X2,
       active: HiSquares2X2,
-      badge: totalPending,
+      badge: 0,
+      group: "overview",
     },
     {
       to: "/admin/candidates",
@@ -124,7 +165,8 @@ export function AdminLayout({
       shortLabel: "KYC",
       icon: HiOutlineIdentification,
       active: HiIdentification,
-      badge: pendingCandidateKYC,
+      badge: getUnseenCount(path, "/admin/candidates", pendingCandidateKYC, seenCounts),
+      group: "verification",
     },
     {
       to: "/admin/facilities",
@@ -132,15 +174,17 @@ export function AdminLayout({
       shortLabel: "Hospitals",
       icon: HiOutlineBuildingOffice2,
       active: HiBuildingOffice2,
-      badge: pendingFacilityKYC,
+      badge: getUnseenCount(path, "/admin/facilities", pendingFacilityKYC, seenCounts),
+      group: "verification",
     },
     {
       to: "/admin/postings",
       label: "Job Approvals",
-      shortLabel: "Postings",
-      icon: HiOutlineDocumentCheck,
-      active: HiDocumentCheck,
-      badge: pendingJobApprovals,
+      shortLabel: "Jobs",
+      icon: HiOutlineBriefcase,
+      active: HiBriefcase,
+      badge: getUnseenCount(path, "/admin/postings", pendingJobApprovals, seenCounts),
+      group: "pipeline",
     },
     {
       to: "/admin/applications",
@@ -148,7 +192,8 @@ export function AdminLayout({
       shortLabel: "Shortlist",
       icon: HiOutlineUserGroup,
       active: HiUserGroup,
-      badge: pendingShortlisting,
+      badge: getUnseenCount(path, "/admin/applications", pendingShortlisting, seenCounts),
+      group: "pipeline",
     },
     {
       to: "/admin/huddle",
@@ -156,15 +201,17 @@ export function AdminLayout({
       shortLabel: "Huddle",
       icon: HiOutlineChatBubbleLeftRight,
       active: HiChatBubbleLeftRight,
-      badge: pendingHuddleModeration,
+      badge: getUnseenCount(path, "/admin/huddle", pendingHuddleModeration, seenCounts),
+      group: "support",
     },
     {
       to: "/admin/support",
       label: "Support Tickets",
-      shortLabel: "Tickets",
-      icon: HiOutlineLifebuoy,
-      active: HiLifebuoy,
-      badge: openTicketsCount,
+      shortLabel: "Support",
+      icon: HiOutlineTicket,
+      active: HiTicket,
+      badge: getUnseenCount(path, "/admin/support", openTicketsCount, seenCounts),
+      group: "support",
     },
   ] as const;
 
@@ -198,43 +245,52 @@ export function AdminLayout({
 
           {/* Top Horizontal Navigation Menu */}
           <nav className="ml-auto hidden h-16 items-center md:flex shrink min-w-0">
-            {adminNav.map((n) => {
+            {adminNav.map((n, idx) => {
               const on =
                 path === n.to ||
                 (n.to !== "/admin" && path.startsWith(n.to + "/"));
               const Icon = on ? n.active : n.icon;
+              const prevGroup = idx > 0 ? adminNav[idx - 1].group : n.group;
+              const showGroupDivider = idx > 0 && n.group !== prevGroup;
 
               return (
-                <Link
-                  key={n.to}
-                  to={n.to}
-                  preload="intent"
-                  className={cn(
-                    "relative flex h-16 min-w-[68px] xl:min-w-[80px] px-1.5 xl:px-2.5 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors whitespace-nowrap",
-                    on
-                      ? "text-primary font-bold"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <div className="relative">
-                    <Icon
-                      className={cn(
-                        "h-5 w-5 shrink-0 transition-transform group-hover:scale-105",
-                        on ? "text-primary" : "text-muted-foreground"
-                      )}
+                <div key={n.to} className="flex items-center h-16">
+                  {showGroupDivider && (
+                    <span
+                      aria-hidden="true"
+                      className="hidden xl:block h-6 w-px bg-border/70 mx-1 shrink-0"
                     />
-                    {n.badge > 0 && (
-                      <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-black text-white shadow-xs">
-                        {n.badge}
-                      </span>
-                    )}
-                  </div>
-                  <span className="leading-none hidden xl:inline">{n.label}</span>
-                  <span className="leading-none inline xl:hidden">{n.shortLabel}</span>
-                  {on && (
-                    <span className="absolute bottom-0 inset-x-2 h-0.5 rounded-t-full bg-primary" />
                   )}
-                </Link>
+                  <Link
+                    to={n.to}
+                    preload="intent"
+                    className={cn(
+                      "group relative flex h-16 min-w-[68px] xl:min-w-[82px] px-2 xl:px-3 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors whitespace-nowrap",
+                      on
+                        ? "text-primary font-bold"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <div className="relative">
+                      <Icon
+                        className={cn(
+                          "h-5 w-5 shrink-0 transition-transform group-hover:scale-105",
+                          on ? "text-primary" : "text-muted-foreground"
+                        )}
+                      />
+                      {n.badge > 0 && (
+                        <span className="absolute -top-1.5 -right-2.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[9px] font-black text-white shadow-xs">
+                          {n.badge}
+                        </span>
+                      )}
+                    </div>
+                    <span className="leading-none hidden xl:inline">{n.label}</span>
+                    <span className="leading-none inline xl:hidden">{n.shortLabel}</span>
+                    {on && (
+                      <span className="absolute bottom-0 inset-x-2 h-0.5 rounded-t-full bg-primary" />
+                    )}
+                  </Link>
+                </div>
               );
             })}
           </nav>

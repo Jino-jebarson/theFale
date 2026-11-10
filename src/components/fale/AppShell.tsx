@@ -11,7 +11,8 @@ import {
   HiOutlineBanknotes, HiBanknotes,
   HiOutlineChatBubbleLeftRight, HiChatBubbleLeftRight,
   HiOutlineBookmark,
-  HiOutlineLifebuoy, HiLifebuoy,
+  HiOutlineTicket, HiTicket,
+  HiOutlineLifebuoy,
 } from "react-icons/hi2";
 import { RiStethoscopeLine, RiVerifiedBadgeFill } from "react-icons/ri";
 import { Logo } from "./Logo";
@@ -42,6 +43,12 @@ import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
 import { getFacilityApplicants, getFacilityProfile } from "@/lib/adapters/facilityAdapter";
 import { getAdminDashboardMetrics, getAdminSupportTickets, type AdminDashboardMetricsDto } from "@/lib/adapters/adminAdapter";
 import { getNotifications } from "@/lib/adapters/notificationAdapter";
+import {
+  getUnseenCount,
+  readAdminSeenCounts,
+  syncAdminSeenCounts,
+  type AdminRouteCounts,
+} from "@/lib/adminSeenCounts";
 
 const candidateNav = [
   { to: "/home", label: "Home", icon: HiOutlineHome, active: HiHome, badge: 0 },
@@ -380,6 +387,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const [adminMetrics, setAdminMetrics] = useState<AdminDashboardMetricsDto | null>(null);
   const [adminOpenTickets, setAdminOpenTickets] = useState<number>(0);
+  const [adminTicketsLoaded, setAdminTicketsLoaded] = useState<boolean>(!isApiEnabled);
+  const [adminSeenCounts, setAdminSeenCounts] = useState<AdminRouteCounts>(() => readAdminSeenCounts());
 
   const pendingCandidateKYC = isApiEnabled && adminMetrics
     ? (adminMetrics.pendingCandidateKycCount ?? 0)
@@ -403,26 +412,58 @@ export function AppShell({ children }: { children: ReactNode }) {
         (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
       ).length;
 
-  const totalAdminPending =
-    pendingCandidateKYC +
-    pendingFacilityKYC +
-    pendingJobApprovals +
-    pendingShortlisting +
-    pendingHuddleModeration;
-
   const adminNav = [
-    { to: "/admin", label: "Overview", shortLabel: "Overview", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: totalAdminPending },
-    { to: "/admin/candidates", label: "Candidate KYC", shortLabel: "KYC", icon: HiOutlineIdentification, active: HiIdentification, badge: pendingCandidateKYC },
-    { to: "/admin/facilities", label: "Hospital Verification", shortLabel: "Hospitals", icon: HiOutlineBuildingOffice2, active: HiBuildingOffice2, badge: pendingFacilityKYC },
-    { to: "/admin/postings", label: "Job Approvals", shortLabel: "Postings", icon: HiOutlineDocumentCheck, active: HiDocumentCheck, badge: pendingJobApprovals },
-    { to: "/admin/applications", label: "Shortlisting", shortLabel: "Shortlist", icon: HiOutlineUserGroup, active: HiUserGroup, badge: pendingShortlisting },
-    { to: "/admin/huddle", label: "Huddle Moderation", shortLabel: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: pendingHuddleModeration },
-    { to: "/admin/support", label: "Support Tickets", shortLabel: "Tickets", icon: HiOutlineLifebuoy, active: HiLifebuoy, badge: adminOpenTickets },
+    { to: "/admin", label: "Overview", shortLabel: "Overview", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: 0 },
+    { to: "/admin/candidates", label: "Candidate KYC", shortLabel: "KYC", icon: HiOutlineIdentification, active: HiIdentification, badge: getUnseenCount(path, "/admin/candidates", pendingCandidateKYC, adminSeenCounts) },
+    { to: "/admin/facilities", label: "Hospital Verification", shortLabel: "Hospitals", icon: HiOutlineBuildingOffice2, active: HiBuildingOffice2, badge: getUnseenCount(path, "/admin/facilities", pendingFacilityKYC, adminSeenCounts) },
+    { to: "/admin/postings", label: "Job Approvals", shortLabel: "Jobs", icon: HiOutlineBriefcase, active: HiBriefcase, badge: getUnseenCount(path, "/admin/postings", pendingJobApprovals, adminSeenCounts) },
+    { to: "/admin/applications", label: "Shortlisting", shortLabel: "Shortlist", icon: HiOutlineUserGroup, active: HiUserGroup, badge: getUnseenCount(path, "/admin/applications", pendingShortlisting, adminSeenCounts) },
+    { to: "/admin/huddle", label: "Huddle Moderation", shortLabel: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: getUnseenCount(path, "/admin/huddle", pendingHuddleModeration, adminSeenCounts) },
+    { to: "/admin/support", label: "Support Tickets", shortLabel: "Support", icon: HiOutlineTicket, active: HiTicket, badge: getUnseenCount(path, "/admin/support", adminOpenTickets, adminSeenCounts) },
   ] as const;
 
   const isAdminPath = path.startsWith("/admin");
   const isFacilityPath = path.startsWith("/employer");
   const activePortal = isAdminPath ? "admin" : isFacilityPath ? "facility" : s.portal;
+
+  const adminMetricsReady = !isApiEnabled || adminMetrics !== null;
+  const adminTicketsReady = !isApiEnabled || adminTicketsLoaded;
+
+  useEffect(() => {
+    if (activePortal !== "admin" && !isAdminPath) return;
+    const updated = syncAdminSeenCounts(
+      path,
+      {
+        "/admin/candidates": pendingCandidateKYC,
+        "/admin/facilities": pendingFacilityKYC,
+        "/admin/postings": pendingJobApprovals,
+        "/admin/applications": pendingShortlisting,
+        "/admin/huddle": pendingHuddleModeration,
+        "/admin/support": adminOpenTickets,
+      },
+      {
+        "/admin/candidates": adminMetricsReady,
+        "/admin/facilities": adminMetricsReady,
+        "/admin/postings": adminMetricsReady,
+        "/admin/applications": adminMetricsReady,
+        "/admin/huddle": adminMetricsReady,
+        "/admin/support": adminTicketsReady,
+      }
+    );
+    setAdminSeenCounts(updated);
+  }, [
+    activePortal,
+    isAdminPath,
+    path,
+    adminMetricsReady,
+    adminTicketsReady,
+    pendingCandidateKYC,
+    pendingFacilityKYC,
+    pendingJobApprovals,
+    pendingShortlisting,
+    pendingHuddleModeration,
+    adminOpenTickets,
+  ]);
 
   // Auto-sync active portal to global store when on route-specific paths
   useEffect(() => {
@@ -501,7 +542,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       .catch(() => {});
 
     getAdminSupportTickets("OPEN")
-      .then((t) => setAdminOpenTickets(t.length))
+      .then((t) => {
+        setAdminOpenTickets(t.length);
+        setAdminTicketsLoaded(true);
+      })
       .catch(() => {});
   }, [activePortal, isAdminPath, path]);
 

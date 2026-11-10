@@ -1,12 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  HiOutlineLifebuoy,
+  HiOutlineTicket,
   HiOutlineMagnifyingGlass,
   HiOutlineArrowPath,
   HiOutlineClock,
   HiOutlineCheckCircle,
-  HiOutlineExclamationCircle,
   HiOutlineEnvelope,
   HiOutlineUser,
   HiOutlineChatBubbleLeftRight,
@@ -28,13 +27,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import {
@@ -43,6 +41,21 @@ import {
   type AdminSupportTicketDto,
 } from "@/lib/adapters/adminAdapter";
 import { draftAllyHandoffWithAi } from "@/lib/adapters/aiAdapter";
+import {
+  type AllyAuditStatus,
+  cleanMarkdownAndJsonNoise,
+  extractJsonPayload,
+  readSessionAuditCache,
+  writeSessionAuditCache,
+} from "@/lib/allyAuditUtils";
+
+const ALLY_SUPPORT_CACHE_KEY = "fale_ally_support_precheck_cache_v1";
+
+type AllyTicketPreCheckResult = {
+  status: AllyAuditStatus;
+  summary: string;
+  draft: string;
+};
 
 export const Route = createFileRoute("/admin/support")({
   head: () => ({
@@ -115,13 +128,163 @@ export function AdminSupportPage() {
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [search, setSearch] = useState<string>("");
 
-  // Managing ticket modal
+  // Managing ticket drawer & Ally pre-check triage state
   const [selectedTicket, setSelectedTicket] = useState<AdminSupportTicketDto | null>(null);
   const [newStatus, setNewStatus] = useState<string>("OPEN");
   const [adminNotes, setAdminNotes] = useState<string>("");
   const [saving, setSaving] = useState(false);
-  const [handoffDraft, setHandoffDraft] = useState<string | null>(null);
-  const [draftingHandoff, setDraftingHandoff] = useState(false);
+
+  const getTicketCacheKey = useCallback((t: AdminSupportTicketDto) => {
+    return `${t.id}:${t.status}:${t.subject || ""}:${(t.description || "").slice(0, 80)}`;
+  }, []);
+
+  const [allyPreChecks, setAllyPreChecks] = useState<Record<string, AllyTicketPreCheckResult>>(() =>
+    readSessionAuditCache<AllyTicketPreCheckResult>(ALLY_SUPPORT_CACHE_KEY)
+  );
+  const [runningPreCheckIds, setRunningPreCheckIds] = useState<Record<string, boolean>>({});
+  const inFlightKeysRef = useRef<Set<string>>(new Set());
+  const autoCheckedKeysRef = useRef<Set<string>>(new Set());
+
+  const getTicketAllyPreCheck = useCallback(
+    (t: AdminSupportTicketDto): AllyTicketPreCheckResult => {
+      const key = getTicketCacheKey(t);
+      const cached = allyPreChecks[key] || allyPreChecks[t.id];
+      if (cached) return cached;
+      return {
+        status: "PENDING",
+        summary: "Ally support triage & reply draft queued for live evaluation.",
+        draft: "",
+      };
+    },
+    [allyPreChecks, getTicketCacheKey]
+  );
+
+  const handleRunAllyTicketPreCheck = useCallback(
+    async (ticket: AdminSupportTicketDto, options?: { silent?: boolean }) => {
+      const key = getTicketCacheKey(ticket);
+      if (options?.silent && inFlightKeysRef.current.has(key)) return;
+
+      inFlightKeysRef.current.add(key);
+      setRunningPreCheckIds((prev) => ({ ...prev, [ticket.id]: true }));
+      try {
+        const promptInput = `[${ticket.category || "SUPPORT"}] ${ticket.subject || "Support Ticket"}${
+          ticket.description ? ` — ${ticket.description}` : ""
+        }`;
+        const res = await draftAllyHandoffWithAi(promptInput);
+        const rawText = res.response || res.content || "";
+        const embeddedJson = extractJsonPayload(rawText);
+        const sData: Record<string, any> = {
+          ...(embeddedJson || {}),
+          ...(res.structuredData || {}),
+        };
+
+        const rawDraft =
+          typeof sData["whatsappDraft"] === "string"
+            ? sData["whatsappDraft"]
+            : typeof sData["draft"] === "string"
+              ? sData["draft"]
+              : typeof sData["reply"] === "string"
+                ? sData["reply"]
+                : embeddedJson
+                  ? ""
+                  : rawText;
+
+        const cleanedDraft =
+          (rawDraft || "")
+            .replace(/```json\s*/gi, "")
+            .replace(/```/g, "")
+            .replace(/\*\*|__|~~/g, "")
+            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+            .trim() ||
+          `Hello ${ticket.userName || "Doctor/Nurse"}, this is FALE Clinical Support regarding ticket #${ticket.id
+            .slice(0, 8)
+            .toUpperCase()} (${ticket.subject}). Our team has reviewed your request and is actively assisting you.`;
+
+        const summary =
+          cleanMarkdownAndJsonNoise(
+            typeof sData["ticketSummary"] === "string"
+              ? sData["ticketSummary"]
+              : typeof sData["summary"] === "string"
+                ? sData["summary"]
+                : ""
+          ) || `Triage & escalation draft ready for ${ticket.category || "Support"} (${ticket.userRole || "User"}).`;
+
+        const entry: AllyTicketPreCheckResult = {
+          status: "VERIFIED",
+          summary,
+          draft: cleanedDraft,
+        };
+
+        setAllyPreChecks((prev) => {
+          const next = { ...prev, [key]: entry };
+          writeSessionAuditCache(ALLY_SUPPORT_CACHE_KEY, next);
+          return next;
+        });
+
+        if (!options?.silent) {
+          toast.success("Ally triage & reply draft generated!");
+        }
+      } catch (err: any) {
+        console.warn("Ally ticket pre-check failed:", err);
+        const fallbackDraft = `Hi ${ticket.userName || "Doctor/Nurse"}, this is the FALE Clinical Support desk following up on ticket #${ticket.id
+          .slice(0, 8)
+          .toUpperCase()} regarding "${ticket.subject}". Our operations team is actively investigating and will update you shortly.`;
+
+        setAllyPreChecks((prev) => ({
+          ...prev,
+          [key]: {
+            status: "ERROR",
+            summary: "Ally live triage service unreachable; fallback template prepared.",
+            draft: fallbackDraft,
+          },
+        }));
+        if (!options?.silent) {
+          toast.error("Ally live service unavailable; fallback draft loaded");
+        }
+      } finally {
+        inFlightKeysRef.current.delete(key);
+        setRunningPreCheckIds((prev) => {
+          const next = { ...prev };
+          delete next[ticket.id];
+          return next;
+        });
+      }
+    },
+    [getTicketCacheKey]
+  );
+
+  const renderAllyTicketBadge = (t: AdminSupportTicketDto) => {
+    const check = getTicketAllyPreCheck(t);
+    const isRunning = Boolean(runningPreCheckIds[t.id]);
+    const isReady = check.status === "VERIFIED";
+    const isError = check.status === "ERROR";
+
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none whitespace-nowrap shrink-0",
+          isRunning || isReady
+            ? "bg-primary/10 text-primary border-primary/25"
+            : isError
+              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
+              : "bg-muted/70 text-muted-foreground border-border/60"
+        )}
+      >
+        {isRunning ? (
+          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+        ) : (
+          <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
+        )}
+        {isRunning
+          ? "Ally Triaging..."
+          : isReady
+            ? "Ally Reply Ready"
+            : isError
+              ? "Ally Retry"
+              : "Ally Triage Queued"}
+      </span>
+    );
+  };
 
   const loadTickets = async () => {
     if (!isApiEnabled) return;
@@ -139,6 +302,47 @@ export function AdminSupportPage() {
   useEffect(() => {
     loadTickets();
   }, []);
+
+  // Performance-safe background Ally triage pre-check for active tickets (MAX_CONCURRENT = 2)
+  useEffect(() => {
+    const queue = tickets.filter((t) => {
+      const s = (t.status || "OPEN").toUpperCase();
+      if (s !== "OPEN" && s !== "IN_PROGRESS") return false;
+      const key = getTicketCacheKey(t);
+      return !allyPreChecks[key] && !autoCheckedKeysRef.current.has(key) && !inFlightKeysRef.current.has(key);
+    });
+    if (queue.length === 0) return;
+
+    let cancelled = false;
+    let cursor = 0;
+    const MAX_CONCURRENT = 2;
+
+    const worker = async () => {
+      while (!cancelled && cursor < queue.length) {
+        const nextTicket = queue[cursor++];
+        if (!nextTicket) break;
+        const key = getTicketCacheKey(nextTicket);
+        autoCheckedKeysRef.current.add(key);
+        await handleRunAllyTicketPreCheck(nextTicket, { silent: true });
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(MAX_CONCURRENT, queue.length) }, () => worker());
+    void Promise.all(workers);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tickets, allyPreChecks, getTicketCacheKey, handleRunAllyTicketPreCheck]);
+
+  // Prioritize Ally triage immediately when Inspect drawer opens for a ticket
+  useEffect(() => {
+    if (!selectedTicket) return;
+    const key = getTicketCacheKey(selectedTicket);
+    if (!allyPreChecks[key] && !inFlightKeysRef.current.has(key)) {
+      void handleRunAllyTicketPreCheck(selectedTicket, { silent: true });
+    }
+  }, [selectedTicket, allyPreChecks, getTicketCacheKey, handleRunAllyTicketPreCheck]);
 
   const counts = useMemo(() => {
     return {
@@ -175,24 +379,6 @@ export function AdminSupportPage() {
     setSelectedTicket(ticket);
     setNewStatus(ticket.status || "OPEN");
     setAdminNotes(ticket.adminNotes || "");
-    setHandoffDraft(null);
-  };
-
-  const handleDraftWhatsApp = async () => {
-    if (!selectedTicket) return;
-    setDraftingHandoff(true);
-    try {
-      const res = await draftAllyHandoffWithAi(selectedTicket.subject || selectedTicket.description);
-      const draftText = res.response || res.content || "";
-      setHandoffDraft(draftText);
-      toast.success("Ally draft generated!");
-    } catch {
-      setHandoffDraft(
-        `Hi ${selectedTicket.userName || "Doctor/Nurse"},\n\nThis is the FALE Clinical Support desk following up on your inquiry regarding: "${selectedTicket.subject}". Our operations team is addressing your ticket #${selectedTicket.id.slice(0, 8).toUpperCase()}. How can we best assist you right now?`
-      );
-    } finally {
-      setDraftingHandoff(false);
-    }
   };
 
   const handleSaveStatus = async () => {
@@ -233,113 +419,127 @@ export function AdminSupportPage() {
         </Button>
       }
     >
-      <div className="space-y-6">
-        {/* KPI Summary Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="rounded-2xl border border-border/80 bg-card p-4 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground">Total Logged</span>
-              <span className="grid h-7 w-7 place-items-center rounded-xl bg-primary/10 text-primary">
-                <HiOutlineLifebuoy className="h-4 w-4" />
-              </span>
-            </div>
-            <div className="mt-2 text-2xl font-black font-mono text-foreground">{counts.all}</div>
-            <p className="text-[11px] text-muted-foreground mt-0.5">All tickets in system</p>
+      {/* Metric Strip (4 Cards matching Candidate KYC, Hospital Verification & Job Approvals) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
+            <span>Action Required</span>
+            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
           </div>
-
-          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-700 dark:text-amber-400">Action Required</span>
-              <span className="grid h-7 w-7 place-items-center rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-300">
-                <HiOutlineExclamationCircle className="h-4 w-4" />
-              </span>
-            </div>
-            <div className="mt-2 text-2xl font-black font-mono text-amber-900 dark:text-amber-300">
-              {counts.open}
-            </div>
-            <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">Awaiting first response</p>
-          </div>
-
-          <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-blue-700 dark:text-blue-400">In Progress</span>
-              <span className="grid h-7 w-7 place-items-center rounded-xl bg-blue-500/20 text-blue-700 dark:text-blue-300">
-                <HiOutlineClock className="h-4 w-4" />
-              </span>
-            </div>
-            <div className="mt-2 text-2xl font-black font-mono text-blue-900 dark:text-blue-300">
-              {counts.inProgress}
-            </div>
-            <p className="text-[11px] text-blue-700/80 dark:text-blue-400/80 mt-0.5">Under clinical investigation</p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">Resolved</span>
-              <span className="grid h-7 w-7 place-items-center rounded-xl bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
-                <HiOutlineCheckCircle className="h-4 w-4" />
-              </span>
-            </div>
-            <div className="mt-2 text-2xl font-black font-mono text-emerald-900 dark:text-emerald-300">
-              {counts.resolved + counts.closed}
-            </div>
-            <p className="text-[11px] text-emerald-700/80 dark:text-emerald-400/80 mt-0.5">Closed & SLA met</p>
-          </div>
+          <div className="text-2xl font-black text-foreground">{counts.open}</div>
+          <p className="text-[11px] text-muted-foreground">Awaiting first response</p>
         </div>
 
-        {/* Filter Bar & Search */}
-        <div className="rounded-2xl border border-border/80 bg-card p-4 shadow-2xs space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            {/* Status Filter Tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-              {[
-                { id: "ALL", label: `All (${counts.all})` },
-                { id: "OPEN", label: `Open (${counts.open})` },
-                { id: "IN_PROGRESS", label: `In Progress (${counts.inProgress})` },
-                { id: "RESOLVED", label: `Resolved (${counts.resolved})` },
-                { id: "CLOSED", label: `Closed (${counts.closed})` },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setStatusFilter(tab.id)}
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
+            <span>In Progress</span>
+            <HiOutlineClock className="h-4 w-4 text-primary" />
+          </div>
+          <div className="text-2xl font-black text-foreground">{counts.inProgress}</div>
+          <p className="text-[11px] text-primary font-medium">Under clinical investigation</p>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
+            <span>Resolved &amp; Closed</span>
+            <HiOutlineCheckCircle className="h-4 w-4 text-emerald-500" />
+          </div>
+          <div className="text-2xl font-black text-foreground">{counts.resolved + counts.closed}</div>
+          <p className="text-[11px] text-emerald-600 font-medium">Closed &amp; SLA met</p>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
+          <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
+            <span>Total Logged</span>
+            <HiOutlineTicket className="h-4 w-4 text-primary" />
+          </div>
+          <div className="text-2xl font-black text-foreground">{counts.all}</div>
+          <p className="text-[11px] text-muted-foreground">All tickets in system</p>
+        </div>
+      </div>
+
+      {/* Main Unified Table & Mobile Card Container */}
+      <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden min-w-0 w-full">
+        {/* Controls Bar */}
+        <div className="p-3.5 sm:p-4 border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 min-w-0">
+          {/* Segmented Filter Pills */}
+          <div className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 w-full md:w-fit overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {[
+              { id: "OPEN", label: "Open", count: counts.open },
+              { id: "IN_PROGRESS", label: "In Progress", count: counts.inProgress },
+              { id: "RESOLVED", label: "Resolved", count: counts.resolved },
+              { id: "CLOSED", label: "Closed", count: counts.closed },
+              { id: "ALL", label: "All Tickets", count: counts.all },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setStatusFilter(tab.id)}
+                className={cn(
+                  "px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0",
+                  statusFilter === tab.id
+                    ? "bg-card text-foreground shadow-xs border border-border/60"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <span>{tab.label}</span>
+                <span
                   className={cn(
-                    "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer",
-                    statusFilter === tab.id
-                      ? "bg-primary text-white shadow-xs"
-                      : "bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground border border-border/60"
+                    "px-1.5 py-0.2 rounded-full text-[10px] font-extrabold",
+                    statusFilter === tab.id ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
                   )}
                 >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
 
-            {/* Search Input */}
-            <div className="relative w-full sm:w-72 shrink-0">
-              <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search ticket, name, subject…"
-                className="w-full h-9 rounded-xl bg-muted/30 border border-border/80 pl-9 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
-              />
-            </div>
+          {/* Search Input */}
+          <div className="relative w-full md:w-80 shrink-0">
+            <HiOutlineMagnifyingGlass className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search ticket, name, subject..."
+              className="w-full h-9 pl-9 pr-8 rounded-xl border border-border bg-muted/30 focus:bg-card text-xs font-medium outline-none focus:ring-1 focus:ring-primary transition-all placeholder:text-muted-foreground"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded cursor-pointer"
+              >
+                <HiOutlineXMark className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Tickets Table */}
-        <div className="rounded-2xl border border-border/80 bg-card shadow-2xs overflow-hidden">
-          <Table>
-            <TableHeader className="bg-muted/40">
-              <TableRow className="hover:bg-transparent border-b border-border/70">
-                <TableHead className="text-xs font-bold text-foreground py-3">Ticket ID</TableHead>
-                <TableHead className="text-xs font-bold text-foreground py-3">Requester</TableHead>
-                <TableHead className="text-xs font-bold text-foreground py-3">Category & Subject</TableHead>
-                <TableHead className="text-xs font-bold text-foreground py-3">Status</TableHead>
-                <TableHead className="text-xs font-bold text-foreground py-3">Logged</TableHead>
-                <TableHead className="text-xs font-bold text-foreground py-3 text-right">Actions</TableHead>
+        {/* Desktop Data Table (md+) */}
+        <div className="hidden md:block overflow-x-auto w-full min-w-0">
+          <Table className="min-w-[820px] w-full">
+            <TableHeader>
+              <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border">
+                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 pl-5 h-11 align-middle">
+                  Ticket ID
+                </TableHead>
+                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
+                  Requester
+                </TableHead>
+                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
+                  Category &amp; Subject
+                </TableHead>
+                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
+                  Status &amp; Ally Triage
+                </TableHead>
+                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 h-11 align-middle">
+                  Logged
+                </TableHead>
+                <TableHead className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground py-3.5 pr-5 text-right h-11 align-middle">
+                  Actions
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -353,25 +553,28 @@ export function AdminSupportPage() {
               ) : filteredTickets.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-12 text-xs text-muted-foreground">
-                    <HiOutlineLifebuoy className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
+                    <HiOutlineTicket className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
                     No support tickets found matching current filters.
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredTickets.map((t) => (
-                  <TableRow key={t.id} className="hover:bg-muted/30 border-b border-border/50">
-                    <TableCell className="py-3.5">
+                  <TableRow key={t.id} className="hover:bg-muted/30 border-b border-border/70 transition-colors">
+                    <TableCell className="py-3.5 pl-5 align-middle">
                       <div className="flex flex-col">
-                        <span className="font-mono text-xs font-black text-foreground">
+                        <span
+                          onClick={() => handleOpenManageModal(t)}
+                          className="font-mono text-xs font-black text-foreground hover:text-primary cursor-pointer transition-colors"
+                        >
                           #{t.id.slice(0, 8).toUpperCase()}
                         </span>
-                        <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[100px]">
+                        <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[105px]">
                           {t.id}
                         </span>
                       </div>
                     </TableCell>
 
-                    <TableCell className="py-3.5">
+                    <TableCell className="py-3.5 align-middle">
                       <div className="flex flex-col">
                         <span className="font-bold text-xs text-foreground">{t.userName || "Verified User"}</span>
                         <span className="text-[11px] text-muted-foreground">{t.userEmail || "No email"}</span>
@@ -379,33 +582,43 @@ export function AdminSupportPage() {
                       </div>
                     </TableCell>
 
-                    <TableCell className="py-3.5 max-w-sm">
+                    <TableCell className="py-3.5 max-w-sm align-middle">
                       <div className="flex flex-col">
                         <div className="flex items-center gap-1.5">
                           <span className="px-2 py-0.5 rounded-md bg-muted text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                             {t.category || "General"}
                           </span>
                         </div>
-                        <span className="text-xs font-bold text-foreground mt-1 truncate">{t.subject}</span>
+                        <span
+                          onClick={() => handleOpenManageModal(t)}
+                          className="text-xs font-bold text-foreground hover:text-primary cursor-pointer mt-1 truncate"
+                        >
+                          {t.subject}
+                        </span>
                         <span className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
                           {t.description}
                         </span>
                       </div>
                     </TableCell>
 
-                    <TableCell className="py-3.5">{getStatusBadge(t.status)}</TableCell>
+                    <TableCell className="py-3.5 align-middle">
+                      <div className="flex flex-col gap-1 items-start">
+                        {getStatusBadge(t.status)}
+                        {renderAllyTicketBadge(t)}
+                      </div>
+                    </TableCell>
 
-                    <TableCell className="py-3.5 text-xs text-muted-foreground whitespace-nowrap">
+                    <TableCell className="py-3.5 text-xs text-muted-foreground whitespace-nowrap align-middle">
                       {formatRelativeTime(t.createdAt)}
                     </TableCell>
 
-                    <TableCell className="py-3.5 text-right">
+                    <TableCell className="py-3.5 pr-5 text-right align-middle">
                       <Button
                         size="sm"
                         onClick={() => handleOpenManageModal(t)}
-                        className="rounded-xl text-xs font-semibold h-8 bg-primary hover:bg-primary-hover text-white shadow-xs cursor-pointer"
+                        className="rounded-lg text-xs font-bold h-8 px-3 bg-primary hover:bg-primary-hover text-white shadow-2xs cursor-pointer"
                       >
-                        Manage
+                        Inspect &amp; Manage
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -414,169 +627,338 @@ export function AdminSupportPage() {
             </TableBody>
           </Table>
         </div>
+
+        {/* Mobile Cards View (< md) */}
+        <div className="md:hidden p-3 sm:p-4 pb-24 sm:pb-4 space-y-3.5 bg-muted/20">
+          {loading && tickets.length === 0 ? (
+            <div className="py-12 text-center text-xs text-muted-foreground">
+              <HiOutlineArrowPath className="h-6 w-6 animate-spin mx-auto text-primary mb-2" />
+              Loading support tickets from database…
+            </div>
+          ) : filteredTickets.length === 0 ? (
+            <div className="p-10 text-center text-xs text-muted-foreground">
+              <HiOutlineTicket className="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
+              No support tickets found matching current filters.
+            </div>
+          ) : (
+            filteredTickets.map((t) => (
+              <div
+                key={`m-ticket-${t.id}`}
+                className="rounded-2xl border border-border/80 bg-card p-3.5 sm:p-5 space-y-3.5 shadow-2xs transition-all overflow-hidden min-w-0"
+              >
+                {/* Header Badges & Timestamp */}
+                <div className="flex items-start justify-between gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                    {getStatusBadge(t.status)}
+                    {renderAllyTicketBadge(t)}
+                  </div>
+                  <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1 whitespace-nowrap shrink-0 pt-0.5">
+                    <HiOutlineClock className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+                    {formatRelativeTime(t.createdAt)}
+                  </span>
+                </div>
+
+                {/* Ticket ID & Subject */}
+                <div className="space-y-1.5 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-[11px] font-black text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md">
+                      #{t.id.slice(0, 8).toUpperCase()}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-muted text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      {t.category || "General"}
+                    </span>
+                  </div>
+                  <h4
+                    onClick={() => handleOpenManageModal(t)}
+                    className="font-bold text-foreground text-sm leading-snug cursor-pointer hover:text-primary transition-colors break-words"
+                  >
+                    {t.subject}
+                  </h4>
+                  <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed break-words">
+                    {t.description}
+                  </p>
+                </div>
+
+                {/* Requester Box */}
+                <div className="p-3 rounded-xl bg-muted/40 border border-border/50 text-xs space-y-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Requester</span>
+                    <span className="text-[10px] font-bold text-primary">{t.userRole || "User"}</span>
+                  </div>
+                  <div className="font-bold text-foreground text-xs truncate">{t.userName || "Verified User"}</div>
+                  <div className="text-[11px] text-muted-foreground truncate">{t.userEmail || "No email"}</div>
+                </div>
+
+                {/* Action Button */}
+                <div className="pt-0.5">
+                  <Button
+                    size="sm"
+                    onClick={() => handleOpenManageModal(t)}
+                    className="w-full h-9 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1.5 shadow-2xs cursor-pointer"
+                  >
+                    <HiOutlineTicket className="h-4 w-4 shrink-0" />
+                    <span>Inspect &amp; Manage Ticket</span>
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
-      {/* Ticket Details & Resolution Modal */}
-      <Dialog open={Boolean(selectedTicket)} onOpenChange={(open) => !open && setSelectedTicket(null)}>
-        <DialogContent className="max-w-xl rounded-3xl p-6 border-border/80">
-          <DialogHeader>
-            <div className="flex items-center justify-between">
-              <span className="px-2.5 py-1 rounded-xl bg-primary/10 text-primary text-xs font-mono font-black">
-                #{selectedTicket?.id.slice(0, 8).toUpperCase()}
-              </span>
-              {getStatusBadge(selectedTicket?.status)}
+      {/* Slide-over Ticket Details & Resolution Drawer (Sheet) */}
+      <Sheet open={Boolean(selectedTicket)} onOpenChange={(open) => !open && setSelectedTicket(null)}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl p-0 flex flex-col h-full max-h-[100dvh] overflow-hidden gap-0">
+          <SheetHeader className="px-4 sm:px-6 py-3.5 sm:py-4.5 border-b border-border bg-card shrink-0 text-left">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 sm:gap-4 pr-8">
+              <div className="flex items-start gap-3 min-w-0">
+                <span className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-xl bg-primary/10 text-primary border border-primary/20 shrink-0 mt-0.5">
+                  <HiOutlineTicket className="h-4 w-4 sm:h-5 sm:w-5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[11px] font-mono font-black border border-primary/20">
+                      #{selectedTicket?.id.slice(0, 8).toUpperCase()}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-muted text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      {selectedTicket?.category || "General"}
+                    </span>
+                  </div>
+                  <SheetTitle className="text-sm sm:text-base font-extrabold text-foreground leading-snug mt-1 break-words">
+                    {selectedTicket?.subject}
+                  </SheetTitle>
+                  <SheetDescription className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
+                    Logged {formatRelativeTime(selectedTicket?.createdAt)} by {selectedTicket?.userName} ({selectedTicket?.userRole})
+                  </SheetDescription>
+                </div>
+              </div>
+              {selectedTicket && (
+                <div className="shrink-0 w-fit mt-0.5">
+                  {getStatusBadge(selectedTicket.status)}
+                </div>
+              )}
             </div>
-            <DialogTitle className="text-lg font-black text-foreground mt-2">
-              {selectedTicket?.subject}
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Logged {formatRelativeTime(selectedTicket?.createdAt)} by {selectedTicket?.userName} ({selectedTicket?.userRole})
-            </DialogDescription>
-          </DialogHeader>
+          </SheetHeader>
 
           {selectedTicket && (
-            <div className="space-y-4 py-2 text-xs">
-              {/* Requester Info Card */}
-              <div className="rounded-2xl bg-muted/30 border border-border/70 p-3.5 flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-foreground">{selectedTicket.userName || "Verified User"}</p>
-                  <p className="text-muted-foreground">{selectedTicket.userEmail}</p>
-                  <p className="text-[11px] font-semibold text-primary">{selectedTicket.userRole}</p>
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 sm:p-6 space-y-4 sm:space-y-5 text-xs">
+              {/* 1. Requester Info Card */}
+              <div className="rounded-2xl bg-muted/30 border border-border/70 p-3.5 sm:p-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary border border-primary/20 shrink-0">
+                    <HiOutlineUser className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-bold text-foreground text-sm truncate">{selectedTicket.userName || "Verified User"}</p>
+                    <p className="text-muted-foreground text-xs truncate">{selectedTicket.userEmail || "No email provided"}</p>
+                    <p className="text-[11px] font-semibold text-primary mt-0.5">{selectedTicket.userRole || "User"}</p>
+                  </div>
                 </div>
                 {selectedTicket.userEmail && (
                   <a
                     href={`mailto:${selectedTicket.userEmail}?subject=Re:%20[FALE%20Support%20#${selectedTicket.id.slice(0, 8).toUpperCase()}]%20${encodeURIComponent(selectedTicket.subject)}`}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-card text-foreground hover:border-primary/50 text-xs font-semibold shadow-2xs transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-primary/25 bg-card text-primary hover:bg-primary/5 text-xs font-bold shadow-2xs transition-colors shrink-0"
                   >
-                    <HiOutlineEnvelope className="h-3.5 w-3.5 text-primary" />
-                    Email User
+                    <HiOutlineEnvelope className="h-3.5 w-3.5 shrink-0" />
+                    <span>Email User</span>
                   </a>
                 )}
               </div>
 
-              {/* Description */}
-              <div className="space-y-1.5">
-                <span className="font-bold text-foreground uppercase tracking-wider text-[10px]">
-                  Description / Issue Details
+              {/* 2. Description */}
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-4 space-y-2 shadow-2xs">
+                <span className="font-bold text-muted-foreground uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                  <HiOutlineChatBubbleLeftRight className="h-3.5 w-3.5 text-primary" />
+                  <span>Description / Issue Details</span>
                 </span>
-                <div className="rounded-2xl border border-border/80 bg-card p-3 text-foreground whitespace-pre-wrap leading-relaxed">
+                <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-foreground whitespace-pre-wrap leading-relaxed break-words">
                   {selectedTicket.description}
                 </div>
               </div>
 
-              {/* Support Handoff Summary & WhatsApp Draft */}
-              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3.5 space-y-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-bold text-primary text-xs flex items-center gap-1.5">
-                    <BotMessageSquare className="h-4 w-4" /> Support Handoff &amp; Response Draft
-                  </span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={handleDraftWhatsApp}
-                    disabled={draftingHandoff}
-                    className="text-xs font-semibold h-7 rounded-xl border-primary/30 text-primary hover:bg-primary/10"
-                  >
-                    {draftingHandoff ? "Drafting with AI..." : "Draft WhatsApp Reply"}
-                  </Button>
-                </div>
+              {/* 3. Ally Support Pre-Check & Reply Card */}
+              {(() => {
+                const check = getTicketAllyPreCheck(selectedTicket);
+                const isRunning = Boolean(runningPreCheckIds[selectedTicket.id]);
+                const isReady = check.status === "VERIFIED";
+                const isError = check.status === "ERROR";
 
-                {handoffDraft && (
-                  <div className="space-y-2 pt-2 border-t border-primary/15">
-                    <div className="rounded-xl border border-border/80 bg-card p-3 text-[11px] leading-relaxed text-foreground whitespace-pre-wrap font-mono">
-                      {handoffDraft}
+                return (
+                  <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3.5 sm:p-5 space-y-3 transition-all shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
+                          {isRunning ? (
+                            <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <BotMessageSquare className="h-4 w-4" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <h5 className="font-extrabold text-xs uppercase tracking-wider text-primary leading-snug">
+                            Ally Ticket Pre-Check &amp; Reply
+                          </h5>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {isRunning
+                              ? "Triaging request & composing response..."
+                              : check.summary}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <span
+                          className={cn(
+                            "text-[10px] font-black px-2 py-0.5 rounded-full border inline-flex items-center gap-1 whitespace-nowrap",
+                            isRunning || isReady
+                              ? "bg-primary/10 text-primary border-primary/25"
+                              : isError
+                                ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25"
+                                : "bg-muted text-muted-foreground border-border/60"
+                          )}
+                        >
+                          {isRunning
+                            ? "Ally Triaging..."
+                            : isReady
+                              ? "Ally Draft Ready"
+                              : isError
+                                ? "Fallback Draft"
+                                : "Ally Queued"}
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={isRunning}
+                          onClick={() => handleRunAllyTicketPreCheck(selectedTicket)}
+                          className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
+                        >
+                          {isRunning ? (
+                            <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                          ) : (
+                            <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          <span>{isRunning ? "Drafting with Ally..." : "Re-draft with Ally"}</span>
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => {
-                          navigator.clipboard.writeText(handoffDraft);
-                          toast.success("WhatsApp draft copied to clipboard!");
-                        }}
-                        className="text-xs font-semibold h-7 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
-                      >
-                        Copy WhatsApp Draft
-                      </Button>
-                      <a
-                        href={`https://wa.me/?text=${encodeURIComponent(handoffDraft)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-semibold h-7 px-3 rounded-xl border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                      >
-                        Open in WhatsApp ↗
-                      </a>
+
+                    <div className="max-h-40 sm:max-h-48 overflow-y-auto pr-1.5 [scrollbar-width:thin] pt-2 border-t border-primary/15 space-y-2.5">
+                      {check.draft ? (
+                        <div className="rounded-xl border border-primary/15 bg-card/90 p-3 text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words">
+                          {check.draft}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Ally is queuing an automated support handoff response for this ticket. Click Re-draft with Ally at any time to refresh.
+                        </p>
+                      )}
                     </div>
+
+                    {check.draft && (
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(check.draft);
+                            toast.success("Ally response draft copied to clipboard!");
+                          }}
+                          className="text-xs font-bold h-8 px-3 rounded-xl bg-primary hover:bg-primary-hover text-white cursor-pointer"
+                        >
+                          Copy Reply Draft
+                        </Button>
+                        <a
+                          href={`https://wa.me/?text=${encodeURIComponent(check.draft)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-bold h-8 px-3 rounded-xl border border-primary/30 text-primary hover:bg-primary/10 bg-background/80 transition-colors"
+                        >
+                          Open in WhatsApp ↗
+                        </a>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()}
 
-              {/* Status Selector */}
-              <div className="space-y-1.5">
-                <span className="font-bold text-foreground uppercase tracking-wider text-[10px]">
-                  Update Ticket Status
+              {/* 4. Status Selector */}
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-4 space-y-2.5 shadow-2xs">
+                <span className="font-bold text-muted-foreground uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                  <HiOutlineTag className="h-3.5 w-3.5 text-primary" />
+                  <span>Update Ticket Status</span>
                 </span>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[
                     { id: "OPEN", label: "Open" },
                     { id: "IN_PROGRESS", label: "In Progress" },
                     { id: "RESOLVED", label: "Resolved" },
                     { id: "CLOSED", label: "Closed" },
-                  ].map((s) => (
+                  ].map((item) => (
                     <button
-                      key={s.id}
+                      key={item.id}
                       type="button"
-                      onClick={() => setNewStatus(s.id)}
+                      onClick={() => setNewStatus(item.id)}
                       className={cn(
-                        "py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center",
-                        newStatus === s.id
+                        "py-2 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center",
+                        newStatus === item.id
                           ? "bg-primary text-white border-primary shadow-xs"
                           : "bg-muted/40 border-border text-muted-foreground hover:text-foreground"
                       )}
                     >
-                      {s.label}
+                      {item.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Admin Resolution Notes */}
-              <div className="space-y-1.5">
-                <span className="font-bold text-foreground uppercase tracking-wider text-[10px]">
-                  Internal Admin Resolution Notes
+              {/* 5. Admin Resolution Notes */}
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-4 space-y-2 shadow-2xs">
+                <span className="font-bold text-muted-foreground uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                  <HiOutlineSparkles className="h-3.5 w-3.5 text-primary" />
+                  <span>Internal Admin Resolution Notes</span>
                 </span>
                 <textarea
                   rows={3}
                   value={adminNotes}
                   onChange={(e) => setAdminNotes(e.target.value)}
                   placeholder="E.g., Contacted candidate via phone. Resolved UTR query with Escrow bank partner."
-                  className="w-full rounded-2xl bg-muted/30 border border-border/80 p-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all resize-none"
+                  className="w-full rounded-xl bg-muted/30 border border-border/80 p-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all resize-none"
                 />
               </div>
             </div>
           )}
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setSelectedTicket(null)}
-              className="rounded-xl text-xs font-semibold cursor-pointer"
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              disabled={saving}
-              onClick={handleSaveStatus}
-              className="rounded-xl text-xs font-black bg-primary hover:bg-primary-hover text-white shadow-xs cursor-pointer"
-            >
-              {saving ? "Saving…" : "Save Changes"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          {/* Sticky Bottom Actions */}
+          {selectedTicket && (
+            <div className="p-3.5 sm:p-4 border-t border-border bg-card flex flex-wrap items-center justify-end gap-2 shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedTicket(null)}
+                className="h-9 px-3 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Close
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={saving}
+                onClick={handleSaveStatus}
+                className="flex-1 sm:flex-initial h-9 px-4 rounded-xl text-xs font-black bg-primary hover:bg-primary-hover text-white gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
+              >
+                {saving ? (
+                  <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin shrink-0" />
+                ) : (
+                  <HiOutlineCheck className="h-3.5 w-3.5 shrink-0" />
+                )}
+                <span>{saving ? "Saving..." : "Save Changes"}</span>
+              </Button>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </AdminLayout>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   HiOutlineUserGroup,
@@ -67,6 +67,26 @@ import { HiOutlineBanknotes } from "react-icons/hi2";
 import { BotMessageSquare } from "lucide-react";
 import { generateClinicalDocumentBlob } from "@/lib/clinicalDocumentPdf";
 import { screenApplicationWithAi } from "@/lib/adapters/aiAdapter";
+import {
+  type AllyAuditStatus,
+  cleanMarkdownAndJsonNoise,
+  extractJsonPayload,
+  formatConfidencePercent,
+  readSessionAuditCache,
+  writeSessionAuditCache,
+} from "@/lib/allyAuditUtils";
+
+const ALLY_APPLICATION_CACHE_KEY = "fale_ally_application_screening_cache_v1";
+
+type AllyApplicationScreeningResult = {
+  status: AllyAuditStatus;
+  suitabilityScore: number;
+  isRecommended: boolean;
+  verdict: string;
+  unitFitSentence: string;
+  councilSentence: string;
+  recommendationSentence: string;
+};
 
 export const Route = createFileRoute("/admin/applications")({
   head: () => ({
@@ -127,108 +147,196 @@ function ApplicationsAdmin() {
   const [previewDoc, setPreviewDoc] = useState<{ name: string; url: string; isImage: boolean } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  // AI Application Screening Desk State
-  const [aiScreeningResults, setAiScreeningResults] = useState<
-    Record<
-      string,
-      {
-        status: "RECOMMENDED" | "FURTHER_REVIEW";
-        suitabilityScore: number;
-        isRecommended: boolean;
-        verdict: string;
-        unitFitSentence: string;
-        councilSentence: string;
-        recommendationSentence: string;
-      }
-    >
-  >({});
-  const [runningScreeningId, setRunningScreeningId] = useState<string | null>(null);
+  // Ally Application Screening Desk State (session-cached + concurrency-limited live checks)
+  const getAppCacheKey = useCallback((app: AdminApplication) => {
+    return `${app.id}:${app.candidateName}:${app.jobTitle}:${app.regNumber || ""}`;
+  }, []);
 
-  const getApplicationScreening = (app: AdminApplication) => {
-    if (aiScreeningResults[app.id]) {
-      return aiScreeningResults[app.id];
-    }
-    const score = app.matchScore || 88;
-    const isVerified = app.councilVerified;
-    const isRecommended = score >= 75 && isVerified;
-    const status: "RECOMMENDED" | "FURTHER_REVIEW" = isRecommended ? "RECOMMENDED" : "FURTHER_REVIEW";
+  const [aiScreeningResults, setAiScreeningResults] = useState<Record<string, AllyApplicationScreeningResult>>(() =>
+    readSessionAuditCache<AllyApplicationScreeningResult>(ALLY_APPLICATION_CACHE_KEY)
+  );
+  const [runningScreeningIds, setRunningScreeningIds] = useState<Record<string, boolean>>({});
+  const inFlightScreeningKeysRef = useRef<Set<string>>(new Set());
+  const autoScreenedKeysRef = useRef<Set<string>>(new Set());
 
-    const unitFitSentence = `${app.candidateName} exhibits strong clinical credentials as ${app.candidateRole} (${app.candidateQualification}) well-suited for ${app.jobTitle} at ${app.hospitalName}.`;
-    const councilSentence = isVerified
-      ? `Statutory council registration with ${app.candidateCouncil || "State Council"} (#${app.regNumber || "Verified Active"}) is verified in active standing.`
-      : `Statutory council registration with ${app.candidateCouncil || "State Council"} (#${app.regNumber || "Pending"}) is awaiting primary registrar verification.`;
-    const recommendationSentence = isRecommended
-      ? `Recommended for immediate administrative shortlisting and direct dispatch to ${app.hospitalName}.`
-      : `Recommend further credential review prior to final dispatch.`;
+  const getApplicationScreening = useCallback(
+    (app: AdminApplication): AllyApplicationScreeningResult => {
+      const cacheKey = getAppCacheKey(app);
+      const cached = aiScreeningResults[cacheKey] || aiScreeningResults[app.id];
+      if (cached) return cached;
 
-    const verdict = `${unitFitSentence} ${councilSentence} ${recommendationSentence}`;
+      return {
+        status: "PENDING",
+        suitabilityScore: 0,
+        isRecommended: false,
+        verdict: "",
+        unitFitSentence: `Ally clinical suitability screening queued for live role-fit verification.`,
+        councilSentence: `Council standing (${app.candidateCouncil || "State Council"} · ${app.regNumber || "Pending"}) and specialty alignment will be verified automatically by Ally.`,
+        recommendationSentence: `Shortlisting recommendation will appear once Ally completes its evaluation.`,
+      };
+    },
+    [aiScreeningResults, getAppCacheKey]
+  );
 
-    return {
-      status,
-      suitabilityScore: score,
-      isRecommended,
-      verdict,
-      unitFitSentence,
-      councilSentence,
-      recommendationSentence,
-    };
-  };
+  const handleRunAiScreening = useCallback(
+    async (app: AdminApplication, options?: { silent?: boolean }) => {
+      const cacheKey = getAppCacheKey(app);
+      if (options?.silent && inFlightScreeningKeysRef.current.has(cacheKey)) return;
 
-  const handleRunAiScreening = async (app: AdminApplication) => {
-    setRunningScreeningId(app.id);
-    try {
-      const res = await screenApplicationWithAi(
-        app.candidateName,
-        app.candidateRole,
-        app.jobTitle,
-        app.hospitalName,
-        {
-          matchScore: app.matchScore,
-          council: app.candidateCouncil,
-          regNumber: app.regNumber,
-          exp: app.exp,
-          isShiftClaim: (app as any).isShiftClaim,
-        }
-      );
+      inFlightScreeningKeysRef.current.add(cacheKey);
+      setRunningScreeningIds((prev) => ({ ...prev, [app.id]: true }));
+      try {
+        const res = await screenApplicationWithAi(
+          app.candidateName,
+          app.candidateRole,
+          app.jobTitle,
+          app.hospitalName,
+          {
+            matchScore: app.matchScore,
+            council: app.candidateCouncil || "State Council",
+            regNumber: app.regNumber,
+            exp: app.exp,
+            isShiftClaim: Boolean((app as any).isShiftClaim),
+          }
+        );
 
-      const text = res.response || res.content || "";
-      const sData = res.structuredData || {};
-      const lower = text.toLowerCase();
-      const isRecommended =
-        sData.isRecommended !== undefined
-          ? !!sData.isRecommended
-          : sData.status === "RECOMMENDED" ||
-            (!lower.includes("not recommended") && !lower.includes("reject") && !lower.includes("discrepancy"));
+        const rawText = res.response || res.content || "";
+        const embeddedJson = extractJsonPayload(rawText);
+        const sData: Record<string, any> = {
+          ...(embeddedJson || {}),
+          ...(res.structuredData || {}),
+        };
 
-      const score = typeof sData.suitabilityScore === "number" ? sData.suitabilityScore : (app.matchScore || 90);
-      const sentences = text
-        .split(/(?<=[.?!])\s+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
+        const rawStatus = String(sData["status"] || "").toUpperCase();
+        const plainProse = cleanMarkdownAndJsonNoise(
+          typeof sData["assessment"] === "string"
+            ? sData["assessment"]
+            : typeof sData["summary"] === "string"
+              ? sData["summary"]
+              : typeof sData["reasoning"] === "string"
+                ? sData["reasoning"]
+                : embeddedJson
+                  ? ""
+                  : rawText
+        );
+        const lower = plainProse.toLowerCase();
 
-      const unitFitSentence = sentences[0] || `${app.candidateName} qualifies for ${app.jobTitle} with strong specialty alignment.`;
-      const councilSentence = sentences[1] || `Statutory credentials registered with ${app.candidateCouncil || "State Council"} verified active.`;
-      const recommendationSentence = sentences[2] || (isRecommended ? `Recommended for immediate administrative shortlisting.` : `Requires supervisor review.`);
+        const isRecommended =
+          typeof sData["isRecommended"] === "boolean"
+            ? sData["isRecommended"]
+            : rawStatus === "RECOMMENDED" || rawStatus === "VERIFIED" || rawStatus === "CLEAR"
+              ? true
+              : rawStatus.includes("REVIEW") || rawStatus.includes("FLAG") || rawStatus.includes("REJECT")
+                ? false
+                : !lower.includes("not recommended") &&
+                  !lower.includes("reject") &&
+                  !lower.includes("discrepancy") &&
+                  !lower.includes("flagged");
 
-      setAiScreeningResults((prev) => ({
-        ...prev,
-        [app.id]: {
-          status: isRecommended ? "RECOMMENDED" : "FURTHER_REVIEW",
-          suitabilityScore: score,
+        const scoreRaw = sData["suitabilityScore"] ?? sData["confidence"] ?? app.matchScore;
+        const suitabilityScore = formatConfidencePercent(scoreRaw, !isRecommended);
+
+        const sentences = plainProse
+          .split(/(?<=[.?!])\s+/)
+          .map((s) => cleanMarkdownAndJsonNoise(s))
+          .filter(Boolean);
+
+        const unitFitSentence =
+          cleanMarkdownAndJsonNoise(typeof sData["unitFitAssessment"] === "string" ? sData["unitFitAssessment"] : "") ||
+          sentences[0] ||
+          `${app.candidateName} qualifies for ${app.jobTitle} at ${app.hospitalName} with ${app.candidateRole} clinical alignment.`;
+
+        const councilSentence =
+          cleanMarkdownAndJsonNoise(typeof sData["councilAssessment"] === "string" ? sData["councilAssessment"] : "") ||
+          sentences[1] ||
+          `Statutory credentials with ${app.candidateCouncil || "State Council"} (#${app.regNumber || "On Record"}) checked for deployment readiness.`;
+
+        const recommendationSentence =
+          cleanMarkdownAndJsonNoise(typeof sData["recommendation"] === "string" ? sData["recommendation"] : "") ||
+          sentences[2] ||
+          (isRecommended
+            ? `Recommended by Ally for immediate administrative shortlisting and dispatch to ${app.hospitalName}.`
+            : `Additional human credential review recommended by Ally before forwarding.`);
+
+        const nextEntry: AllyApplicationScreeningResult = {
+          status: isRecommended ? "VERIFIED" : "FLAGGED",
+          suitabilityScore,
           isRecommended,
-          verdict: text,
+          verdict: plainProse,
           unitFitSentence,
           councilSentence,
           recommendationSentence,
-        },
-      }));
-      toast.success(`AI Screening completed for ${app.candidateName}`);
-    } catch (err: any) {
-      console.warn("AI screening failed:", err);
-      toast.error("Failed to run AI screening");
-    } finally {
-      setRunningScreeningId(null);
-    }
+        };
+
+        setAiScreeningResults((prev) => {
+          const next = { ...prev, [cacheKey]: nextEntry };
+          writeSessionAuditCache(ALLY_APPLICATION_CACHE_KEY, next);
+          return next;
+        });
+
+        if (!options?.silent) {
+          toast.success(`Ally screening completed for ${app.candidateName}`);
+        }
+      } catch (err: any) {
+        console.warn("Ally screening failed:", err);
+        const errorEntry: AllyApplicationScreeningResult = {
+          status: "ERROR",
+          suitabilityScore: 0,
+          isRecommended: false,
+          verdict: "",
+          unitFitSentence: `Ally could not reach the clinical screening service right now.`,
+          councilSentence: `Unmasked contact, council registration (${app.regNumber}), and regulatory documents remain available below.`,
+          recommendationSentence: `Click Re-analyze with Ally to retry automated suitability scoring.`,
+        };
+        setAiScreeningResults((prev) => ({ ...prev, [cacheKey]: errorEntry }));
+        if (!options?.silent) {
+          toast.error("Failed to run Ally screening");
+        }
+      } finally {
+        inFlightScreeningKeysRef.current.delete(cacheKey);
+        setRunningScreeningIds((prev) => {
+          const next = { ...prev };
+          delete next[app.id];
+          return next;
+        });
+      }
+    },
+    [getAppCacheKey]
+  );
+
+  const renderAllyScreeningBadge = (app: AdminApplication) => {
+    const scr = getApplicationScreening(app);
+    const isScreening = Boolean(runningScreeningIds[app.id]);
+    const isVerified = scr.status === "VERIFIED";
+    const isFlagged = scr.status === "FLAGGED" || scr.status === "ERROR";
+
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none whitespace-nowrap shrink-0",
+          isScreening || isVerified
+            ? "bg-primary/10 text-primary border-primary/25"
+            : isFlagged
+              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
+              : "bg-muted/70 text-muted-foreground border-border/60"
+        )}
+      >
+        {isScreening ? (
+          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+        ) : (
+          <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
+        )}
+        {isScreening
+          ? "Ally Screening..."
+          : isVerified
+            ? "Ally Shortlist Vetted"
+            : scr.status === "ERROR"
+              ? "Ally Retry"
+              : isFlagged
+                ? "Ally Review"
+                : "Ally Queued"}
+      </span>
+    );
   };
 
   const fetchApps = async () => {
@@ -422,6 +530,46 @@ function ApplicationsAdmin() {
 
   const apps = isApiEnabled ? apiApps : s.adminApplications;
 
+  // Performance-safe background Ally screening for pending_admin applications (MAX_CONCURRENT = 2)
+  useEffect(() => {
+    const queue = apps.filter((a) => {
+      if (a.status !== "pending_admin") return false;
+      const key = getAppCacheKey(a);
+      return !aiScreeningResults[key] && !autoScreenedKeysRef.current.has(key) && !inFlightScreeningKeysRef.current.has(key);
+    });
+    if (queue.length === 0) return;
+
+    let cancelled = false;
+    let cursor = 0;
+    const MAX_CONCURRENT = 2;
+
+    const worker = async () => {
+      while (!cancelled && cursor < queue.length) {
+        const nextItem = queue[cursor++];
+        if (!nextItem) break;
+        const key = getAppCacheKey(nextItem);
+        autoScreenedKeysRef.current.add(key);
+        await handleRunAiScreening(nextItem, { silent: true });
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(MAX_CONCURRENT, queue.length) }, () => worker());
+    void Promise.all(workers);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apps, aiScreeningResults, getAppCacheKey, handleRunAiScreening]);
+
+  // Prioritize Ally screening immediately when Dossier Inspect drawer opens
+  useEffect(() => {
+    if (!sheetOpen || !selectedApp) return;
+    const key = getAppCacheKey(selectedApp);
+    if (!aiScreeningResults[key] && !inFlightScreeningKeysRef.current.has(key)) {
+      void handleRunAiScreening(selectedApp, { silent: true });
+    }
+  }, [sheetOpen, selectedApp, aiScreeningResults, getAppCacheKey, handleRunAiScreening]);
+
   const filtered = apps.filter((a) => {
     const matchesFilter = filter === "all" ? true : a.status === filter;
     const matchesSearch =
@@ -610,7 +758,7 @@ function ApplicationsAdmin() {
       }
     >
       {/* Metric Strip (4 Cards matching Candidate KYC & Facility Verification) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
           <div className="flex items-center justify-between text-muted-foreground text-xs font-semibold">
             <span>Pending Screening</span>
@@ -653,7 +801,7 @@ function ApplicationsAdmin() {
         {/* Controls Bar */}
         <div className="p-3.5 sm:p-4 border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 min-w-0">
           {/* Segmented Filter Pills */}
-          <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 w-fit">
+          <div className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 w-full md:w-fit overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {[
               { id: "pending_admin" as const, label: "Pending Screening", count: pendingCount },
               { id: "shortlisted" as const, label: "Shortlisted", count: shortlistedCount },
@@ -666,7 +814,7 @@ function ApplicationsAdmin() {
                 type="button"
                 onClick={() => setFilter(tab.id)}
                 className={cn(
-                  "px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5",
+                  "px-2.5 sm:px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0",
                   filter === tab.id
                     ? "bg-card text-foreground shadow-xs border border-border/60"
                     : "text-muted-foreground hover:text-foreground"
@@ -693,7 +841,7 @@ function ApplicationsAdmin() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search candidate, role, hospital, reg #..."
-              className="w-full h-9 pl-9 pr-4 rounded-xl border border-border bg-muted/30 focus:bg-card text-xs font-medium outline-none focus:ring-1 focus:ring-primary transition-all placeholder:text-muted-foreground"
+              className="w-full h-9 pl-9 pr-8 rounded-xl border border-border bg-muted/30 focus:bg-card text-xs font-medium outline-none focus:ring-1 focus:ring-primary transition-all placeholder:text-muted-foreground"
             />
             {search && (
               <button
@@ -875,23 +1023,7 @@ function ApplicationsAdmin() {
                             <HiOutlineSparkles className="h-3.5 w-3.5" />
                             {item.matchScore >= 90 ? `Exact Match (${item.matchScore}%)` : `${item.matchScore}%`}
                           </span>
-                          {(() => {
-                            const scr = getApplicationScreening(item);
-                            const isClear = scr.isRecommended;
-                            return (
-                              <span
-                                className={cn(
-                                  "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none",
-                                  isClear
-                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                                    : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
-                                )}
-                              >
-                                <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
-                                {isClear ? "AI Shortlist Vetted" : "AI Review"}
-                              </span>
-                            );
-                          })()}
+                          {renderAllyScreeningBadge(item)}
                         </div>
                       </TableCell>
 
@@ -984,15 +1116,15 @@ function ApplicationsAdmin() {
             </div>
 
             {/* Mobile Cards View (< md) */}
-            <div className="md:hidden p-3.5 sm:p-4 space-y-4 bg-muted/20">
+            <div className="md:hidden p-3 sm:p-4 pb-24 sm:pb-4 space-y-3.5 bg-muted/20">
               {filtered.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-2xs space-y-3.5 overflow-hidden min-w-0"
+                  className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 shadow-2xs space-y-3.5 overflow-hidden min-w-0"
                 >
                   {/* Header */}
-                  <div className="flex items-start justify-between gap-2.5 min-w-0">
-                    <div className="flex items-start gap-2.5 min-w-0">
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <div className="flex items-start gap-2.5 min-w-0 flex-1">
                       <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary font-bold text-sm shrink-0 border border-primary/20">
                         {item.candidateName
                           .split(" ")
@@ -1000,8 +1132,14 @@ function ApplicationsAdmin() {
                           .slice(0, 2)
                           .join("")}
                       </div>
-                      <div className="min-w-0">
-                        <h3 className="font-extrabold text-foreground text-sm leading-snug truncate">
+                      <div className="min-w-0 flex-1">
+                        <h3
+                          onClick={() => {
+                            setSelectedApp(item);
+                            setSheetOpen(true);
+                          }}
+                          className="font-extrabold text-foreground text-sm leading-snug break-words cursor-pointer hover:text-primary transition-colors"
+                        >
                           {item.candidateName}
                         </h3>
                         <p className="text-xs text-muted-foreground truncate">
@@ -1011,27 +1149,11 @@ function ApplicationsAdmin() {
                     </div>
 
                     <div className="flex flex-col items-end gap-1 shrink-0">
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2 py-0.5 text-xs font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
-                        <HiOutlineSparkles className="h-3 w-3" />
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2 py-0.5 text-[11px] font-black text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0 whitespace-nowrap">
+                        <HiOutlineSparkles className="h-3 w-3 shrink-0" />
                         {item.matchScore >= 90 ? `Exact Match (${item.matchScore}%)` : `${item.matchScore}%`}
                       </span>
-                      {(() => {
-                        const scr = getApplicationScreening(item);
-                        const isClear = scr.isRecommended;
-                        return (
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none",
-                              isClear
-                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                                : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
-                            )}
-                          >
-                            <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
-                            {isClear ? "AI Vetted" : "AI Review"}
-                          </span>
-                        );
-                      })()}
+                      {renderAllyScreeningBadge(item)}
                     </div>
                   </div>
 
@@ -1093,7 +1215,12 @@ function ApplicationsAdmin() {
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="grid grid-cols-2 gap-2 pt-1 min-w-0">
+                  <div
+                    className={cn(
+                      "pt-1 min-w-0",
+                      item.status === "pending_admin" ? "grid grid-cols-3 gap-1.5 sm:gap-2" : "flex items-center gap-2"
+                    )}
+                  >
                     <Button
                       size="sm"
                       variant="outline"
@@ -1102,23 +1229,38 @@ function ApplicationsAdmin() {
                         setSheetOpen(true);
                       }}
                       className={cn(
-                        "h-9 px-2 text-xs font-bold rounded-xl border-border hover:bg-muted text-foreground min-w-0 w-full",
-                        item.status !== "pending_admin" && "col-span-2"
+                        "h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl border-border hover:bg-muted text-foreground min-w-0 gap-1 cursor-pointer",
+                        item.status !== "pending_admin" && "flex-1"
                       )}
                     >
-                      <HiOutlineEye className="h-3.5 w-3.5 mr-1 text-muted-foreground shrink-0" />
+                      <HiOutlineEye className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span className="truncate">Dossier</span>
                     </Button>
 
                     {item.status === "pending_admin" && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
-                        className="h-9 px-2 text-xs font-bold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground gap-1 min-w-0 w-full shadow-2xs"
-                      >
-                        <HiOutlinePaperAirplane className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">Shortlist</span>
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedApp(item);
+                            setRejectModalOpen(true);
+                          }}
+                          className="h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl text-rose-600 border-rose-300 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 gap-1 min-w-0 cursor-pointer"
+                        >
+                          <HiOutlineXMark className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">Reject</span>
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
+                          className="h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground gap-1 min-w-0 shadow-2xs cursor-pointer"
+                        >
+                          <HiOutlinePaperAirplane className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">Shortlist</span>
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1137,25 +1279,25 @@ function ApplicationsAdmin() {
 
       {/* Slide-over Inspection Sheet (Comprehensive Candidate Dossier — UNMASKED) */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl p-0 flex flex-col h-full max-h-screen overflow-hidden gap-0">
-          <SheetHeader className="px-5 py-4 border-b border-border bg-card shrink-0 text-left">
+        <SheetContent side="right" className="w-full sm:max-w-2xl p-0 flex flex-col h-full max-h-[100dvh] overflow-hidden gap-0">
+          <SheetHeader className="px-4 sm:px-6 py-3.5 sm:py-4.5 border-b border-border bg-card shrink-0 text-left">
             <div className="pr-8">
-              <SheetTitle className="text-base font-extrabold text-foreground flex items-center gap-2">
-                <HiOutlineUserGroup className="h-5 w-5 text-primary shrink-0" />
+              <SheetTitle className="text-sm sm:text-base font-extrabold text-foreground flex items-center gap-2">
+                <HiOutlineUserGroup className="h-4 w-4 sm:h-5 sm:w-5 text-primary shrink-0" />
                 <span>Candidate Clinical Dossier</span>
               </SheetTitle>
-              <SheetDescription className="text-xs text-muted-foreground mt-0.5">
+              <SheetDescription className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
                 Screen unmasked practitioner credentials before dispatching to {selectedApp?.hospitalName}.
               </SheetDescription>
             </div>
           </SheetHeader>
 
           {selectedApp && (
-            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-5 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 sm:p-6 space-y-4">
               {/* 1. Unmasked Candidate Header Card */}
-              <div className="rounded-2xl border border-border bg-muted/30 p-4 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
+              <div className="rounded-2xl border border-border bg-muted/30 p-3.5 sm:p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 sm:gap-3">
+                  <div className="flex items-start sm:items-center gap-3 min-w-0">
                     <div className="grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 border border-primary/20 text-primary font-black text-sm shrink-0 shadow-2xs">
                       {selectedApp.candidateName
                         .split(" ")
@@ -1163,19 +1305,19 @@ function ApplicationsAdmin() {
                         .slice(0, 2)
                         .join("")}
                     </div>
-                    <div>
-                      <h4 className="font-extrabold text-foreground text-base leading-tight">
+                    <div className="min-w-0 flex-1">
+                      <h4 className="font-extrabold text-foreground text-base leading-tight break-words">
                         {selectedApp.candidateName}
                       </h4>
-                      <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                      <p className="text-xs text-muted-foreground mt-0.5 flex flex-wrap items-center gap-1.5">
                         <span className="font-semibold text-foreground/90">{selectedApp.candidateRole}</span>
                         <span className="h-1 w-1 rounded-full bg-border" />
                         <span>{selectedApp.candidateQualification}</span>
                       </p>
                     </div>
                   </div>
-                  <span className="font-black text-emerald-600 text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 shrink-0 flex items-center gap-1">
-                    <HiOutlineSparkles className="h-3.5 w-3.5" />
+                  <span className="font-black text-emerald-600 text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 shrink-0 w-fit inline-flex items-center gap-1 whitespace-nowrap">
+                    <HiOutlineSparkles className="h-3.5 w-3.5 shrink-0" />
                     {selectedApp.matchScore >= 90 ? `Exact Match (${selectedApp.matchScore}%)` : `${selectedApp.matchScore}% Match`}
                   </span>
                 </div>
@@ -1234,100 +1376,111 @@ function ApplicationsAdmin() {
                 </div>
               </div>
 
-              {/* AI Clinical Screening & Shortlist Verdict Card */}
+              {/* Ally Clinical Screening & Shortlist Pre-Check Card */}
               {(() => {
                 const screening = getApplicationScreening(selectedApp);
-                const isScreening = runningScreeningId === selectedApp.id;
-                const isClear = screening.isRecommended;
+                const isScreening = Boolean(runningScreeningIds[selectedApp.id]);
+                const isVerified = screening.status === "VERIFIED";
+                const isFlagged = screening.status === "FLAGGED";
+                const isError = screening.status === "ERROR";
 
                 return (
-                  <div
-                    className={cn(
-                      "rounded-2xl border p-4 space-y-3 transition-all shadow-2xs",
-                      isClear
-                        ? "border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10"
-                        : "border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10"
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className={cn(
-                            "grid h-8 w-8 place-items-center rounded-xl shrink-0",
-                            isClear
-                              ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                              : "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                  <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3.5 sm:p-4 space-y-3 transition-all shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
+                          {isScreening ? (
+                            <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <BotMessageSquare className="h-4 w-4" />
                           )}
-                        >
-                          <BotMessageSquare className="h-4 w-4" />
                         </div>
-                        <div>
-                          <h5
-                            className={cn(
-                              "font-extrabold text-xs uppercase tracking-wider",
-                              isClear ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"
-                            )}
-                          >
-                            AI Clinical Screening Verdict
+                        <div className="min-w-0">
+                          <h5 className="font-extrabold text-xs uppercase tracking-wider text-primary leading-snug">
+                            Ally Clinical Pre-Check
                           </h5>
-                          <p className="text-[10px] text-muted-foreground">
-                            {isClear ? "Shortlist Recommended" : "Further Review Recommended"} · {selectedApp.hospitalName}
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {isScreening
+                              ? "Evaluating role alignment & council credentials..."
+                              : isVerified
+                                ? "Shortlist Recommended"
+                                : isFlagged
+                                  ? "Further Review Recommended"
+                                  : isError
+                                    ? "Screening unavailable · Retry recommended"
+                                    : "Queued for automated Ally evaluation"}{" "}
+                            · {selectedApp.hospitalName}
                           </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
                         <span
                           className={cn(
-                            "text-[10px] font-black px-2 py-0.5 rounded-full border",
-                            isClear
-                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30"
-                              : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                            "text-[10px] font-black px-2 py-0.5 rounded-full border inline-flex items-center gap-1 whitespace-nowrap",
+                            isScreening || isVerified
+                              ? "bg-primary/10 text-primary border-primary/25"
+                              : isFlagged
+                                ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25"
+                                : isError
+                                  ? "bg-destructive/10 text-destructive border-destructive/25"
+                                  : "bg-muted text-muted-foreground border-border/60"
                           )}
                         >
-                          Suitability: {screening.suitabilityScore}%
+                          {isScreening
+                            ? "Ally Screening..."
+                            : isVerified
+                              ? `Suitability: ${screening.suitabilityScore.toFixed(1)}%`
+                              : isFlagged
+                                ? `Review · ${screening.suitabilityScore.toFixed(1)}%`
+                                : isError
+                                  ? "Ally Retry"
+                                  : "Ally Queued"}
                         </span>
                         <Button
                           size="sm"
                           variant="outline"
                           disabled={isScreening}
                           onClick={() => handleRunAiScreening(selectedApp)}
-                          className={cn(
-                            "h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 cursor-pointer",
-                            isClear
-                              ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
-                              : "border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
-                          )}
+                          className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
                         >
-                          <BotMessageSquare className={cn("h-3.5 w-3.5", isScreening && "animate-spin")} />
-                          <span>{isScreening ? "Auditing with AI..." : "Re-analyze with AI"}</span>
+                          {isScreening ? (
+                            <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                          ) : (
+                            <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          <span>{isScreening ? "Screening with Ally..." : "Re-analyze with Ally"}</span>
                         </Button>
                       </div>
                     </div>
 
-                    <div className="text-xs text-foreground/90 leading-relaxed space-y-2 pt-1 border-t border-border/40">
+                    <div className="max-h-36 sm:max-h-44 overflow-y-auto pr-1.5 [scrollbar-width:thin] text-xs text-foreground/90 leading-relaxed space-y-2 pt-2 border-t border-primary/15">
                       <p className="flex items-start gap-2">
                         <HiOutlineCheckBadge
-                          className={cn("h-4 w-4 shrink-0 mt-0.5", isClear ? "text-emerald-600" : "text-amber-600")}
+                          className={cn(
+                            "h-4 w-4 shrink-0 mt-0.5",
+                            isFlagged ? "text-amber-600 dark:text-amber-400" : isError ? "text-destructive" : "text-primary"
+                          )}
                         />
-                        <span>{screening.unitFitSentence}</span>
+                        <span className="break-words min-w-0">{screening.unitFitSentence}</span>
                       </p>
                       <p className="flex items-start gap-2">
                         <HiOutlineCheckBadge
-                          className={cn("h-4 w-4 shrink-0 mt-0.5", isClear ? "text-emerald-600" : "text-amber-600")}
+                          className={cn(
+                            "h-4 w-4 shrink-0 mt-0.5",
+                            isFlagged ? "text-amber-600 dark:text-amber-400" : isError ? "text-destructive" : "text-primary"
+                          )}
                         />
-                        <span>{screening.councilSentence}</span>
+                        <span className="break-words min-w-0">{screening.councilSentence}</span>
                       </p>
                       <p
                         className={cn(
-                          "text-[11px] font-semibold pt-1.5 border-t flex items-start gap-2",
-                          isClear
-                            ? "text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                            : "text-amber-700 dark:text-amber-300 border-amber-500/20"
+                          "text-[11px] font-semibold pt-2 border-t border-primary/15 flex items-start gap-2",
+                          isFlagged ? "text-amber-700 dark:text-amber-300" : isError ? "text-destructive" : "text-primary"
                         )}
                       >
                         <HiOutlineSparkles className="h-4 w-4 shrink-0 mt-0.5" />
-                        <span>{screening.recommendationSentence}</span>
+                        <span className="break-words min-w-0">{screening.recommendationSentence}</span>
                       </p>
                     </div>
                   </div>
@@ -1335,15 +1488,15 @@ function ApplicationsAdmin() {
               })()}
 
               {/* 2. Target Opening & Hiring Hospital Card */}
-              <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-2xs">
-                <div className="flex items-center justify-between">
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-4 space-y-3 shadow-2xs">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h5 className="font-bold text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <HiOutlineBriefcase className="h-4 w-4 text-primary" />
                     <span>Target Hospital Requirement</span>
                   </h5>
                   <span
                     className={cn(
-                      "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                      "text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap",
                       selectedApp.status === "shortlisted"
                         ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                         : selectedApp.status === "rejected"
@@ -1359,7 +1512,7 @@ function ApplicationsAdmin() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
                   <div>
                     <span className="text-muted-foreground text-[11px]">Requirement Title:</span>
                     <div className="font-bold text-foreground text-sm mt-0.5">{selectedApp.jobTitle}</div>
@@ -1410,8 +1563,8 @@ function ApplicationsAdmin() {
               </div>
 
               {/* 3. Statutory Council Registration Audit */}
-              <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-2xs">
-                <div className="flex items-center justify-between">
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-4 space-y-3 shadow-2xs">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h5 className="font-bold text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <HiOutlineAcademicCap className="h-4 w-4 text-primary" />
                     <span>Statutory Council Audit</span>
@@ -1426,21 +1579,21 @@ function ApplicationsAdmin() {
                 </div>
 
                 <div className="p-3 rounded-xl bg-muted/40 border border-border/60 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
                     <span className="text-muted-foreground">State Council:</span>
-                    <span className="font-semibold text-foreground">{selectedApp.candidateCouncil}</span>
+                    <span className="font-semibold text-foreground text-right">{selectedApp.candidateCouncil}</span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
                     <span className="text-muted-foreground">Council Reg Number:</span>
-                    <span className="font-mono font-bold text-primary">{selectedApp.regNumber}</span>
+                    <span className="font-mono font-bold text-primary break-all text-right">{selectedApp.regNumber}</span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
                     <span className="text-muted-foreground">Highest Degree:</span>
-                    <span className="font-semibold text-foreground">{selectedApp.candidateQualification}</span>
+                    <span className="font-semibold text-foreground text-right">{selectedApp.candidateQualification}</span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
                     <span className="text-muted-foreground">Expected Salary:</span>
-                    <span className="font-mono font-semibold text-foreground">{selectedApp.expectedSalary}</span>
+                    <span className="font-mono font-semibold text-foreground text-right">{selectedApp.expectedSalary}</span>
                   </div>
                 </div>
 
@@ -1453,8 +1606,8 @@ function ApplicationsAdmin() {
               </div>
 
               {/* 4. Attached Verification & Regulatory Documents */}
-              <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-2xs">
-                <div className="flex items-center justify-between">
+              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-4 space-y-3 shadow-2xs">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <h5 className="font-bold text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <HiOutlineDocumentText className="h-4 w-4 text-primary" />
                     <span>Candidate Regulatory Documents</span>
@@ -1471,17 +1624,17 @@ function ApplicationsAdmin() {
                     {selectedApp.documents.map((doc: any, idx: number) => (
                       <div
                         key={doc.id || idx}
-                        className="flex items-center justify-between p-3 rounded-xl border border-border/70 bg-muted/30 hover:bg-muted/50 transition-colors"
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl border border-border/70 bg-muted/30 hover:bg-muted/50 transition-colors"
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1 w-full">
                           <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary font-bold text-xs shrink-0">
                             <HiOutlineDocumentText className="h-4 w-4" />
                           </div>
-                          <div className="min-w-0">
-                            <div className="font-bold text-foreground text-xs truncate">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-foreground text-xs break-all sm:truncate">
                               {doc.originalFileName || formatDocType(doc.documentType)}
                             </div>
-                            <div className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                            <div className="text-[10px] text-muted-foreground flex flex-wrap items-center gap-1.5 mt-0.5">
                               <span>{formatDocType(doc.documentType)}</span>
                               <span className="h-1 w-1 rounded-full bg-border" />
                               <span>{formatBytes(doc.fileSizeBytes)}</span>
@@ -1494,7 +1647,7 @@ function ApplicationsAdmin() {
                           variant="outline"
                           onClick={() => openDocumentPreview(doc)}
                           disabled={previewLoading}
-                          className="text-xs font-bold gap-1 h-7.5 px-2.5 rounded-lg border-border hover:bg-muted cursor-pointer shrink-0"
+                          className="w-full sm:w-auto text-xs font-bold gap-1 h-8 px-3 rounded-lg border-border hover:bg-muted cursor-pointer shrink-0"
                         >
                           <HiOutlineEye className="h-3.5 w-3.5" />
                           <span>View</span>
@@ -1510,14 +1663,14 @@ function ApplicationsAdmin() {
                         documentType: "REGISTRATION_CERTIFICATE",
                       })
                     }
-                    className="flex items-center justify-between p-3 rounded-xl border border-dashed border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors cursor-pointer"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl border border-dashed border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors cursor-pointer"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1 w-full">
                       <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary font-bold text-xs shrink-0">
                         <HiOutlineDocumentText className="h-4 w-4" />
                       </div>
-                      <div className="min-w-0">
-                        <div className="font-bold text-foreground text-xs truncate">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-foreground text-xs break-all sm:truncate">
                           {selectedApp.candidateName}_State_Council_Reg_Certificate.pdf
                         </div>
                         <div className="text-[10px] text-muted-foreground mt-0.5">
@@ -1528,7 +1681,7 @@ function ApplicationsAdmin() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="text-xs font-bold gap-1 h-7.5 px-2.5 rounded-lg border-border hover:bg-muted shrink-0"
+                      className="w-full sm:w-auto text-xs font-bold gap-1 h-8 px-3 rounded-lg border-border hover:bg-muted shrink-0"
                     >
                       <HiOutlineEye className="h-3.5 w-3.5" />
                       <span>Inspect</span>
@@ -1541,7 +1694,7 @@ function ApplicationsAdmin() {
 
           {/* Sticky Bottom Actions */}
           {selectedApp && (
-            <div className="p-4 border-t border-border bg-card flex items-center justify-end gap-2 shrink-0">
+            <div className="p-3.5 sm:p-4 border-t border-border bg-card flex flex-wrap items-center justify-end gap-2 shrink-0">
               <Button
                 variant="outline"
                 size="sm"
@@ -1558,15 +1711,15 @@ function ApplicationsAdmin() {
                     onClick={() => setRejectModalOpen(true)}
                     className="h-9 px-3 rounded-xl text-rose-600 border-rose-300 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-bold gap-1.5 cursor-pointer"
                   >
-                    <HiOutlineXMark className="h-4 w-4" />
+                    <HiOutlineXMark className="h-4 w-4 shrink-0" />
                     <span>Mark Ineligible</span>
                   </Button>
                   <Button
                     size="sm"
                     onClick={() => handleShortlist(selectedApp.id, selectedApp.candidateName, selectedApp.hospitalName)}
-                    className="h-9 px-4 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold gap-1.5 shadow-2xs cursor-pointer"
+                    className="flex-1 sm:flex-initial h-9 px-4 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold gap-1.5 shadow-2xs cursor-pointer whitespace-nowrap"
                   >
-                    <HiOutlinePaperAirplane className="h-4 w-4" />
+                    <HiOutlinePaperAirplane className="h-4 w-4 shrink-0" />
                     <span>Shortlist for Hospital</span>
                   </Button>
                 </>
@@ -1699,10 +1852,10 @@ function ApplicationsAdmin() {
 
       {/* Document Binary Blob Preview Modal */}
       <Dialog open={!!previewDoc} onOpenChange={(open) => !open && setPreviewDoc(null)}>
-        <DialogContent className="max-w-3xl h-[85vh] p-0 flex flex-col gap-0 overflow-hidden">
-          <DialogHeader className="px-5 py-3.5 border-b border-border bg-card shrink-0 flex flex-row items-center justify-between">
-            <div>
-              <DialogTitle className="text-sm font-bold text-foreground">
+        <DialogContent className="w-full sm:w-[94vw] max-w-4xl h-[90dvh] sm:h-[85vh] max-h-[92dvh] sm:max-h-[85vh] p-0 flex flex-col gap-0 overflow-hidden rounded-t-3xl rounded-b-none sm:rounded-2xl border-border bg-card">
+          <DialogHeader className="px-4 sm:px-5 py-3.5 border-b border-border bg-card shrink-0 text-left pr-10">
+            <div className="min-w-0">
+              <DialogTitle className="text-xs sm:text-sm font-bold text-foreground truncate">
                 {previewDoc?.name || "Document Preview"}
               </DialogTitle>
               <DialogDescription className="text-[11px] text-muted-foreground mt-0.5">

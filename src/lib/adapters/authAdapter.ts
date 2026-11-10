@@ -6,6 +6,8 @@ import { apiFetch, getAccessToken, setAccessToken, isApiEnabled } from "@/lib/ap
 export interface UserSummary {
   id: string;
   phone: string;
+  email?: string;
+  username?: string;
   role: "ROLE_CANDIDATE" | "ROLE_FACILITY" | "ROLE_ADMIN";
   candidateLevel?: "STUDENT" | "FRESHER" | "PROFESSIONAL";
   onboarded: boolean;
@@ -142,6 +144,100 @@ export async function adminLogin(email: string, password: string): Promise<AuthR
       };
       setAccessToken(mockAdmin.accessToken);
       return mockAdmin;
+    }
+    throw err;
+  }
+}
+
+export interface AdminSignupData {
+  username: string;
+  workingmailid: string;
+  password: string;
+  passcode: string;
+}
+
+export interface AdminForgotPasswordData {
+  workingmailid: string;
+  passcode: string;
+  newPassword: string;
+}
+
+export const ADMIN_STATIC_PASSCODE = "FALE907010";
+
+/**
+ * Register a new administrator with secured passcode against backend /api/v1/auth/admin/signup.
+ */
+export async function adminSignup(data: AdminSignupData): Promise<AuthResponse> {
+  const cleanEmail = data.workingmailid.trim().toLowerCase();
+  const cleanUsername = data.username.trim();
+  const cleanPasscode = data.passcode.trim();
+
+  try {
+    const response = await apiFetch<AuthResponse>("/auth/admin/signup", {
+      method: "POST",
+      skipAuth: true,
+      body: JSON.stringify({
+        username: cleanUsername,
+        workingmailid: cleanEmail,
+        password: data.password,
+        passcode: cleanPasscode,
+      }),
+    });
+
+    if (response?.accessToken) {
+      setAccessToken(response.accessToken);
+    }
+    return response;
+  } catch (err: any) {
+    if (!isApiEnabled || err?.message?.includes("Failed to fetch") || err?.status === 0) {
+      if (cleanPasscode !== ADMIN_STATIC_PASSCODE) {
+        throw new Error("Invalid administrator authorization passcode.");
+      }
+      const mockAdmin: AuthResponse = {
+        accessToken: "mock-admin-token-" + Date.now(),
+        role: "ROLE_ADMIN",
+        onboarded: true,
+        user: {
+          id: "adm-" + Date.now(),
+          phone: "+919876543210",
+          email: cleanEmail,
+          username: cleanUsername,
+          role: "ROLE_ADMIN",
+          onboarded: true,
+          active: true,
+        },
+      };
+      setAccessToken(mockAdmin.accessToken);
+      return mockAdmin;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Reset administrator password with secured passcode against backend /api/v1/auth/admin/forgot-password.
+ */
+export async function adminForgotPassword(data: AdminForgotPasswordData): Promise<{ message: string }> {
+  const cleanEmail = data.workingmailid.trim().toLowerCase();
+  const cleanPasscode = data.passcode.trim();
+
+  try {
+    const response = await apiFetch<{ message: string }>("/auth/admin/forgot-password", {
+      method: "POST",
+      skipAuth: true,
+      body: JSON.stringify({
+        workingmailid: cleanEmail,
+        passcode: cleanPasscode,
+        newPassword: data.newPassword,
+      }),
+    });
+    return response;
+  } catch (err: any) {
+    if (!isApiEnabled || err?.message?.includes("Failed to fetch") || err?.status === 0) {
+      if (cleanPasscode !== ADMIN_STATIC_PASSCODE) {
+        throw new Error("Invalid administrator authorization passcode.");
+      }
+      return { message: "Password reset successfully. You can now sign in with your new credentials." };
     }
     throw err;
   }

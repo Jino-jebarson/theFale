@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   HiOutlineChatBubbleLeftRight,
@@ -45,6 +45,22 @@ import {
 import { toast } from "sonner";
 import { BotMessageSquare } from "lucide-react";
 import { moderateHuddlePostWithAi } from "@/lib/adapters/aiAdapter";
+import {
+  type AllyAuditStatus,
+  cleanMarkdownAndJsonNoise,
+  extractJsonPayload,
+  readSessionAuditCache,
+  writeSessionAuditCache,
+} from "@/lib/allyAuditUtils";
+
+const ALLY_HUDDLE_CACHE_KEY = "fale_ally_huddle_moderation_cache_v1";
+
+type AllyHuddleModerationResult = {
+  status: AllyAuditStatus;
+  category: string;
+  rationale: string;
+  isApproved: boolean;
+};
 import { AdminLayout } from "@/components/fale/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -142,91 +158,167 @@ function AdminHuddleModeration() {
   const [selectedPost, setSelectedPost] = useState<HuddlePost | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // AI Moderation Scan State (#17)
-  const [aiModerationResults, setAiModerationResults] = useState<Record<string, {
-    status: "SAFE" | "FLAGGED";
-    category: string;
-    rationale: string;
-    isApproved: boolean;
-  }>>({});
-  const [scanningPostId, setScanningPostId] = useState<string | null>(null);
+  // Ally Moderation Scan State (session-cached + concurrency-limited live checks)
+  const getPostModCacheKey = useCallback((post: HuddlePost) => {
+    return `${post.id}:${(post.text || "").slice(0, 80)}:${post.reports?.length || 0}`;
+  }, []);
 
-  const getPostAiModeration = (post: HuddlePost) => {
-    if (aiModerationResults[post.id]) return aiModerationResults[post.id];
+  const [aiModerationResults, setAiModerationResults] = useState<Record<string, AllyHuddleModerationResult>>(() =>
+    readSessionAuditCache<AllyHuddleModerationResult>(ALLY_HUDDLE_CACHE_KEY)
+  );
+  const [scanningPostIds, setScanningPostIds] = useState<Record<string, boolean>>({});
+  const inFlightScanKeysRef = useRef<Set<string>>(new Set());
+  const autoScannedKeysRef = useRef<Set<string>>(new Set());
 
-    const text = (post.text || "").toLowerCase();
-    const hasPhoneOrRecruiter = /(?:\+91|whatsapp|phone|call me|contact me|telegram|dm me|hiring alert)/i.test(text);
-    const hasPhi = /\b(?:uhid|mrd|ipd|opd|patient name|bed\s*#?\d+)\b/i.test(text) || post.reports.some((r) => r.toLowerCase().includes("privacy"));
-    const hasHarassment = /(fake|scam|fraud|cheat|stupid|idiot)/i.test(text);
+  const getPostAiModeration = useCallback(
+    (post: HuddlePost): AllyHuddleModerationResult => {
+      const cacheKey = getPostModCacheKey(post);
+      const cached = aiModerationResults[cacheKey] || aiModerationResults[post.id];
+      if (cached) return cached;
 
-    const isFlagged = hasPhoneOrRecruiter || hasPhi || hasHarassment || post.reports.length > 0;
-    let category = "Clinical Knowledge Discussion";
-    let rationale = "Clean clinical knowledge exchange adhering to FALE clinical forum governance.";
+      return {
+        status: "PENDING",
+        category: "Ally Safety Pre-Check Queued",
+        rationale:
+          "Ally automated moderation scan is queued to inspect patient de-identification (UHID/MRD/names), off-platform recruiter solicitation, and clinical policy compliance.",
+        isApproved: false,
+      };
+    },
+    [aiModerationResults, getPostModCacheKey]
+  );
 
-    if (hasPhi) {
-      category = "Patient Privacy Risk: PHI / Identifier pattern detected";
-      rationale = "Potential patient identification numbers or un-redacted clinical identifiers detected.";
-    } else if (hasPhoneOrRecruiter) {
-      category = "Spam Risk: Off-platform contact / solicitation identified";
-      rationale = "Direct phone number, WhatsApp contact solicitation, or off-platform recruitment detected.";
-    } else if (hasHarassment) {
-      category = "Community Policy Infraction: Hostile language detected";
-      rationale = "Hostile language or non-professional phrasing detected in peer clinical forum.";
-    } else if (post.reports.length > 0) {
-      category = "Community Flagged: Peer reports under review";
-      rationale = `Flagged by ${post.reports.length} peer clinical reports for administrative review.`;
-    }
+  const handleScanPostWithAi = useCallback(
+    async (post: HuddlePost, options?: { silent?: boolean }) => {
+      const cacheKey = getPostModCacheKey(post);
+      if (options?.silent && inFlightScanKeysRef.current.has(cacheKey)) return;
 
-    return {
-      status: isFlagged ? ("FLAGGED" as const) : ("SAFE" as const),
-      category,
-      rationale,
-      isApproved: !isFlagged,
-    };
-  };
+      inFlightScanKeysRef.current.add(cacheKey);
+      setScanningPostIds((prev) => ({ ...prev, [post.id]: true }));
+      try {
+        const res = await moderateHuddlePostWithAi(post.text);
+        const rawText = res.response || res.content || "";
+        const embeddedJson = extractJsonPayload(rawText);
+        const sData: Record<string, any> = {
+          ...(embeddedJson || {}),
+          ...(res.structuredData || {}),
+        };
 
-  const handleScanPostWithAi = async (post: HuddlePost) => {
-    setScanningPostId(post.id);
-    try {
-      const res = await moderateHuddlePostWithAi(post.text);
-      const text = res.response || res.content || "";
-      const sData = res.structuredData || {};
-      const lower = text.toLowerCase();
-      const isFlagged =
-        sData.status === "FLAGGED" ||
-        sData.isApproved === false ||
-        lower.startsWith("flagged") ||
-        lower.includes("flagged") ||
-        lower.includes("violation") ||
-        lower.includes("phi") ||
-        lower.includes("spam");
+        const rawStatus = String(sData["status"] || "").toUpperCase();
+        const plainRationale = cleanMarkdownAndJsonNoise(
+          typeof sData["rationale"] === "string"
+            ? sData["rationale"]
+            : typeof sData["assessment"] === "string"
+              ? sData["assessment"]
+              : typeof sData["reasoning"] === "string"
+                ? sData["reasoning"]
+                : embeddedJson
+                  ? ""
+                  : rawText
+        );
+        const lower = plainRationale.toLowerCase();
 
-      const category = sData.category || (isFlagged
-        ? lower.includes("phi") || lower.includes("patient") || lower.includes("identifier")
-          ? "Patient Privacy Risk: PHI / Identifier pattern detected"
-          : "Spam Risk: Off-platform contact / solicitation identified"
-        : "Community Safe: Verified Clinical Exchange");
+        const isFlagged =
+          rawStatus === "FLAGGED" ||
+          rawStatus === "FLAGGED_DISCREPANCY" ||
+          rawStatus === "VIOLATION" ||
+          sData["isApproved"] === false ||
+          (rawStatus !== "SAFE" &&
+            rawStatus !== "CLEAR" &&
+            rawStatus !== "APPROVED" &&
+            (lower.startsWith("flagged") ||
+              lower.includes("flagged") ||
+              lower.includes("violation") ||
+              lower.includes("patient privacy") ||
+              lower.includes("off-platform") ||
+              lower.includes("spam")));
 
-      const rationale = sData.rationale || text || (isFlagged
-        ? "Flagged by AI safety filters for potential policy infraction."
-        : "Clean clinical post adhering to community safety guidelines.");
+        const category =
+          cleanMarkdownAndJsonNoise(typeof sData["category"] === "string" ? sData["category"] : "") ||
+          (isFlagged
+            ? lower.includes("phi") || lower.includes("patient") || lower.includes("identifier") || lower.includes("uhid")
+              ? "Patient Privacy Risk: PHI / Identifier pattern detected"
+              : "Policy Infraction: Off-platform solicitation / safety risk"
+            : "Community Safe: Verified Clinical Exchange");
 
-      setAiModerationResults((prev) => ({
-        ...prev,
-        [post.id]: {
-          status: isFlagged ? "FLAGGED" : "SAFE",
+        const rationale =
+          plainRationale ||
+          (isFlagged
+            ? "Flagged by Ally safety filters for potential patient privacy or community policy infraction."
+            : "Clean clinical discussion adhering to FALE Huddle community safety guidelines.");
+
+        const nextEntry: AllyHuddleModerationResult = {
+          status: isFlagged ? "FLAGGED" : "VERIFIED",
           category,
           rationale,
           isApproved: !isFlagged,
-        },
-      }));
-      toast.success(`AI Moderation scan complete: ${isFlagged ? "Violation Detected" : "Clear"}`);
-    } catch (err: any) {
-      console.warn("AI Moderation failed:", err);
-      toast.error("Failed to run AI Moderation scan");
-    } finally {
-      setScanningPostId(null);
-    }
+        };
+
+        setAiModerationResults((prev) => {
+          const next = { ...prev, [cacheKey]: nextEntry };
+          writeSessionAuditCache(ALLY_HUDDLE_CACHE_KEY, next);
+          return next;
+        });
+
+        if (!options?.silent) {
+          toast.success(`Ally moderation scan complete: ${isFlagged ? "Violation Detected" : "Clear"}`);
+        }
+      } catch (err: any) {
+        console.warn("Ally moderation scan failed:", err);
+        const errorEntry: AllyHuddleModerationResult = {
+          status: "ERROR",
+          category: "Ally Moderation Service Unavailable",
+          rationale: "Ally could not complete automated safety analysis right now. Review content manually or click Re-scan with Ally.",
+          isApproved: false,
+        };
+        setAiModerationResults((prev) => ({ ...prev, [cacheKey]: errorEntry }));
+        if (!options?.silent) {
+          toast.error("Failed to run Ally moderation scan");
+        }
+      } finally {
+        inFlightScanKeysRef.current.delete(cacheKey);
+        setScanningPostIds((prev) => {
+          const next = { ...prev };
+          delete next[post.id];
+          return next;
+        });
+      }
+    },
+    [getPostModCacheKey]
+  );
+
+  const renderAllyModerationBadge = (post: HuddlePost) => {
+    const scan = getPostAiModeration(post);
+    const isScanning = Boolean(scanningPostIds[post.id]);
+    const isSafe = scan.status === "VERIFIED";
+    const isFlagged = scan.status === "FLAGGED" || scan.status === "ERROR";
+
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border leading-none whitespace-nowrap shrink-0",
+          isScanning || isSafe
+            ? "bg-primary/10 text-primary border-primary/25"
+            : isFlagged
+              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
+              : "bg-muted/70 text-muted-foreground border-border/60"
+        )}
+      >
+        {isScanning ? (
+          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+        ) : (
+          <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
+        )}
+        {isScanning
+          ? "Ally Scanning..."
+          : isSafe
+            ? "Ally Community Safe"
+            : scan.status === "ERROR"
+              ? "Ally Retry"
+              : isFlagged
+                ? "Ally Flagged Review"
+                : "Ally Scan Queued"}
+      </span>
+    );
   };
 
   // Dialog states
@@ -353,6 +445,45 @@ function AdminHuddleModeration() {
     () => allPosts.filter((p) => p.status === "live"),
     [allPosts]
   );
+
+  // Performance-safe background Ally safety scan for flagged reports & review cases (MAX_CONCURRENT = 2)
+  useEffect(() => {
+    const queue = [...flaggedPosts, ...pendingCases].filter((p) => {
+      const key = getPostModCacheKey(p);
+      return !aiModerationResults[key] && !autoScannedKeysRef.current.has(key) && !inFlightScanKeysRef.current.has(key);
+    });
+    if (queue.length === 0) return;
+
+    let cancelled = false;
+    let cursor = 0;
+    const MAX_CONCURRENT = 2;
+
+    const worker = async () => {
+      while (!cancelled && cursor < queue.length) {
+        const nextPost = queue[cursor++];
+        if (!nextPost) break;
+        const key = getPostModCacheKey(nextPost);
+        autoScannedKeysRef.current.add(key);
+        await handleScanPostWithAi(nextPost, { silent: true });
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(MAX_CONCURRENT, queue.length) }, () => worker());
+    void Promise.all(workers);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [flaggedPosts, pendingCases, aiModerationResults, getPostModCacheKey, handleScanPostWithAi]);
+
+  // Prioritize Ally safety scan immediately when Inspect drawer opens for any post
+  useEffect(() => {
+    if (!sheetOpen || !selectedPost) return;
+    const key = getPostModCacheKey(selectedPost);
+    if (!aiModerationResults[key] && !inFlightScanKeysRef.current.has(key)) {
+      void handleScanPostWithAi(selectedPost, { silent: true });
+    }
+  }, [sheetOpen, selectedPost, aiModerationResults, getPostModCacheKey, handleScanPostWithAi]);
 
   // Handlers
   const handleApprovePost = (post: HuddlePost) => {
@@ -579,7 +710,7 @@ function AdminHuddleModeration() {
       }
     >
       {/* Top 4 Enterprise KPI Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Card 1: Clinical Privacy Queue */}
         <div
           onClick={() => setActiveTab("cases")}
@@ -740,7 +871,7 @@ function AdminHuddleModeration() {
             TAB 1: FLAGGED REPORTS DESK
            ========================================================================= */}
         {activeTab === "flagged" && (
-          <div className="p-4 sm:p-6 space-y-4">
+          <div className="p-3.5 sm:p-6 pb-24 sm:pb-6 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/60">
               <div>
                 <h3 className="text-sm font-extrabold text-foreground flex flex-wrap items-center gap-2">
@@ -793,25 +924,24 @@ function AdminHuddleModeration() {
               <div className="space-y-3">
                 {filteredFlagged.map((post) => {
                   const modScan = getPostAiModeration(post);
-                  const isViolation = modScan.status === "FLAGGED";
 
                   return (
                     <div
                       key={post.id}
-                      className="rounded-xl border border-border/80 bg-card p-4 hover:border-primary/40 transition-all space-y-3 shadow-2xs"
+                      className="rounded-xl border border-border/80 bg-card p-3.5 sm:p-4 hover:border-primary/40 transition-all space-y-3 shadow-2xs overflow-hidden min-w-0"
                     >
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2.5">
                         {/* Author info with avatar */}
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
                           <div className="h-9 w-9 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0 border border-primary/20">
                             {post.authorName ? post.authorName.charAt(0) : "U"}
                           </div>
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-xs font-bold text-foreground">
+                              <span className="text-xs font-bold text-foreground truncate">
                                 {post.authorName}
                               </span>
-                              <span className="text-[11px] text-muted-foreground">
+                              <span className="text-[11px] text-muted-foreground truncate">
                                 ({post.authorRole})
                               </span>
                             </div>
@@ -822,42 +952,21 @@ function AdminHuddleModeration() {
                         </div>
 
                         {/* Status badges */}
-                        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0">
-                          <span
-                            className={cn(
-                              "rounded-md border px-2 py-0.5 text-[10px] font-bold flex items-center gap-1 whitespace-nowrap",
-                              isViolation
-                                ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
-                                : "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
-                            )}
-                          >
-                            <RiAlertLine className="h-3 w-3 shrink-0" />
-                            {isViolation ? "Flagged Review" : "Community Safe"}
-                          </span>
+                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          {renderAllyModerationBadge(post)}
                           <span className="text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full whitespace-nowrap">
                             {post.reports.length} report{post.reports.length > 1 ? "s" : ""}
                           </span>
                         </div>
                       </div>
 
-                      {/* Community Moderation Guardrail Analysis */}
-                      <div
-                        className={cn(
-                          "rounded-lg border p-2.5 text-[11px] flex flex-wrap items-center justify-between gap-1.5",
-                          isViolation
-                            ? "bg-amber-500/5 border-amber-500/20"
-                            : "bg-emerald-500/5 border-emerald-500/20"
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "font-bold flex items-center gap-1.5",
-                            isViolation ? "text-amber-800 dark:text-amber-300" : "text-emerald-800 dark:text-emerald-300"
-                          )}
-                        >
-                          <BotMessageSquare className="h-3.5 w-3.5" /> Moderation Scan:
+                      {/* Ally Moderation Pre-Check Summary */}
+                      <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5 text-[11px] flex flex-wrap items-center justify-between gap-1.5">
+                        <span className="font-bold text-primary flex items-center gap-1.5 shrink-0">
+                          <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
+                          <span>Ally Pre-Check:</span>
                         </span>
-                        <span className="text-[10px] font-semibold text-foreground/85">
+                        <span className="text-[11px] font-semibold text-foreground/85 break-words min-w-0">
                           {modScan.category}
                         </span>
                       </div>
@@ -925,7 +1034,7 @@ function AdminHuddleModeration() {
                             size="sm"
                             variant="outline"
                             onClick={() => handleDismissReport(post)}
-                            className="h-8 text-xs font-bold gap-1 text-foreground border border-border/80 hover:bg-muted px-2 justify-center"
+                            className="h-8 text-[11px] sm:text-xs font-bold gap-1 text-foreground border border-border/80 hover:bg-muted px-1.5 sm:px-2.5 justify-center min-w-0"
                           >
                             <HiCheck className="h-3.5 w-3.5 shrink-0 text-primary" />
                             <span className="truncate">Dismiss</span>
@@ -938,7 +1047,7 @@ function AdminHuddleModeration() {
                               setPostToWarn(post);
                               setWarnModalOpen(true);
                             }}
-                            className="h-8 text-xs font-bold gap-1 text-primary border border-primary/30 hover:bg-primary/10 px-2 justify-center"
+                            className="h-8 text-[11px] sm:text-xs font-bold gap-1 text-primary border border-primary/30 hover:bg-primary/10 px-1.5 sm:px-2.5 justify-center min-w-0"
                           >
                             <HiOutlineExclamationTriangle className="h-3.5 w-3.5 shrink-0" />
                             <span className="truncate">Warn</span>
@@ -950,7 +1059,7 @@ function AdminHuddleModeration() {
                               setPostToDelete(post);
                               setDeleteModalOpen(true);
                             }}
-                            className="h-8 text-xs font-bold gap-1 bg-primary text-white hover:bg-primary-hover px-2 justify-center shadow-2xs"
+                            className="h-8 text-[11px] sm:text-xs font-bold gap-1 bg-primary text-white hover:bg-primary-hover px-1.5 sm:px-2.5 justify-center shadow-2xs min-w-0"
                           >
                             <HiOutlineTrash className="h-3.5 w-3.5 shrink-0" />
                             <span className="truncate">Delete</span>
@@ -969,7 +1078,7 @@ function AdminHuddleModeration() {
             TAB 2: CLINICAL CASE PRIVACY & DE-IDENTIFICATION QUEUE
            ========================================================================= */}
         {activeTab === "cases" && (
-          <div className="p-4 sm:p-6 space-y-4">
+          <div className="p-3.5 sm:p-6 pb-24 sm:pb-6 space-y-4">
             <div className="pb-3 border-b border-border/60">
               <h3 className="text-sm font-extrabold text-foreground flex flex-wrap items-center gap-2">
                 <span>Clinical Case Study De-Identification Desk</span>
@@ -1001,12 +1110,12 @@ function AdminHuddleModeration() {
                     key={post.id}
                     className="rounded-xl border border-border/80 bg-card p-4 sm:p-5 shadow-2xs space-y-4 hover:border-primary/40 transition-all"
                   >
-                    <div className="flex items-start justify-between gap-3 pb-3 border-b border-border/60">
-                      <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex flex-wrap items-start justify-between gap-2.5 pb-3 border-b border-border/60">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         <div className="h-9 w-9 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0 border border-primary/20">
                           {post.authorName ? post.authorName.charAt(0) : "C"}
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="text-xs font-bold text-foreground">
                               {post.authorName}
@@ -1021,7 +1130,8 @@ function AdminHuddleModeration() {
                         </div>
                       </div>
 
-                      <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 shrink-0">
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        {renderAllyModerationBadge(post)}
                         <span className="rounded-md bg-primary/10 border border-primary/20 text-primary px-2 py-0.5 text-[10px] font-extrabold whitespace-nowrap">
                           {post.type} · {post.field}
                         </span>
@@ -1112,7 +1222,7 @@ function AdminHuddleModeration() {
                         <span>Full Audit View</span>
                       </Button>
 
-                      <div className="grid grid-cols-2 sm:flex sm:items-center gap-2">
+                      <div className="grid grid-cols-2 sm:flex sm:items-center gap-1.5 sm:gap-2">
                         <Button
                           size="sm"
                           variant="outline"
@@ -1123,7 +1233,7 @@ function AdminHuddleModeration() {
                             );
                             setWarnModalOpen(true);
                           }}
-                          className="h-8 text-xs font-bold gap-1 text-primary border border-primary/30 hover:bg-primary/10 px-2.5 justify-center"
+                          className="h-8 text-[11px] sm:text-xs font-bold gap-1 text-primary border border-primary/30 hover:bg-primary/10 px-2 justify-center min-w-0"
                         >
                           <HiOutlineExclamationTriangle className="h-3.5 w-3.5 shrink-0" />
                           <span className="truncate">Request Redaction</span>
@@ -1132,7 +1242,7 @@ function AdminHuddleModeration() {
                         <Button
                           size="sm"
                           onClick={() => handleApprovePost(post)}
-                          className="h-8 text-xs font-bold gap-1.5 bg-primary text-white hover:bg-primary-hover shadow-2xs px-3 justify-center"
+                          className="h-8 text-[11px] sm:text-xs font-bold gap-1.5 bg-primary text-white hover:bg-primary-hover shadow-2xs px-2 sm:px-3 justify-center min-w-0"
                         >
                           <HiCheck className="h-3.5 w-3.5 shrink-0" />
                           <span className="truncate">Approve &amp; Publish</span>
@@ -1150,12 +1260,12 @@ function AdminHuddleModeration() {
             TAB 3: LIVE FEED & FULL DISCUSSIONS AUDIT
            ========================================================================= */}
         {activeTab === "feed" && (
-          <div className="p-4 sm:p-6 space-y-4">
+          <div className="p-3.5 sm:p-6 pb-24 sm:pb-6 space-y-4">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-border/60">
               <div>
-                <h3 className="text-sm font-extrabold text-foreground flex items-center gap-2">
+                <h3 className="text-sm font-extrabold text-foreground flex flex-wrap items-center gap-2">
                   <span>Live Feed Audit &amp; Activity Stream</span>
-                  <span className="rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5">
+                  <span className="rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-black px-2 py-0.5 whitespace-nowrap">
                     {filteredLive.length} Discussions
                   </span>
                 </h3>
@@ -1165,8 +1275,8 @@ function AdminHuddleModeration() {
               </div>
 
               {/* Filters toolbar right above table */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="w-36">
+              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                <div className="flex-1 sm:flex-initial min-w-[130px] sm:w-36">
                   <Select value={fieldFilter} onValueChange={(val) => setFieldFilter(val)}>
                     <SelectTrigger className="h-8 w-full rounded-xl border border-border bg-card px-2.5 text-xs font-semibold text-foreground hover:bg-muted/40">
                       <SelectValue placeholder="All Specialties" />
@@ -1183,7 +1293,7 @@ function AdminHuddleModeration() {
                   </Select>
                 </div>
 
-                <div className="w-36">
+                <div className="flex-1 sm:flex-initial min-w-[130px] sm:w-36">
                   <Select value={typeFilter} onValueChange={(val) => setTypeFilter(val)}>
                     <SelectTrigger className="h-8 w-full rounded-xl border border-border bg-card px-2.5 text-xs font-semibold text-foreground hover:bg-muted/40">
                       <SelectValue placeholder="All Post Types" />
@@ -1509,7 +1619,7 @@ function AdminHuddleModeration() {
             TAB 4: CLINICAL MENTORS DESK
            ========================================================================= */}
         {activeTab === "mentors" && (
-          <div className="p-4 sm:p-6 space-y-6">
+          <div className="p-3.5 sm:p-6 pb-24 sm:pb-6 space-y-6">
             {/* Sub-section 1: Pending Clinical Mentor Applications Queue */}
             <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:p-5 space-y-3.5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1703,7 +1813,7 @@ function AdminHuddleModeration() {
             TAB 5: COMMUNITY GUARDRAILS & POLICIES
            ========================================================================= */}
         {activeTab === "rules" && (
-          <div className="p-4 sm:p-6 space-y-6">
+          <div className="p-3.5 sm:p-6 pb-24 sm:pb-6 space-y-6">
             <div className="pb-3 border-b border-border/60">
               <h3 className="text-sm font-extrabold text-foreground flex flex-wrap items-center gap-2">
                 <span>FALE Huddle Moderation Engine &amp; Privacy Policies</span>
@@ -1814,14 +1924,14 @@ function AdminHuddleModeration() {
           SLIDE-OVER INSPECTION DRAWER (SHEET)
          ========================================================================= */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent className="w-full sm:max-w-xl overflow-y-auto p-0">
+        <SheetContent side="right" className="w-full sm:max-w-xl p-0 flex flex-col h-full max-h-[100dvh] overflow-hidden gap-0">
           {selectedPost && (
-            <div className="p-6 space-y-6">
-              <SheetHeader className="space-y-1 text-left pb-4 border-b border-border/80">
-                <div className="flex items-center justify-between pr-8">
+            <>
+              <SheetHeader className="px-4 sm:px-6 py-3.5 sm:py-4.5 space-y-1 text-left border-b border-border bg-card shrink-0">
+                <div className="flex flex-wrap items-center justify-between gap-2 pr-8">
                   <span
                     className={cn(
-                      "text-[10px] font-black uppercase px-2 py-0.5 rounded-md border",
+                      "text-[10px] font-black uppercase px-2 py-0.5 rounded-md border whitespace-nowrap",
                       selectedPost.type === "Case"
                         ? "bg-primary/10 text-primary border-primary/20"
                         : "bg-primary text-white border-primary"
@@ -1831,7 +1941,7 @@ function AdminHuddleModeration() {
                   </span>
                   <span
                     className={cn(
-                      "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                      "text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap",
                       selectedPost.status === "live"
                         ? "bg-primary/10 text-primary border-primary/20"
                         : selectedPost.status === "review"
@@ -1842,221 +1952,237 @@ function AdminHuddleModeration() {
                     Status: {selectedPost.status.toUpperCase()}
                   </span>
                 </div>
-                <SheetTitle className="text-base font-black text-foreground pt-1">
+                <SheetTitle className="text-sm sm:text-base font-black text-foreground pt-1 leading-snug">
                   Discussion Audit &amp; Moderation
                 </SheetTitle>
-                <SheetDescription className="text-xs text-muted-foreground">
+                <SheetDescription className="text-[11px] sm:text-xs text-muted-foreground">
                   Submitted {selectedPost.at}
                 </SheetDescription>
               </SheetHeader>
 
-              {/* Author Details Card */}
-              <div className="rounded-xl border border-border/80 bg-muted/30 p-3.5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-black text-sm shrink-0">
-                    {selectedPost.isHospital ? (
-                      <RiHospitalLine className="h-4 w-4" />
-                    ) : (
-                      selectedPost.authorName[0]
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-black text-foreground truncate">
-                        {selectedPost.isHospital ? selectedPost.hospitalName : selectedPost.authorName}
-                      </span>
-                      {selectedPost.isMentor && (
-                        <HiOutlineCheckBadge className="h-4 w-4 text-primary shrink-0" />
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 sm:p-6 space-y-4 sm:space-y-5">
+                {/* Author Details Card */}
+                <div className="rounded-xl border border-border/80 bg-muted/30 p-3.5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center font-black text-sm shrink-0">
+                      {selectedPost.isHospital ? (
+                        <RiHospitalLine className="h-4 w-4" />
+                      ) : (
+                        selectedPost.authorName[0]
                       )}
                     </div>
-                    <span className="text-[11px] text-muted-foreground block truncate">
-                      {selectedPost.authorRole} · {selectedPost.authorLevel}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-black text-foreground truncate">
+                          {selectedPost.isHospital ? selectedPost.hospitalName : selectedPost.authorName}
+                        </span>
+                        {selectedPost.isMentor && (
+                          <HiOutlineCheckBadge className="h-4 w-4 text-primary shrink-0" />
+                        )}
+                      </div>
+                      <span className="text-[11px] text-muted-foreground block truncate">
+                        {selectedPost.authorRole} · {selectedPost.authorLevel}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <span className="text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full whitespace-nowrap">
+                      Council KYC Active
                     </span>
                   </div>
                 </div>
 
-                <div className="text-right shrink-0">
-                  <span className="text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full">
-                    Council KYC Active
-                  </span>
-                </div>
-              </div>
-
-              {/* Community Reports Alert */}
-              {selectedPost.reports && selectedPost.reports.length > 0 && (
-                <div className="rounded-xl border border-border/80 bg-muted/40 p-3.5 space-y-1.5">
-                  <div className="text-xs font-extrabold text-primary flex items-center gap-1.5">
-                    <HiOutlineExclamationTriangle className="h-4 w-4" />
-                    <span>Member Reports ({selectedPost.reports.length}):</span>
+                {/* Community Reports Alert */}
+                {selectedPost.reports && selectedPost.reports.length > 0 && (
+                  <div className="rounded-xl border border-border/80 bg-muted/40 p-3.5 space-y-1.5">
+                    <div className="text-xs font-extrabold text-primary flex items-center gap-1.5">
+                      <HiOutlineExclamationTriangle className="h-4 w-4 shrink-0" />
+                      <span>Member Reports ({selectedPost.reports.length}):</span>
+                    </div>
+                    <ul className="space-y-1 text-xs text-foreground/90 pl-5 list-disc">
+                      {selectedPost.reports.map((r, i) => (
+                        <li key={i} className="break-words">{r}</li>
+                      ))}
+                    </ul>
                   </div>
-                  <ul className="space-y-1 text-xs text-foreground/90 pl-5 list-disc">
-                    {selectedPost.reports.map((r, i) => (
-                      <li key={i}>{r}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                )}
 
-              {/* AI Community Moderation Scan Card (#17) */}
-              {(() => {
-                const modScan = getPostAiModeration(selectedPost);
-                const isScanning = scanningPostId === selectedPost.id;
-                const isViolation = modScan.status === "FLAGGED";
+                {/* Ally Community Moderation Pre-Check Card */}
+                {(() => {
+                  const modScan = getPostAiModeration(selectedPost);
+                  const isScanning = Boolean(scanningPostIds[selectedPost.id]);
+                  const isSafe = modScan.status === "VERIFIED";
+                  const isFlagged = modScan.status === "FLAGGED";
+                  const isError = modScan.status === "ERROR";
 
-                return (
-                  <div
-                    className={cn(
-                      "rounded-2xl border p-4 sm:p-5 space-y-3 shadow-xs transition-colors",
-                      isViolation
-                        ? "border-amber-500/30 bg-amber-500/5"
-                        : "border-emerald-500/30 bg-emerald-500/5"
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "grid h-7 w-7 place-items-center rounded-lg",
-                            isViolation ? "bg-amber-500/10 text-amber-600" : "bg-emerald-500/10 text-emerald-600"
-                          )}
-                        >
-                          <BotMessageSquare className="h-4 w-4" />
-                        </span>
-                        <span
-                          className={cn(
-                            "text-xs font-bold uppercase tracking-wider",
-                            isViolation ? "text-amber-800 dark:text-amber-300" : "text-emerald-800 dark:text-emerald-300"
-                          )}
-                        >
-                          AI Community Moderation Scan
-                        </span>
+                  return (
+                    <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3.5 sm:p-5 space-y-3 shadow-xs transition-colors">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
+                            {isScanning ? (
+                              <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <BotMessageSquare className="h-4 w-4" />
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-xs font-extrabold uppercase tracking-wider text-primary block leading-snug">
+                              Ally Community Pre-Check
+                            </span>
+                            <span className="text-[11px] text-muted-foreground block truncate">
+                              {isScanning
+                                ? "Checking PHI privacy & forum policy..."
+                                : isSafe
+                                  ? "Privacy & Policy Verified"
+                                  : isFlagged
+                                    ? "Policy Discrepancy Flagged"
+                                    : isError
+                                      ? "Scan unavailable · Retry recommended"
+                                      : "Queued for Ally safety check"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          <span
+                            className={cn(
+                              "text-[10px] font-black px-2 py-0.5 rounded-full border inline-flex items-center gap-1 whitespace-nowrap",
+                              isScanning || isSafe
+                                ? "bg-primary/10 text-primary border-primary/25"
+                                : isFlagged
+                                  ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25"
+                                  : isError
+                                    ? "bg-destructive/10 text-destructive border-destructive/25"
+                                    : "bg-muted text-muted-foreground border-border/60"
+                            )}
+                          >
+                            {isScanning
+                              ? "Ally Scanning..."
+                              : isSafe
+                                ? "Community Safe"
+                                : isFlagged
+                                  ? "Policy Violation Flagged"
+                                  : isError
+                                    ? "Ally Audit Retry"
+                                    : "Ally Scan Queued"}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isScanning}
+                            onClick={() => handleScanPostWithAi(selectedPost)}
+                            className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
+                          >
+                            {isScanning ? (
+                              <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                            ) : (
+                              <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
+                            )}
+                            <span>{isScanning ? "Scanning with Ally..." : "Re-scan with Ally"}</span>
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span
+
+                      <div className="max-h-36 sm:max-h-44 overflow-y-auto pr-1.5 [scrollbar-width:thin] text-xs text-foreground/90 leading-relaxed space-y-2 pt-2 border-t border-primary/15">
+                        <p
                           className={cn(
-                            "text-[10px] font-extrabold px-2 py-0.5 rounded-full border",
-                            isViolation
-                              ? "text-amber-700 dark:text-amber-300 bg-amber-500/15 border-amber-500/30"
-                              : "text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 border-emerald-500/30"
+                            "font-bold text-[11px] break-words",
+                            isFlagged ? "text-amber-700 dark:text-amber-300" : isError ? "text-destructive" : "text-primary"
                           )}
                         >
-                          {isViolation ? "Policy Violation Flagged" : "Community Safe"}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isScanning}
-                          onClick={() => handleScanPostWithAi(selectedPost)}
-                          className={cn(
-                            "h-6 px-2 text-[10px] font-bold rounded-md gap-1 cursor-pointer",
-                            isViolation
-                              ? "border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
-                              : "border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
-                          )}
-                        >
-                          <BotMessageSquare className="h-3 w-3" />
-                          <span>{isScanning ? "Scanning with AI..." : "Re-scan Content"}</span>
-                        </Button>
+                          Category: {modScan.category}
+                        </p>
+                        <p className="text-foreground/85 leading-relaxed text-xs break-words">
+                          {modScan.rationale}
+                        </p>
                       </div>
                     </div>
-                    <div className="text-xs text-foreground/90 leading-relaxed space-y-1.5">
-                      <p
-                        className={cn(
-                          "font-bold text-[11px]",
-                          isViolation ? "text-amber-800 dark:text-amber-300" : "text-emerald-800 dark:text-emerald-300"
-                        )}
-                      >
-                        Category: {modScan.category}
-                      </p>
-                      <p className="text-foreground/80 leading-relaxed text-[11px]">
-                        {modScan.rationale}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })()}
+                  );
+                })()}
 
-              {/* Full Discussion Content */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Post Content Text:
-                </label>
-                <div className="rounded-xl border border-border/80 bg-card p-4 text-xs text-foreground leading-relaxed whitespace-pre-wrap">
-                  {selectedPost.text}
-                </div>
-              </div>
-
-              {/* Attached Clinical Imagery if present */}
-              {(selectedPost.image || (selectedPost as any).imageUrl) && (
+                {/* Full Discussion Content */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                    Attached Clinical Imagery:
+                    Post Content Text:
                   </label>
-                  <div className="rounded-xl overflow-hidden border border-border/80 bg-muted/20 p-2 max-w-full">
-                    <img
-                      src={selectedPost.image || (selectedPost as any).imageUrl}
-                      alt="Attached clinical scan"
-                      className="max-h-72 w-full object-contain rounded-lg bg-black/5"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLElement).style.display = "none";
-                      }}
-                    />
+                  <div className="rounded-xl border border-border/80 bg-card p-3.5 sm:p-4 text-xs text-foreground leading-relaxed whitespace-pre-wrap break-words">
+                    {selectedPost.text}
                   </div>
                 </div>
-              )}
 
-              {/* Engagement Stats */}
-              <div className="grid grid-cols-2 gap-3 text-center">
-                <div className="rounded-xl border border-border/80 bg-muted/20 p-2.5">
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold block">
-                    Helpful Upvotes
-                  </span>
-                  <span className="text-base font-black font-mono text-foreground">
-                    {selectedPost.helpfulCount}
-                  </span>
+                {/* Attached Clinical Imagery if present */}
+                {(selectedPost.image || (selectedPost as any).imageUrl) && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Attached Clinical Imagery:
+                    </label>
+                    <div className="rounded-xl overflow-hidden border border-border/80 bg-muted/20 p-2 max-w-full">
+                      <img
+                        src={selectedPost.image || (selectedPost as any).imageUrl}
+                        alt="Attached clinical scan"
+                        className="max-h-72 w-full object-contain rounded-lg bg-black/5"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLElement).style.display = "none";
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Engagement Stats */}
+                <div className="grid grid-cols-2 gap-3 text-center">
+                  <div className="rounded-xl border border-border/80 bg-muted/20 p-2.5">
+                    <span className="text-[10px] text-muted-foreground uppercase font-bold block">
+                      Helpful Upvotes
+                    </span>
+                    <span className="text-base font-black font-mono text-foreground">
+                      {selectedPost.helpfulCount}
+                    </span>
+                  </div>
+                  <div className="rounded-xl border border-border/80 bg-muted/20 p-2.5">
+                    <span className="text-[10px] text-muted-foreground uppercase font-bold block">
+                      Replies Logged
+                    </span>
+                    <span className="text-base font-black font-mono text-foreground">
+                      {selectedPost.replies?.length || 0}
+                    </span>
+                  </div>
                 </div>
-                <div className="rounded-xl border border-border/80 bg-muted/20 p-2.5">
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold block">
-                    Replies Logged
-                  </span>
-                  <span className="text-base font-black font-mono text-foreground">
-                    {selectedPost.replies?.length || 0}
-                  </span>
-                </div>
+
+                {/* Reply Thread Preview */}
+                {selectedPost.replies && selectedPost.replies.length > 0 && (
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Recent Replies ({selectedPost.replies.length}):
+                    </label>
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1 [scrollbar-width:thin]">
+                      {selectedPost.replies.map((rep) => (
+                        <div
+                          key={rep.id}
+                          className="rounded-lg border border-border/60 bg-muted/20 p-2.5 text-xs space-y-1"
+                        >
+                          <div className="flex items-center justify-between gap-2 text-[11px]">
+                            <strong className="text-foreground truncate">{rep.authorName}</strong>
+                            <span className="text-muted-foreground shrink-0">{rep.at}</span>
+                          </div>
+                          <p className="text-muted-foreground break-words">{rep.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Reply Thread Preview */}
-              {selectedPost.replies && selectedPost.replies.length > 0 && (
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                    Recent Replies ({selectedPost.replies.length}):
-                  </label>
-                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                    {selectedPost.replies.map((rep) => (
-                      <div
-                        key={rep.id}
-                        className="rounded-lg border border-border/60 bg-muted/20 p-2.5 text-xs space-y-1"
-                      >
-                        <div className="flex items-center justify-between text-[11px]">
-                          <strong className="text-foreground">{rep.authorName}</strong>
-                          <span className="text-muted-foreground">{rep.at}</span>
-                        </div>
-                        <p className="text-muted-foreground">{rep.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Action Buttons in Drawer */}
-              <div className="pt-4 border-t border-border/80 space-y-2">
+              {/* Sticky Action Footer in Drawer */}
+              <div className="p-3.5 sm:p-4 border-t border-border bg-card shrink-0 space-y-2">
                 {selectedPost.status !== "live" && (
                   <Button
                     size="sm"
                     onClick={() => handleApprovePost(selectedPost)}
-                    className="w-full h-9 text-xs font-bold gap-1.5 bg-primary text-white hover:bg-primary-hover rounded-xl shadow-xs"
+                    className="w-full h-9 text-xs font-bold gap-1.5 bg-primary text-white hover:bg-primary-hover rounded-xl shadow-xs cursor-pointer"
                   >
-                    <HiCheck className="h-4 w-4" />
+                    <HiCheck className="h-4 w-4 shrink-0" />
                     <span>Approve &amp; Set Live</span>
                   </Button>
                 )}
@@ -2066,9 +2192,9 @@ function AdminHuddleModeration() {
                     size="sm"
                     variant="outline"
                     onClick={() => handleDismissReport(selectedPost)}
-                    className="w-full h-9 text-xs font-bold gap-1.5 text-foreground border border-border/80 hover:bg-muted rounded-xl"
+                    className="w-full h-9 text-xs font-bold gap-1.5 text-foreground border border-border/80 hover:bg-muted rounded-xl cursor-pointer"
                   >
-                    <HiCheck className="h-4 w-4 text-primary" />
+                    <HiCheck className="h-4 w-4 text-primary shrink-0" />
                     <span>Dismiss Reports &amp; Restore Live</span>
                   </Button>
                 )}
@@ -2081,10 +2207,10 @@ function AdminHuddleModeration() {
                       setPostToWarn(selectedPost);
                       setWarnModalOpen(true);
                     }}
-                    className="h-9 text-xs font-bold gap-1 text-primary border border-primary/30 hover:bg-primary/10 rounded-xl"
+                    className="h-9 text-xs font-bold gap-1 text-primary border border-primary/30 hover:bg-primary/10 rounded-xl cursor-pointer"
                   >
-                    <HiOutlineExclamationTriangle className="h-4 w-4" />
-                    <span>Warn Author</span>
+                    <HiOutlineExclamationTriangle className="h-4 w-4 shrink-0" />
+                    <span className="truncate">Warn Author</span>
                   </Button>
 
                   <Button
@@ -2093,14 +2219,14 @@ function AdminHuddleModeration() {
                       setPostToDelete(selectedPost);
                       setDeleteModalOpen(true);
                     }}
-                    className="h-9 text-xs font-bold gap-1 rounded-xl bg-primary text-white hover:bg-primary-hover shadow-2xs"
+                    className="h-9 text-xs font-bold gap-1 rounded-xl bg-primary text-white hover:bg-primary-hover shadow-2xs cursor-pointer"
                   >
-                    <HiOutlineTrash className="h-4 w-4" />
-                    <span>Delete Post</span>
+                    <HiOutlineTrash className="h-4 w-4 shrink-0" />
+                    <span className="truncate">Delete Post</span>
                   </Button>
                 </div>
               </div>
-            </div>
+            </>
           )}
         </SheetContent>
       </Sheet>
