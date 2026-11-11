@@ -258,11 +258,13 @@ function Applicants() {
         );
 
         const derivedMatch =
-          (s.adminApplications || []).find(
-            (adm) => adm.id === a.id || (adm.candidateName && adm.candidateName === a.candidateName)
-          )?.matchScore ||
-          clinicalMatch?.score ||
-          76;
+          isApiEnabled && typeof a.matchScore === "number" && a.matchScore > 0
+            ? a.matchScore
+            : clinicalMatch?.score ||
+              (s.adminApplications || []).find(
+                (adm) => adm.id === a.id || (adm.candidateName && adm.candidateName === a.candidateName)
+              )?.matchScore ||
+              50;
 
         return {
           id: a.id,
@@ -608,49 +610,17 @@ function Applicants() {
           .split("\n")
           .map((l) => l.replace(/^[\d+*#\.\-\)]+\s*/, "").trim())
           .filter((l) => l.length > 20);
-        if (parsed.length >= 2) {
+        if (parsed.length > 0) {
           setCandidateQuestions(parsed.slice(0, 4));
           return;
         }
       }
 
-      // 3. Dynamic specialty-tailored questions if AI response is sparse
-      const targetSpecialty = ((app.for || "") + " " + (app.role || "") + " " + (app.skills || []).join(" ")).toLowerCase();
-      if (targetSpecialty.includes("dialysis") || targetSpecialty.includes("renal") || targetSpecialty.includes("hemodialysis")) {
-        setCandidateQuestions([
-          "How do you inspect and assess an AV fistula or graft before initiating hemodialysis cannulation?",
-          "What immediate emergency protocol do you execute if a patient experiences acute intradialytic hypotension?",
-          "Walk us through your dialyzer priming and heparinization protocol under NABH infection control standards.",
-          "How do you handle severe muscle cramping and dialyzer membrane hypersensitivity reactions mid-session?",
-        ]);
-      } else if (targetSpecialty.includes("scrub") || targetSpecialty.includes("ot") || targetSpecialty.includes("theatre") || targetSpecialty.includes("surgical")) {
-        setCandidateQuestions([
-          "Can you walk us through the surgical hand scrub and sterile gowning workflow according to NABH guidelines?",
-          "What is your exact protocol when a surgical needle or sponge count is unaccounted for during closure?",
-          "How do you manage rapid sterile field re-establishment after an accidental contamination event during surgery?",
-          "Explain the sterile instrument turnover and chemical indicator verification between high-acuity surgeries.",
-        ]);
-      } else if (targetSpecialty.includes("emergency") || targetSpecialty.includes("casualty") || targetSpecialty.includes("trauma") || targetSpecialty.includes("er")) {
-        setCandidateQuestions([
-          "How do you prioritize triage in the Emergency Department when two critical poly-trauma patients arrive simultaneously?",
-          "Walk us through the 10-minute acute chest pain and STEMI protocol from arrival to cath lab alert.",
-          "What is your standard protocol for managing acute anaphylactic shock in casualty before physician arrival?",
-          "How do you maintain documentation and chain-of-custody for Medico-Legal Cases in emergency?",
-        ]);
-      } else {
-        setCandidateQuestions([
-          `Can you walk us through your clinical experience managing high-acuity cases in ${app.role}?`,
-          "How do you ensure strict adherence to infection control bundles and statutory NABH protocols?",
-          "Can you walk us through your procedure for high-alert medication titration under physician orders?",
-          "How do you coordinate with the intensivist and consultant team during rapid escalation?",
-        ]);
-      }
+      toast.error("Ally returned an empty interview question list. Please try again.");
+      setCandidateQuestions([]);
     } catch {
-      setCandidateQuestions([
-        `Walk us through your clinical experience as ${app.role} for ${app.for}.`,
-        "Explain your protocol during emergency resuscitations and acute deterioration.",
-        "How do you coordinate with the multidisciplinary team during shift handovers?",
-      ]);
+      toast.error("Unable to generate Ally interview questions right now.");
+      setCandidateQuestions([]);
     } finally {
       setGeneratingQuestions(false);
     }

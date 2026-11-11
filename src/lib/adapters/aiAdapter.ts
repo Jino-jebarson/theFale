@@ -1,7 +1,7 @@
 // src/lib/adapters/aiAdapter.ts
 // Unified AI Adapter powering all 20 FALE AI touchpoints
 
-import { apiFetch, isApiEnabled } from "@/lib/api";
+import { API_BASE_URL, apiFetch, getAccessToken, isApiEnabled } from "@/lib/api";
 
 export type AiTaskType =
   | "chat"
@@ -28,6 +28,11 @@ export type AiTaskType =
   | "daily_brief"
   | "demand_forecast";
 
+export interface AiChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 export interface AiTaskRequest {
   task: AiTaskType;
   prompt: string;
@@ -35,6 +40,7 @@ export interface AiTaskRequest {
   language?: "en" | "kn" | "ml" | "hi" | "ta";
   role?: "clinician" | "hospital" | "admin" | "guest" | "student" | string;
   metadata?: Record<string, any>;
+  history?: AiChatTurn[];
 }
 
 export interface AiTaskResponse {
@@ -51,31 +57,197 @@ export interface AiTaskResponse {
 
 export async function executeAiTask(req: AiTaskRequest): Promise<AiTaskResponse> {
   if (isApiEnabled) {
-    try {
-      const res = await apiFetch<AiTaskResponse>("/ai/execute", {
-        method: "POST",
-        body: JSON.stringify(req),
-      });
-      if (res && res.success) {
-        const text = res.response || res.content || "";
-        res.response = text;
-        res.content = text;
-        return res;
-      }
-    } catch (err) {
-      console.warn(`[AI Engine] Backend request failed for task '${req.task}':`, err);
+    const res = await apiFetch<AiTaskResponse>("/ai/execute", {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+    if (!res || !res.success) {
+      throw new Error("Live Ally AI service returned an unsuccessful response.");
     }
+    const text = res.response || res.content || "";
+    res.response = text;
+    res.content = text;
+    return res;
   }
 
-  // Graceful local fallback simulation if backend is offline
+  // Offline UI-only fallback when backend API mode is disabled
   const fallback = getLocalAiFallback(req);
   fallback.content = fallback.response;
   return fallback;
 }
 
 // 1. Ally Chat (#1)
-export async function chatWithAlly(prompt: string, role = "clinician", language = "en", metadata?: Record<string, any>) {
-  return executeAiTask({ task: "chat", prompt, role: role as any, language: language as any, metadata });
+export async function chatWithAlly(
+  prompt: string,
+  role = "clinician",
+  language = "en",
+  metadata?: Record<string, any>,
+  history?: AiChatTurn[]
+) {
+  return executeAiTask({
+    task: "chat",
+    prompt,
+    role: role as any,
+    language: language as any,
+    metadata,
+    history,
+  });
+}
+
+export async function streamChatWithAlly(
+  prompt: string,
+  role = "clinician",
+  language = "en",
+  metadata: Record<string, any> | undefined,
+  history: AiChatTurn[] | undefined,
+  onChunk: (delta: string) => void
+): Promise<AiTaskResponse> {
+  if (!isApiEnabled) {
+    const res = await chatWithAlly(prompt, role, language, metadata, history);
+    if (res.response) onChunk(res.response);
+    return res;
+  }
+
+  const token = getAccessToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const reqBody = {
+    task: "chat",
+    prompt,
+    role,
+    language,
+    metadata,
+    history,
+  };
+
+  let resp: Response;
+  try {
+    resp = await fetch(`${API_BASE_URL}/ai/chat/stream`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify(reqBody),
+    });
+  } catch {
+    const fallbackRes = await chatWithAlly(prompt, role, language, metadata, history);
+    if (fallbackRes.response) onChunk(fallbackRes.response);
+    return fallbackRes;
+  }
+
+  if (!resp.ok || !resp.body) {
+    const fallbackRes = await chatWithAlly(prompt, role, language, metadata, history);
+    if (fallbackRes.response) onChunk(fallbackRes.response);
+    return fallbackRes;
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let accumulated = "";
+  let finalResponse: AiTaskResponse | null = null;
+  let currentEvent = "message";
+
+  const processLine = (rawLine: string) => {
+    const line = rawLine.replace(/\r$/, "");
+    if (line === "") {
+      currentEvent = "message";
+      return;
+    }
+    if (line.startsWith("event:")) {
+      currentEvent = line.slice(6).trim();
+      return;
+    }
+    if (!line.startsWith("data:")) return;
+
+    const payload = line.slice(5).trim();
+    if (!payload) return;
+
+    try {
+      const parsed = JSON.parse(payload);
+      if (currentEvent === "chunk" && typeof parsed.text === "string") {
+        accumulated += parsed.text;
+        onChunk(parsed.text);
+      } else if (currentEvent === "done") {
+        finalResponse = parsed as AiTaskResponse;
+      } else if (currentEvent === "error") {
+        throw new Error(parsed.message || "Live Ally AI could not respond right now.");
+      }
+    } catch (e) {
+      if (currentEvent === "error") throw e;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nlIdx = buffer.indexOf("\n");
+    while (nlIdx !== -1) {
+      processLine(buffer.slice(0, nlIdx));
+      buffer = buffer.slice(nlIdx + 1);
+      nlIdx = buffer.indexOf("\n");
+    }
+  }
+  if (buffer.trim()) {
+    processLine(buffer);
+  }
+
+  if (finalResponse) {
+    const text = finalResponse.response || finalResponse.content || accumulated;
+    finalResponse.response = text;
+    finalResponse.content = text;
+    return finalResponse;
+  }
+
+  if (accumulated.trim()) {
+    return {
+      success: true,
+      task: "chat",
+      provider: "gemini",
+      response: accumulated.trim(),
+      content: accumulated.trim(),
+    };
+  }
+
+  return chatWithAlly(prompt, role, language, metadata, history);
+}
+
+export interface AllyChatHistoryItem {
+  id: string;
+  sender: "user" | "ally";
+  text: string;
+  action?: string | undefined;
+  actionLabel?: string | undefined;
+  suggestions?: string[] | undefined;
+  ticketId?: string | undefined;
+  createdAt: string;
+}
+
+export async function getAllyChatHistory(role?: string): Promise<AllyChatHistoryItem[]> {
+  if (!isApiEnabled) return [];
+  const query = role ? `?role=${encodeURIComponent(role)}` : "";
+  const data = await apiFetch<AllyChatHistoryItem[]>(`/ai/chat/history${query}`);
+  return Array.isArray(data) ? data : [];
+}
+
+export async function clearAllyChatHistory(role?: string): Promise<void> {
+  if (!isApiEnabled) return;
+  const query = role ? `?role=${encodeURIComponent(role)}` : "";
+  await apiFetch<void>(`/ai/chat/history${query}`, { method: "DELETE" });
+}
+
+export async function attachTicketToAllyMessage(messageId: string, ticketId: string): Promise<void> {
+  if (!isApiEnabled || !messageId || !ticketId) return;
+  await apiFetch<void>(`/ai/chat/messages/${encodeURIComponent(messageId)}/ticket`, {
+    method: "PATCH",
+    body: JSON.stringify({ ticketId }),
+  });
 }
 
 // 2. Resume Upload (#2)
@@ -788,8 +960,8 @@ function getLocalAiFallback(req: AiTaskRequest): AiTaskResponse {
     const rationale = dist > 50
       ? `This is an inter-city relocation opening (${dist} km away) at ${hosp}, matching your verified ${dept} credentials.`
       : dist > 0
-      ? `Located ${dist} km away at ${hosp}, with a direct commute and aligned ${dept} credentials.`
-      : `Matches your verified clinical credentials and requirements for ${hosp}.`;
+        ? `Located ${dist} km away at ${hosp}, with a direct commute and aligned ${dept} credentials.`
+        : `Matches your verified clinical credentials and requirements for ${hosp}.`;
 
     return {
       success: true,
@@ -1167,10 +1339,10 @@ function getLocalAiFallback(req: AiTaskRequest): AiTaskResponse {
     const roleHelp = req.role === "hospital"
       ? "facility staffing, shift rosters, or escrow top-ups"
       : req.role === "student"
-      ? "internship shifts, clinical viva prep, or study modules"
-      : req.role === "admin"
-      ? "compliance audit queues or pending hospital verifications"
-      : "locum shifts, KYC credentials, or guaranteed escrow payouts";
+        ? "internship shifts, clinical viva prep, or study modules"
+        : req.role === "admin"
+          ? "compliance audit queues or pending hospital verifications"
+          : "locum shifts, KYC credentials, or guaranteed escrow payouts";
 
     return {
       success: true,
@@ -1180,10 +1352,10 @@ function getLocalAiFallback(req: AiTaskRequest): AiTaskResponse {
       suggestions: req.role === "hospital"
         ? ["Post Urgent ICU Shift", "Search Duty Doctors", "Top up Escrow Wallet", "Review Shortlisted Applicants"]
         : req.role === "student"
-        ? ["Find Internship Shifts", "Council Exam Prep", "Connect with Clinical Mentors", "Verify My Student ID"]
-        : req.role === "admin"
-        ? ["Review Candidate KYC", "Audit Hospital Verification", "Check Job Approvals", "Open Support Tickets"]
-        : ["Set me Open to Work", "Find Night ICU Shifts", "How Escrow Payouts Work", "Handover to Support Desk"],
+          ? ["Find Internship Shifts", "Council Exam Prep", "Connect with Clinical Mentors", "Verify My Student ID"]
+          : req.role === "admin"
+            ? ["Review Candidate KYC", "Audit Hospital Verification", "Check Job Approvals", "Open Support Tickets"]
+            : ["Set me Open to Work", "Find Night ICU Shifts", "How Escrow Payouts Work", "Handover to Support Desk"],
     };
   }
 
@@ -1191,10 +1363,10 @@ function getLocalAiFallback(req: AiTaskRequest): AiTaskResponse {
     const roleHelp = req.role === "hospital"
       ? "hospital locum staffing or clinician sourcing"
       : req.role === "student"
-      ? "student internship shifts or council prep"
-      : req.role === "admin"
-      ? "operations queues or support tickets"
-      : "clinical duty shifts, KYC status, or escrow earnings";
+        ? "student internship shifts or council prep"
+        : req.role === "admin"
+          ? "operations queues or support tickets"
+          : "clinical duty shifts, KYC status, or escrow earnings";
 
     return {
       success: true,
@@ -1204,10 +1376,10 @@ function getLocalAiFallback(req: AiTaskRequest): AiTaskResponse {
       suggestions: req.role === "hospital"
         ? ["Post Urgent ICU Shift", "Search Duty Doctors", "Top up Escrow Wallet", "Review Shortlisted Applicants"]
         : req.role === "student"
-        ? ["Find Internship Shifts", "Council Exam Prep", "Connect with Clinical Mentors", "Verify My Student ID"]
-        : req.role === "admin"
-        ? ["Review Candidate KYC", "Audit Hospital Verification", "Check Job Approvals", "Open Support Tickets"]
-        : ["Set me Open to Work", "Find Night ICU Shifts", "How Escrow Payouts Work", "Handover to Support Desk"],
+          ? ["Find Internship Shifts", "Council Exam Prep", "Connect with Clinical Mentors", "Verify My Student ID"]
+          : req.role === "admin"
+            ? ["Review Candidate KYC", "Audit Hospital Verification", "Check Job Approvals", "Open Support Tickets"]
+            : ["Set me Open to Work", "Find Night ICU Shifts", "How Escrow Payouts Work", "Handover to Support Desk"],
     };
   }
 

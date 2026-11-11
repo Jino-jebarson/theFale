@@ -105,11 +105,8 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
         setAiRationale(res.response);
       }
     } catch {
-      setAiRationale(
-        distanceKm > 50
-          ? `Relocation opportunity (${distanceKm} km away) with verified ${job.dept || "clinical"} requirements for ${job.org}.`
-          : `Calculated commute of ${distanceKm} km with verified ${job.dept || "clinical"} credentials requested by ${job.org}.`
-      );
+      setAiRationale(null);
+      toast.error("Unable to generate Ally match explanation right now.");
     } finally {
       setLoadingRationale(false);
     }

@@ -1,8 +1,19 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { BotMessageSquare, X, Send, Globe, CheckCircle2, ArrowRight } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
+import { BotMessageSquare, X, Send, ArrowRight, RotateCcw, Ticket } from "lucide-react";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
-import { chatWithAlly, type AiTaskResponse } from "@/lib/adapters/aiAdapter";
+import {
+  streamChatWithAlly,
+  getAllyChatHistory,
+  clearAllyChatHistory,
+  attachTicketToAllyMessage,
+  type AiChatTurn,
+  type AiTaskResponse,
+} from "@/lib/adapters/aiAdapter";
+import { updateOpenToWork } from "@/lib/adapters/candidateAdapter";
+import { createSupportTicket } from "@/lib/adapters/supportAdapter";
+import { isApiEnabled } from "@/lib/api";
+import { cleanMarkdownAndJsonNoise } from "@/lib/allyAuditUtils";
 import { useApp, setState } from "@/lib/store";
 import { toast } from "sonner";
 import {
@@ -19,16 +30,98 @@ interface AllyFloatingButtonProps {
 
 interface ChatMessage {
   id: string;
+  serverId?: string | undefined;
   sender: "user" | "ally";
   text: string;
-  time: string;
-  action?: string;
-  suggestions?: string[];
+  createdAt: number;
+  action?: string | undefined;
+  actionLabel?: string | undefined;
+  suggestions?: string[] | undefined;
+  isError?: boolean | undefined;
+  isStreaming?: boolean | undefined;
+  ticketId?: string | undefined;
+}
+
+const CHAT_STORAGE_PREFIX = "fale_ally_chat_v1:";
+
+function formatChatTimestamp(createdAt: number): string {
+  const dt = new Date(createdAt || Date.now());
+  if (Number.isNaN(dt.getTime())) return "";
+  const now = new Date();
+  const sameDay =
+    dt.getFullYear() === now.getFullYear() &&
+    dt.getMonth() === now.getMonth() &&
+    dt.getDate() === now.getDate();
+
+  if (sameDay) {
+    return dt.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  }
+  return dt.toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function buildWelcomeMessage(role: FaleRole, welcomeText: string, suggestions: string[]): ChatMessage {
+  return {
+    id: `m-welcome-${role}`,
+    sender: "ally",
+    text: welcomeText,
+    createdAt: Date.now(),
+    suggestions,
+  };
+}
+
+function readStoredChatMessages(
+  scopeKey: string,
+  role: FaleRole,
+  welcomeText: string,
+  suggestions: string[]
+): ChatMessage[] {
+  if (typeof window === "undefined") {
+    return [buildWelcomeMessage(role, welcomeText, suggestions)];
+  }
+  try {
+    const raw = window.localStorage.getItem(`${CHAT_STORAGE_PREFIX}${scopeKey}`);
+    if (!raw) return [buildWelcomeMessage(role, welcomeText, suggestions)];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return [buildWelcomeMessage(role, welcomeText, suggestions)];
+    }
+    const normalized = parsed
+      .filter((m) => m && typeof m.text === "string" && (m.sender === "user" || m.sender === "ally"))
+      .slice(-40)
+      .map((m) => ({
+        ...m,
+        createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
+        isStreaming: false,
+      })) as ChatMessage[];
+    return normalized.length > 0 ? normalized : [buildWelcomeMessage(role, welcomeText, suggestions)];
+  } catch {
+    return [buildWelcomeMessage(role, welcomeText, suggestions)];
+  }
+}
+
+function writeStoredChatMessages(scopeKey: string, msgs: ChatMessage[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    const persistable = msgs.filter((m) => !m.isStreaming).slice(-40);
+    window.localStorage.setItem(`${CHAT_STORAGE_PREFIX}${scopeKey}`, JSON.stringify(persistable));
+  } catch {
+    // Ignore storage quota issues cleanly
+  }
 }
 
 export type FaleRole = "student" | "professional" | "facility" | "admin";
 
-export function detectActiveRole(portal?: string, pathname?: string, profile: Record<string, any> = {}): FaleRole {
+export function detectActiveRole(
+  portal?: string,
+  pathname?: string,
+  profile: Record<string, any> = {},
+  candidateLevel?: string
+): FaleRole {
   const path = pathname || (typeof window !== "undefined" ? window.location.pathname : "");
   if (path.startsWith("/admin") || portal === "admin") {
     return "admin";
@@ -36,7 +129,10 @@ export function detectActiveRole(portal?: string, pathname?: string, profile: Re
   if (path.startsWith("/employer") || portal === "facility") {
     return "facility";
   }
-  if (profile.isStudent === true || profile.candidateLevel === "student" || profile.role === "Student") {
+  const levelStr = String(
+    candidateLevel || profile["candidateLevel"] || profile["level"] || profile["cadreLevel"] || ""
+  ).toLowerCase();
+  if (profile["isStudent"] === true || levelStr === "student" || profile["role"] === "Student") {
     return "student";
   }
   return "professional";
@@ -121,42 +217,101 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const s = useApp();
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (st) => st.location.pathname });
 
-  // Dynamically resolve active role based on portal, pathname, and profile
+  // Dynamically resolve active role based on portal, live route pathname, candidateLevel, and profile
   const activeRole = useMemo(() => {
-    const pathname = typeof window !== "undefined" ? window.location.pathname : "";
-    return detectActiveRole(s.portal, pathname, s.profile);
-  }, [s.portal, s.profile]);
+    return detectActiveRole(s.portal, pathname, s.profile, s.candidateLevel);
+  }, [s.portal, pathname, s.profile, s.candidateLevel]);
 
   const roleConfig = ROLE_CONFIGS[activeRole];
+  const sessionScopeKey = `${activeRole}:${s.contact || s.profile?.["email"] || "anon"}`;
+  const lastScopeRef = useRef(sessionScopeKey);
+  const [creatingTicketMsgId, setCreatingTicketMsgId] = useState<string | null>(null);
 
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [
-    {
-      id: `m-welcome-${activeRole}`,
-      sender: "ally",
-      text: roleConfig.welcome,
-      time: "Just now",
-      suggestions: roleConfig.suggestions,
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    readStoredChatMessages(sessionScopeKey, activeRole, roleConfig.welcome, roleConfig.suggestions)
+  );
 
-  // When role changes and user hasn't typed anything yet, dynamically update welcome message
+  const resetChatToWelcome = () => {
+    const fresh = [
+      {
+        ...buildWelcomeMessage(activeRole, roleConfig.welcome, roleConfig.suggestions),
+        id: `m-welcome-${activeRole}-${Date.now()}`,
+      },
+    ];
+    setMessages(fresh);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(`${CHAT_STORAGE_PREFIX}${sessionScopeKey}`);
+      } catch {}
+    }
+    if (isApiEnabled && s.signedIn) {
+      clearAllyChatHistory(roleConfig.aiRoleKey).catch(() => {});
+    }
+  };
+
+  // Switch cleanly when role/portal or account changes, restoring stored messages for that scope
   useEffect(() => {
+    if (lastScopeRef.current !== sessionScopeKey) {
+      lastScopeRef.current = sessionScopeKey;
+      setMessages(
+        readStoredChatMessages(sessionScopeKey, activeRole, roleConfig.welcome, roleConfig.suggestions)
+      );
+      return;
+    }
     setMessages((prev) => {
-      if (prev.length === 1 && prev[0].id.startsWith("m-welcome")) {
-        return [
-          {
-            id: `m-welcome-${activeRole}`,
-            sender: "ally",
-            text: roleConfig.welcome,
-            time: "Just now",
-            suggestions: roleConfig.suggestions,
-          },
-        ];
+      if (prev.length === 1 && prev[0]?.id.startsWith("m-welcome")) {
+        return [buildWelcomeMessage(activeRole, roleConfig.welcome, roleConfig.suggestions)];
       }
       return prev;
     });
-  }, [activeRole, roleConfig]);
+  }, [sessionScopeKey, activeRole, roleConfig]);
+
+  // Hydrate cross-device chat history from backend DB on sign-in / scope change
+  useEffect(() => {
+    if (!isApiEnabled || !s.signedIn) return;
+    let active = true;
+    getAllyChatHistory(roleConfig.aiRoleKey)
+      .then((remote) => {
+        if (!active || !Array.isArray(remote) || remote.length === 0) return;
+        const mapped: ChatMessage[] = remote.map((item) => {
+          const parsedTs = item.createdAt ? new Date(item.createdAt).getTime() : Date.now();
+          return {
+            id: item.id,
+            serverId: item.id,
+            sender: item.sender === "user" ? "user" : "ally",
+            text: item.text,
+            createdAt: Number.isNaN(parsedTs) ? Date.now() : parsedTs,
+            action: item.action,
+            actionLabel: item.actionLabel,
+            suggestions: item.suggestions && item.suggestions.length > 0 ? item.suggestions : undefined,
+            ticketId: item.ticketId,
+          };
+        });
+        const earliestTs = mapped[0]?.createdAt ? mapped[0].createdAt - 1000 : Date.now();
+        const welcomeFirst: ChatMessage = {
+          id: `m-welcome-${activeRole}`,
+          sender: "ally",
+          text: roleConfig.welcome,
+          createdAt: earliestTs,
+          suggestions: undefined,
+        };
+        setMessages((prev) => {
+          if (prev.some((m) => m.isStreaming)) return prev;
+          return [welcomeFirst, ...mapped];
+        });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [sessionScopeKey, activeRole, roleConfig, s.signedIn]);
+
+  // Persist non-streaming conversation history per user/role scope
+  useEffect(() => {
+    writeStoredChatMessages(sessionScopeKey, messages);
+  }, [sessionScopeKey, messages]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -188,66 +343,180 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
     };
   }, [isOpen]);
 
+  const handleCreateTicketFromChat = async (messageId: string) => {
+    if (creatingTicketMsgId) return;
+    if (!isApiEnabled) {
+      navigate({ to: "/support" });
+      setIsOpen(false);
+      return;
+    }
+
+    setCreatingTicketMsgId(messageId);
+    try {
+      const recentTurns = messages
+        .filter((m) => !m.id.startsWith("m-welcome") && !m.isError)
+        .slice(-6)
+        .map((m) => `${m.sender === "user" ? "User" : "Ally"}: ${m.text}`)
+        .join("\n\n");
+      const lastUserText =
+        [...messages].reverse().find((m) => m.sender === "user")?.text ||
+        "Priority assistance requested from Ally Copilot";
+      const subject = `Ally Escalation: ${lastUserText.slice(0, 75)}`;
+      const category = activeRole === "facility" ? "BILLING" : "OTHER";
+
+      const created = await createSupportTicket(
+        subject,
+        category,
+        `Escalated directly from Ally Copilot (${roleConfig.aiRoleKey} portal):\n\n${recentTurns || lastUserText}`
+      );
+      const shortId = created.id ? created.id.slice(0, 8).toUpperCase() : "LOGGED";
+      const targetMsg = messages.find((m) => m.id === messageId);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, ticketId: shortId } : m))
+      );
+      if (targetMsg?.serverId) {
+        attachTicketToAllyMessage(targetMsg.serverId, shortId).catch(() => {});
+      }
+      toast.success(`Support Ticket #${shortId} submitted`, {
+        description: "Our FALE Operations team has received your conversation context.",
+      });
+    } catch (err: any) {
+      toast.error(err?.message || "Could not submit ticket right now");
+      navigate({ to: "/support" });
+      setIsOpen(false);
+    } finally {
+      setCreatingTicketMsgId(null);
+    }
+  };
+
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || input).trim();
     if (!text || loading) return;
 
+    const nowTs = Date.now();
     const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
+      id: `u-${nowTs}`,
       sender: "user",
       text,
-      time: "Just now",
+      createdAt: nowTs,
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    const history: AiChatTurn[] = messages
+      .filter((m) => !m.id.startsWith("m-welcome") && !m.isError && !m.isStreaming)
+      .slice(-10)
+      .map((m) => ({
+        role: m.sender === "user" ? "user" : "assistant",
+        text: m.text,
+      }));
+
+    const botMsgId = `a-${nowTs + 1}`;
+    setMessages((prev) => [
+      ...prev,
+      userMsg,
+      {
+        id: botMsgId,
+        sender: "ally",
+        text: "",
+        createdAt: nowTs + 1,
+        isStreaming: true,
+      },
+    ]);
     setInput("");
     setLoading(true);
 
     try {
-      const res: AiTaskResponse = await chatWithAlly(text, roleConfig.aiRoleKey, language, {
-        userName: s.profile?.fullName || s.profile?.recruiter || "FALE Member",
-        portal: s.portal,
-        activeRole,
-      });
+      const displayName =
+        s.profile?.["hospitalName"] ||
+        s.profile?.["recruiter"] ||
+        s.profile?.["name"] ||
+        s.profile?.["fullName"] ||
+        s.contact ||
+        "FALE Member";
 
-      // Handle automatic actions if triggered by AI
-      if (res.action === "open_to_work") {
-        setState({
-          profile: {
-            ...s.profile,
-            openToWork: true,
-          },
-        });
-        toast.success("Status Updated: You are now Open to Work!", {
-          description: "Hospitals in your city can now dispatch immediate locum shifts to you.",
-        });
+      let streamedText = "";
+      const res: AiTaskResponse = await streamChatWithAlly(
+        text,
+        roleConfig.aiRoleKey,
+        language,
+        {
+          userName: displayName,
+          portal: s.portal,
+          activeRole,
+        },
+        history,
+        (delta) => {
+          streamedText += delta;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === botMsgId ? { ...m, text: streamedText } : m))
+          );
+        }
+      );
+
+      // Handle safe, role-scoped automatic action if triggered by Ally
+      if (res.action === "open_to_work" && activeRole === "professional") {
+        let persisted = !isApiEnabled;
+        if (isApiEnabled) {
+          try {
+            await updateOpenToWork(true);
+            persisted = true;
+          } catch {
+            toast.error("Could not update Open to Work status on server.");
+          }
+        }
+        if (persisted) {
+          setState({
+            profile: {
+              ...s.profile,
+              openToWork: true,
+            },
+          });
+          toast.success("Status Updated: You are now Open to Work!", {
+            description: "Hospitals in your city can now dispatch immediate locum shifts to you.",
+          });
+        }
       } else if (res.action === "handover_human") {
-        toast.info("Escalated to FALE Operations", {
-          description: "A clinical specialist has been notified to assist you via WhatsApp.",
+        toast.info("Ready to connect you to FALE Support Desk", {
+          description: "You can submit a priority ticket directly from the message below.",
         });
       }
 
-      const botMsg: ChatMessage = {
-        id: `a-${Date.now()}`,
-        sender: "ally",
-        text: res.response,
-        time: "Just now",
-        action: res.action,
-        suggestions: res.suggestions,
-      };
+      const cleanedReply = cleanMarkdownAndJsonNoise(res.response || streamedText) || res.response || streamedText;
+      const actionLabel =
+        typeof res.actionData?.["label"] === "string" ? res.actionData["label"] : undefined;
+      const persistedMessageId =
+        typeof res.actionData?.["messageId"] === "string" ? res.actionData["messageId"] : undefined;
 
-      setMessages((prev) => [...prev, botMsg]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `a-${Date.now()}`,
-          sender: "ally",
-          text: `I'm connected to the FALE Healthcare platform as your ${roleConfig.subtitle}. How can I assist you right now?`,
-          time: "Just now",
-          suggestions: roleConfig.suggestions.slice(0, 3),
-        },
-      ]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === botMsgId
+            ? {
+                ...m,
+                serverId: persistedMessageId,
+                text: cleanedReply,
+                createdAt: Date.now(),
+                action: res.action,
+                actionLabel,
+                suggestions: res.suggestions,
+                isStreaming: false,
+              }
+            : m
+        )
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "Ally AI could not respond right now");
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === botMsgId
+            ? {
+                ...m,
+                text: "Ally AI is temporarily unavailable right now. Please try your question again in a moment.",
+                createdAt: Date.now(),
+                isError: true,
+                isStreaming: false,
+              }
+            : m
+        )
+      );
     } finally {
       setLoading(false);
     }
@@ -258,6 +527,12 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
     if (actionName === "browse_shifts" || actionName === "open_to_work") {
       navigate({ to: "/shifts" });
       setIsOpen(false);
+    } else if (actionName === "browse_jobs") {
+      navigate({ to: "/jobs" });
+      setIsOpen(false);
+    } else if (actionName === "view_profile") {
+      navigate({ to: "/profile" });
+      setIsOpen(false);
     } else if (actionName === "handover_human") {
       navigate({ to: activeRole === "admin" ? "/admin/support" : "/support" });
       setIsOpen(false);
@@ -267,7 +542,7 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
     }
     // Student Actions
     else if (actionName === "find_internships") {
-      navigate({ to: "/shifts" });
+      navigate({ to: "/jobs" });
       setIsOpen(false);
     } else if (actionName === "start_learning") {
       navigate({ to: "/learning" });
@@ -299,6 +574,12 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
       setIsOpen(false);
     } else if (actionName === "job_approvals") {
       navigate({ to: "/admin/postings" });
+      setIsOpen(false);
+    } else if (actionName === "shortlisting") {
+      navigate({ to: "/admin/applications" });
+      setIsOpen(false);
+    } else if (actionName === "huddle_moderation") {
+      navigate({ to: "/admin/huddle" });
       setIsOpen(false);
     } else if (actionName === "support_tickets") {
       navigate({ to: "/admin/support" });
@@ -390,6 +671,16 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
 
               <button
                 type="button"
+                onClick={resetChatToWelcome}
+                title="New conversation"
+                className="grid h-7 w-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                aria-label="Reset Ally chat"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setIsOpen(false)}
                 className="grid h-7 w-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
                 aria-label="Close Ally"
@@ -401,7 +692,9 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
 
           {/* Conversation Stream */}
           <div className="flex-1 overflow-y-auto py-3 space-y-3 pr-1 [scrollbar-width:thin]">
-            {messages.map((m) => (
+            {messages
+              .filter((m) => !(m.isStreaming && !m.text))
+              .map((m) => (
               <div
                 key={m.id}
                 className={cn(
@@ -417,24 +710,54 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
                       : "bg-muted/60 text-foreground border border-border/60 rounded-bl-none"
                   )}
                 >
-                  <div className="whitespace-pre-line">{m.text}</div>
+                  <div className="whitespace-pre-line">
+                    {m.text}
+                    {m.isStreaming && (
+                      <span className="inline-block w-1.5 h-3.5 ml-1 align-middle bg-[#FF5A1F] animate-pulse rounded-xs" />
+                    )}
+                  </div>
 
-                  {/* Trigger Action Pill if present */}
-                  {m.action && (
-                    <button
-                      type="button"
-                      onClick={() => executeAction(m.action!)}
-                      className="mt-2.5 inline-flex items-center gap-1.5 rounded-xl bg-white/95 dark:bg-card px-2.5 py-1.5 text-[11px] font-bold text-[#FF5A1F] border border-[#FF5A1F]/30 shadow-2xs hover:bg-white transition-all cursor-pointer"
-                    >
-                      <BotMessageSquare className="h-3.5 w-3.5 text-[#FF5A1F]" />
-                      <span>Execute in FALE</span>
-                      <ArrowRight className="h-3 w-3" />
-                    </button>
+                  {/* Trigger Action Pill / Direct Support Escalation if present */}
+                  {!m.isStreaming && m.action && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {m.action === "handover_human" && activeRole !== "admin" ? (
+                        <button
+                          type="button"
+                          disabled={creatingTicketMsgId === m.id}
+                          onClick={() =>
+                            m.ticketId
+                              ? executeAction("handover_human")
+                              : handleCreateTicketFromChat(m.id)
+                          }
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-white/95 dark:bg-card px-2.5 py-1.5 text-[11px] font-bold text-[#FF5A1F] border border-[#FF5A1F]/30 shadow-2xs hover:bg-white transition-all cursor-pointer disabled:opacity-60"
+                        >
+                          <Ticket className="h-3.5 w-3.5 text-[#FF5A1F]" />
+                          <span>
+                            {creatingTicketMsgId === m.id
+                              ? "Submitting Ticket..."
+                              : m.ticketId
+                              ? `Ticket #${m.ticketId} Logged · Open Desk`
+                              : "Create Priority Support Ticket"}
+                          </span>
+                          <ArrowRight className="h-3 w-3" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => executeAction(m.action!)}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-white/95 dark:bg-card px-2.5 py-1.5 text-[11px] font-bold text-[#FF5A1F] border border-[#FF5A1F]/30 shadow-2xs hover:bg-white transition-all cursor-pointer"
+                        >
+                          <BotMessageSquare className="h-3.5 w-3.5 text-[#FF5A1F]" />
+                          <span>{m.actionLabel || "Open in FALE"}</span>
+                          <ArrowRight className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
 
                 {/* Suggestions Pills underneath Ally message */}
-                {m.suggestions && m.suggestions.length > 0 && (
+                {!m.isStreaming && m.suggestions && m.suggestions.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {m.suggestions.map((sug, i) => (
                       <button
@@ -449,11 +772,15 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
                   </div>
                 )}
 
-                <span className="text-[9px] text-muted-foreground mt-1 px-1">{m.time}</span>
+                {!m.isStreaming && (
+                  <span className="text-[9px] text-muted-foreground mt-1 px-1">
+                    {formatChatTimestamp(m.createdAt)}
+                  </span>
+                )}
               </div>
             ))}
 
-            {loading && (
+            {loading && messages.every((m) => !(m.isStreaming && m.text.length > 0)) && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground mr-auto bg-muted/40 px-3 py-2 rounded-2xl border border-border/50">
                 <span className="flex gap-1">
                   <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce" />

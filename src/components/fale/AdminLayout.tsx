@@ -88,7 +88,7 @@ export function AdminLayout({
         setOpenTicketsCount(t.length);
         setTicketsLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [path]);
 
   const pendingCandidateKYC = isApiEnabled && metrics
@@ -110,8 +110,8 @@ export function AdminLayout({
   const pendingHuddleModeration = isApiEnabled && metrics
     ? (metrics.flaggedHuddlePostsCount ?? 0)
     : s.huddlePosts.filter(
-        (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
-      ).length;
+      (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
+    ).length;
 
   const metricsReady = !isApiEnabled || metrics !== null;
   const ticketsReady = !isApiEnabled || ticketsLoaded;
@@ -250,7 +250,7 @@ export function AdminLayout({
                 path === n.to ||
                 (n.to !== "/admin" && path.startsWith(n.to + "/"));
               const Icon = on ? n.active : n.icon;
-              const prevGroup = idx > 0 ? adminNav[idx - 1].group : n.group;
+              const prevGroup = idx > 0 ? adminNav[idx - 1]?.group : n.group;
               const showGroupDivider = idx > 0 && n.group !== prevGroup;
 
               return (
@@ -323,53 +323,53 @@ export function AdminLayout({
                 </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel>
-                <div className="flex items-center gap-1.5 font-bold text-foreground">
-                  <span>Clinical Ops Admin</span>
-                  <span className="rounded bg-primary/10 px-1.5 py-0.2 text-[10px] font-bold text-primary border border-primary/20">
-                    Master
-                  </span>
-                </div>
-                <div className="text-xs font-normal text-muted-foreground">
-                  Verification & Operations Board
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Switch Portal
-              </DropdownMenuLabel>
-              <DropdownMenuItem
-                onClick={() => switchPortal("candidate")}
-                className="cursor-pointer text-xs"
-              >
-                🩺 Candidate Portal (Jobs & Shifts)
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => switchPortal("facility")}
-                className="cursor-pointer text-xs"
-              >
-                🏥 Hospital / Facility Portal
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={async () => {
-                  try {
-                    await logout();
-                  } catch {
-                    // Ignore logout network errors
-                  }
-                  setState({ signedIn: false });
-                  navigate({ to: "/admin/login" });
-                }}
-                className="text-destructive text-xs cursor-pointer"
-              >
-                <HiOutlineArrowRightOnRectangle className="h-4 w-4" /> Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuLabel>
+                  <div className="flex items-center gap-1.5 font-bold text-foreground">
+                    <span>Clinical Ops Admin</span>
+                    <span className="rounded bg-primary/10 px-1.5 py-0.2 text-[10px] font-bold text-primary border border-primary/20">
+                      Master
+                    </span>
+                  </div>
+                  <div className="text-xs font-normal text-muted-foreground">
+                    Verification & Operations Board
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Switch Portal
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={() => switchPortal("candidate")}
+                  className="cursor-pointer text-xs"
+                >
+                  🩺 Candidate Portal (Jobs & Shifts)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => switchPortal("facility")}
+                  className="cursor-pointer text-xs"
+                >
+                  🏥 Hospital / Facility Portal
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={async () => {
+                    try {
+                      await logout();
+                    } catch {
+                      // Ignore logout network errors
+                    }
+                    setState({ signedIn: false });
+                    navigate({ to: "/admin/login" });
+                  }}
+                  className="text-destructive text-xs cursor-pointer"
+                >
+                  <HiOutlineArrowRightOnRectangle className="h-4 w-4" /> Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
 
       {/* Sub-Header Strip with Title, Badge & Action Buttons */}
       <div className="border-b border-border/80 bg-card/75 backdrop-blur px-4 sm:px-6 lg:px-8 py-5 sm:py-6 shadow-2xs">

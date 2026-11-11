@@ -429,7 +429,10 @@ function ApplicationsAdmin() {
           jobTitle: titleJob,
           hospitalName: dto.facilityName || "Partner Hospital",
           department: deptJob,
-          matchScore: clinicalMatch.score || dto.matchScore || 85,
+          matchScore:
+            isApiEnabled && typeof dto.matchScore === "number" && dto.matchScore > 0
+              ? dto.matchScore
+              : clinicalMatch.score,
           councilVerified: isVerified,
           regNumber: dto.regNumber || "Verified Council Member",
           exp: dto.candidateExperience || "2+ yrs clinical exp",
@@ -461,16 +464,16 @@ function ApplicationsAdmin() {
           {
             role: sc.candidateRole || "Staff Nurse",
             profession: sc.candidateRole || "Staff Nurse",
-            specialty: sc.department || "Critical care",
-            qualification: "State Council Registered Practitioner",
-            city: sc.candidateCity || "Chennai",
-            state: "Tamil Nadu",
-            kycStatus: "VERIFIED",
+            specialty: sc.candidateSpecialty || "",
+            qualification: sc.candidateQualification || "",
+            city: sc.candidateCity || "",
+            kycStatus: sc.councilVerified ? "VERIFIED" : "PENDING",
+            experienceYears: sc.candidateExperience || "",
           },
           {
             title: sc.shiftTitle || "Clinical Shift",
             dept: sc.department || "Critical care",
-            city: sc.candidateCity || "Chennai",
+            city: sc.facilityCity || "",
           }
         );
 
@@ -481,7 +484,7 @@ function ApplicationsAdmin() {
           candidateRole: sc.candidateRole || "Clinical Practitioner",
           candidateCity: sc.candidateCity || "Chennai",
           candidateState: "Tamil Nadu",
-          candidateQualification: "State Council Registered Practitioner",
+          candidateQualification: sc.candidateQualification || "State Council Registered Practitioner",
           candidateCouncil: "State Medical / Nursing Council",
           candidateBio: `Locum clinical shift duty. Slot hold awaiting compliance verification. Escrow guarantee: ₹${netRupees.toLocaleString("en-IN")}.`,
           candidateNoticePeriod: "Immediate Duty Ready",
@@ -489,8 +492,11 @@ function ApplicationsAdmin() {
           jobTitle: `[Locum Shift] ${sc.shiftTitle || "Clinical Shift"}`,
           hospitalName: sc.facilityName || "Partner Hospital",
           department: sc.department || "Emergency & Trauma",
-          matchScore: sc.matchScore ?? clinicalMatch.score,
-          councilVerified: true,
+          matchScore:
+            isApiEnabled && typeof sc.matchScore === "number" && sc.matchScore > 0
+              ? sc.matchScore
+              : clinicalMatch.score,
+          councilVerified: Boolean(sc.councilVerified),
           regNumber: "Council Verified Practitioner",
           exp: `${sc.hours || 8} hrs duty`,
           status,

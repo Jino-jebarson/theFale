@@ -457,7 +457,8 @@ function CourseDetailScreen() {
       const res = await explainLearningConceptWithAi(activeQ.question, selectedOpt?.text || "Selected option");
       setAiRationale(res.response || res.content || "");
     } catch {
-      setAiRationale("Evidence-Based Protocol: Adhere strictly to institutional infection control SOPs and closed-loop telemetry monitoring.");
+      setAiRationale(null);
+      toast.error("Unable to generate Ally explanation right now.");
     } finally {
       setLoadingRationale(false);
     }

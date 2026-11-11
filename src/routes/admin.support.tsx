@@ -189,16 +189,16 @@ export function AdminSupportPage() {
                   ? ""
                   : rawText;
 
-        const cleanedDraft =
-          (rawDraft || "")
-            .replace(/```json\s*/gi, "")
-            .replace(/```/g, "")
-            .replace(/\*\*|__|~~/g, "")
-            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
-            .trim() ||
-          `Hello ${ticket.userName || "Doctor/Nurse"}, this is FALE Clinical Support regarding ticket #${ticket.id
-            .slice(0, 8)
-            .toUpperCase()} (${ticket.subject}). Our team has reviewed your request and is actively assisting you.`;
+        const cleanedDraft = (rawDraft || "")
+          .replace(/```json\s*/gi, "")
+          .replace(/```/g, "")
+          .replace(/\*\*|__|~~/g, "")
+          .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+          .trim();
+
+        if (!cleanedDraft) {
+          throw new Error("Ally returned an empty response.");
+        }
 
         const summary =
           cleanMarkdownAndJsonNoise(
@@ -207,7 +207,7 @@ export function AdminSupportPage() {
               : typeof sData["summary"] === "string"
                 ? sData["summary"]
                 : ""
-          ) || `Triage & escalation draft ready for ${ticket.category || "Support"} (${ticket.userRole || "User"}).`;
+          ) || `Ally triage ready for ${ticket.category || "Support"} (${ticket.userRole || "User"}).`;
 
         const entry: AllyTicketPreCheckResult = {
           status: "VERIFIED",
@@ -226,20 +226,16 @@ export function AdminSupportPage() {
         }
       } catch (err: any) {
         console.warn("Ally ticket pre-check failed:", err);
-        const fallbackDraft = `Hi ${ticket.userName || "Doctor/Nurse"}, this is the FALE Clinical Support desk following up on ticket #${ticket.id
-          .slice(0, 8)
-          .toUpperCase()} regarding "${ticket.subject}". Our operations team is actively investigating and will update you shortly.`;
-
         setAllyPreChecks((prev) => ({
           ...prev,
           [key]: {
             status: "ERROR",
-            summary: "Ally live triage service unreachable; fallback template prepared.",
-            draft: fallbackDraft,
+            summary: "Ally live triage service is temporarily unavailable.",
+            draft: "",
           },
         }));
         if (!options?.silent) {
-          toast.error("Ally live service unavailable; fallback draft loaded");
+          toast.error("Ally live triage service is unavailable right now.");
         }
       } finally {
         inFlightKeysRef.current.delete(key);
@@ -822,7 +818,7 @@ export function AdminSupportPage() {
                             : isReady
                               ? "Ally Draft Ready"
                               : isError
-                                ? "Fallback Draft"
+                                ? "Ally Retry"
                                 : "Ally Queued"}
                         </span>
                         <Button
@@ -848,9 +844,13 @@ export function AdminSupportPage() {
                         <div className="rounded-xl border border-primary/15 bg-card/90 p-3 text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words">
                           {check.draft}
                         </div>
+                      ) : isError ? (
+                        <p className="text-xs text-destructive leading-relaxed">
+                          Ally live triage service is temporarily unavailable. Click Re-draft with Ally to retry.
+                        </p>
                       ) : (
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          Ally is queuing an automated support handoff response for this ticket. Click Re-draft with Ally at any time to refresh.
+                          Ally is queuing a live support response for this ticket. Click Re-draft with Ally at any time to refresh.
                         </p>
                       )}
                     </div>

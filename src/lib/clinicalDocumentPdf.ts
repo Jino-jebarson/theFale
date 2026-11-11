@@ -493,27 +493,66 @@ export function generateFacilityDocumentBlob(
   return pdf.output("blob");
 }
 
-export interface CandidateDossierInfo {
-  name: string;
+export interface CandidateCvExperienceItem {
+  org: string;
   role: string;
-  specialty?: string;
-  qualification?: string;
-  council?: string;
-  regNumber?: string;
-  experienceYears?: string;
-  city?: string;
-  state?: string;
-  email?: string;
-  phone?: string;
-  college?: string;
-  bio?: string;
-  skills?: string[];
-  languages?: string[];
-  cmeCredits?: number | string;
-  documentsCount?: number;
-  isMentor?: boolean;
+  fy?: string | undefined;
+  cur?: boolean | undefined;
+  location?: string | undefined;
+  bullets?: string[] | undefined;
 }
 
+export interface CandidateCvDocumentItem {
+  title: string;
+  fileName?: string | undefined;
+  verified?: boolean | undefined;
+}
+
+export interface CandidateDossierInfo {
+  name: string;
+  role?: string | undefined;
+  specialty?: string | undefined;
+  qualification?: string | undefined;
+  council?: string | undefined;
+  regNumber?: string | undefined;
+  regYear?: string | undefined;
+  experienceYears?: string | undefined;
+  city?: string | undefined;
+  state?: string | undefined;
+  email?: string | undefined;
+  phone?: string | undefined;
+  college?: string | undefined;
+  bio?: string | undefined;
+  skills?: string[] | undefined;
+  subSpecialties?: string[] | undefined;
+  languages?: string[] | undefined;
+  preferredCities?: string[] | undefined;
+  availability?: string | undefined;
+  employmentType?: string | undefined;
+  openToWork?: boolean | undefined;
+  kycStatus?: "PENDING" | "VERIFIED" | "REJECTED" | string | undefined;
+  verifiedAt?: string | undefined;
+  isStudent?: boolean | undefined;
+  course?: string | undefined;
+  studyYear?: string | undefined;
+  universityRegNo?: string | undefined;
+  expectedGraduationYear?: number | string | undefined;
+  cmeCredits?: number | string | undefined;
+  documentsCount?: number | undefined;
+  isMentor?: boolean | undefined;
+  experiences?: CandidateCvExperienceItem[] | undefined;
+  documents?: CandidateCvDocumentItem[] | undefined;
+}
+
+function cleanText(val?: string | number | null): string {
+  if (val === undefined || val === null) return "";
+  return String(val).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Generates an executive, single-column, strictly black-and-white ATS Times serif resume PDF
+ * grounded 100% in the candidate's real profile, experience, education, and verification records.
+ */
 export function generateCandidateDossierBlob(c: CandidateDossierInfo): Blob {
   const pdf = new jsPDF({
     orientation: "portrait",
@@ -523,205 +562,618 @@ export function generateCandidateDossierBlob(c: CandidateDossierInfo): Blob {
 
   const pageWidth = 210;
   const pageHeight = 297;
-  const margin = 14;
-  const contentWidth = pageWidth - margin * 2;
+  const marginX = 18;
+  const topMargin = 20;
+  const bottomLimit = pageHeight - 22;
+  const contentWidth = pageWidth - marginX * 2;
+  let y = topMargin;
 
-  // Background frame
-  pdf.setDrawColor(226, 232, 240);
-  pdf.setLineWidth(0.6);
-  pdf.roundedRect(margin, margin, contentWidth, pageHeight - margin * 2, 3, 3, "S");
+  const isStudent = Boolean(c.isStudent);
+  const kycNormalized = cleanText(c.kycStatus).toUpperCase();
+  const isVerified = !isStudent && kycNormalized === "VERIFIED";
 
-  // Top Header Banner
-  pdf.setFillColor(15, 23, 42); // slate-900
-  pdf.rect(margin, margin, contentWidth, 26, "F");
-
-  // FALE Logo & Title
-  pdf.setTextColor(255, 107, 0); // FALE Orange
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(18);
-  pdf.text("FALE", margin + 6, margin + 12);
-
-  pdf.setTextColor(241, 245, 249);
-  pdf.setFontSize(10);
-  pdf.text("HEALTHCARE PLATFORM", margin + 26, margin + 12);
-
-  pdf.setTextColor(148, 163, 184);
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(8);
-  pdf.text("Statutory Clinical Credential Dossier & Verified Practice Portfolio", margin + 6, margin + 20);
-
-  // Verification Badge Top Right
-  pdf.setFillColor(30, 41, 59);
-  pdf.roundedRect(pageWidth - margin - 64, margin + 5, 58, 16, 2, 2, "F");
-  pdf.setTextColor(52, 211, 153); // emerald-400
-  pdf.setFontSize(8);
-  pdf.setFont("helvetica", "bold");
-  pdf.text("COUNCIL VERIFIED TIER-1", pageWidth - margin - 60, margin + 11);
-  pdf.setTextColor(203, 213, 225);
-  pdf.setFontSize(6.5);
-  pdf.setFont("helvetica", "normal");
-  pdf.text("DigiLocker & NMC Registry Audited", pageWidth - margin - 60, margin + 17);
-
-  // Candidate Name & Headline Banner
-  let y = margin + 34;
-  pdf.setFillColor(255, 247, 237); // orange-50
-  pdf.setDrawColor(254, 215, 170); // orange-200
-  pdf.roundedRect(margin + 6, y, contentWidth - 12, 36, 2, 2, "FD");
-
-  pdf.setTextColor(15, 23, 42);
-  pdf.setFontSize(16);
-  pdf.setFont("helvetica", "bold");
-  pdf.text(c.name || "Healthcare Practitioner", margin + 10, y + 9);
-
-  // Qualification & Council Pills
-  pdf.setFontSize(8.5);
-  pdf.setTextColor(255, 107, 0);
-  const qualText = `${c.qualification || "MBBS"}  •  ${c.role || "Doctor"} (${c.specialty || "General Medicine"})  •  ${c.experienceYears || "4+ Years Exp"}`;
-  pdf.text(qualText, margin + 10, y + 17);
-
-  pdf.setTextColor(71, 85, 105);
-  pdf.setFontSize(8);
-  pdf.setFont("helvetica", "normal");
-  pdf.text(`${c.council || "State Medical Council"}  •  Registration No: ${c.regNumber || "KAC456"}`, margin + 10, y + 24);
-  const locParts = [c.city, c.state].filter(Boolean).join(", ");
-  pdf.text(`Location: ${locParts || "Not specified"}  |  Email: ${c.email || "N/A"}  |  Phone: ${c.phone || "N/A"}`, margin + 10, y + 30);
-
-  y += 44;
-
-  // Section 1: Clinical Profile Summary
-  pdf.setTextColor(15, 23, 42);
-  pdf.setFontSize(10);
-  pdf.setFont("helvetica", "bold");
-  pdf.text("1. CLINICAL PROFILE & PRACTICE SUMMARY", margin + 6, y);
-
-  y += 4;
-  pdf.setFillColor(248, 250, 252);
-  pdf.roundedRect(margin + 6, y, contentWidth - 12, 24, 2, 2, "F");
-  pdf.setDrawColor(226, 232, 240);
-  pdf.roundedRect(margin + 6, y, contentWidth - 12, 24, 2, 2, "S");
-
-  pdf.setTextColor(51, 65, 85);
-  pdf.setFontSize(8);
-  pdf.setFont("helvetica", "normal");
-  const summaryText = c.bio || `Accredited ${c.role || "Clinician"} specializing in ${c.specialty || "General Medicine"}. Experienced in comprehensive patient triage, inpatient and outpatient clinical protocols, emergency life support (BLS/ACLS), and evidence-based pharmacotherapy across NABH-accredited healthcare facilities.`;
-  const splitSummary = pdf.splitTextToSize(summaryText, contentWidth - 20);
-  pdf.text(splitSummary, margin + 10, y + 7);
-
-  y += 32;
-
-  // Section 2: Statutory Licensure & Academic Credentials
-  pdf.setTextColor(15, 23, 42);
-  pdf.setFontSize(10);
-  pdf.setFont("helvetica", "bold");
-  pdf.text("2. STATUTORY LICENSURE & VERIFIED CREDENTIALS", margin + 6, y);
-
-  y += 4;
-  const credItems = [
-    ["Statutory State Council", c.council || "Tamil Nadu Medical Council"],
-    ["Medical Registration License No", c.regNumber || "KAC456"],
-    ["Primary Practicing Degree", `${c.qualification || "MBBS"} - ${c.college || "Madras Medical College"}`],
-    ["Clinical Specialty / Cadre", `${c.role || "Doctor"} • ${c.specialty || "General Medicine"}`],
-    ["Verified Clinical Experience", c.experienceYears || "4+ Years Active Clinical Practice"],
-    ["Council Verification Status", "ACTIVE & GOOD STANDING (DigiLocker / NMC Verified)"],
-    ["CME Accreditation Hours", `${c.cmeCredits || "18.5"} Verified CME Credits (AHA & IRC)`],
-    ["FALE Clinical Mentor Accreditation", c.isMentor ? "Accredited Senior Clinical Mentor" : "Standard Verified Practitioner"],
-  ];
-
-  pdf.setFillColor(255, 255, 255);
-  pdf.roundedRect(margin + 6, y, contentWidth - 12, 58, 2, 2, "F");
-  pdf.setDrawColor(226, 232, 240);
-  pdf.roundedRect(margin + 6, y, contentWidth - 12, 58, 2, 2, "S");
-
-  let credY = y + 6;
-  credItems.forEach(([label, value], idx) => {
-    if (idx % 2 === 1) {
-      pdf.setFillColor(248, 250, 252);
-      pdf.rect(margin + 7, credY - 4, contentWidth - 14, 6.8, "F");
+  const ensureSpace = (neededMm: number) => {
+    if (y + neededMm > bottomLimit) {
+      pdf.addPage();
+      y = topMargin;
     }
-    pdf.setFontSize(7.5);
-    pdf.setFont("helvetica", "bold");
-    pdf.setTextColor(100, 116, 139);
-    pdf.text(label, margin + 10, credY);
+  };
 
-    pdf.setFont("helvetica", "normal");
-    pdf.setTextColor(15, 23, 42);
-    if (label.includes("Status") || label.includes("Mentor")) {
-      pdf.setFont("helvetica", "bold");
-      pdf.setTextColor(16, 185, 129);
+  const drawSectionHeading = (title: string) => {
+    ensureSpace(16);
+    y += 4.2;
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(11);
+    pdf.setTextColor(0, 0, 0);
+    pdf.text(title.toUpperCase(), marginX, y);
+    y += 2.0;
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setLineWidth(0.38);
+    pdf.line(marginX, y, pageWidth - marginX, y);
+    y += 5.4;
+  };
+
+  const drawWrappedLines = (
+    text: string,
+    opts?: {
+      x?: number;
+      maxWidth?: number;
+      fontSize?: number;
+      style?: "normal" | "bold" | "italic" | "bolditalic";
+      lineHeight?: number;
+      color?: [number, number, number];
     }
-    pdf.text(String(value), margin + 68, credY);
-    credY += 6.8;
-  });
+  ) => {
+    const x = opts?.x ?? marginX;
+    const maxWidth = opts?.maxWidth ?? contentWidth;
+    const fontSize = opts?.fontSize ?? 10;
+    const style = opts?.style ?? "normal";
+    const lineHeight = opts?.lineHeight ?? 5.0;
+    const [r, g, b] = opts?.color ?? [25, 25, 25];
 
-  y += 66;
+    pdf.setFont("times", style);
+    pdf.setFontSize(fontSize);
+    pdf.setTextColor(r, g, b);
 
-  // Section 3: Clinical Competencies
-  pdf.setTextColor(15, 23, 42);
-  pdf.setFontSize(10);
-  pdf.setFont("helvetica", "bold");
-  pdf.text("3. VERIFIED CLINICAL COMPETENCIES & PROCEDURAL SKILLS", margin + 6, y);
-
-  y += 4;
-  pdf.setFillColor(248, 250, 252);
-  pdf.roundedRect(margin + 6, y, contentWidth - 12, 24, 2, 2, "F");
-  pdf.setDrawColor(226, 232, 240);
-  pdf.roundedRect(margin + 6, y, contentWidth - 12, 24, 2, 2, "S");
-
-  const skillList = c.skills && c.skills.length > 0
-    ? c.skills
-    : ["Diagnostic Triage & Assessment", "Emergency Resuscitation (ACLS/BLS)", "Inpatient Protocol Management", "Bedside Ultrasound & ECG", "Infection Control & Asepsis", "Pharmacotherapy Protocols"];
-
-  let skillX = margin + 10;
-  let skillRowY = y + 8;
-  skillList.slice(0, 6).forEach((skill, i) => {
-    if (i === 3) {
-      skillX = margin + 10;
-      skillRowY += 8;
+    const lines = pdf.splitTextToSize(text, maxWidth) as string[];
+    for (const line of lines) {
+      ensureSpace(lineHeight + 1.5);
+      pdf.text(line, x, y);
+      y += lineHeight;
     }
-    pdf.setFillColor(255, 255, 255);
-    pdf.setDrawColor(203, 213, 225);
-    pdf.roundedRect(skillX, skillRowY - 4, 56, 6, 1, 1, "FD");
-    pdf.setTextColor(255, 107, 0);
-    pdf.setFontSize(7);
-    pdf.setFont("helvetica", "bold");
-    pdf.text("• " + skill, skillX + 2, skillRowY);
-    skillX += 59;
+  };
+
+  const drawBoldLabelRow = (label: string, value: string) => {
+    const cleanVal = cleanText(value);
+    if (!cleanVal) return;
+
+    const lineHeight = 4.9;
+    const prefix = `${label}: `;
+    pdf.setFontSize(10);
+    pdf.setFont("times", "bold");
+    const prefixWidth = pdf.getTextWidth(prefix);
+
+    pdf.setFont("times", "normal");
+    // Word-wrap the first line to fit cleanly alongside the bold label prefix
+    const words = cleanVal.split(" ");
+    let firstLine = "";
+    let nextWordIdx = 0;
+    const firstLineMaxW = Math.max(40, contentWidth - prefixWidth);
+
+    while (nextWordIdx < words.length) {
+      const word = words[nextWordIdx] || "";
+      const candidate = firstLine ? `${firstLine} ${word}` : word;
+      if (pdf.getTextWidth(candidate) <= firstLineMaxW || !firstLine) {
+        firstLine = candidate;
+        nextWordIdx++;
+      } else {
+        break;
+      }
+    }
+
+    const remainingText = words.slice(nextWordIdx).join(" ");
+    const continuationLines = remainingText
+      ? (pdf.splitTextToSize(remainingText, contentWidth) as string[])
+      : [];
+
+    ensureSpace((1 + continuationLines.length) * lineHeight + 1.5);
+
+    pdf.setFont("times", "bold");
+    pdf.setTextColor(0, 0, 0);
+    pdf.text(prefix, marginX, y);
+
+    pdf.setFont("times", "normal");
+    pdf.setTextColor(25, 25, 25);
+    pdf.text(firstLine, marginX + prefixWidth, y);
+    y += lineHeight;
+
+    for (const contLine of continuationLines) {
+      ensureSpace(lineHeight + 1);
+      pdf.setFont("times", "normal");
+      pdf.setTextColor(25, 25, 25);
+      pdf.text(contLine, marginX, y);
+      y += lineHeight;
+    }
+    y += 1.0;
+  };
+
+  const drawBulletLine = (text: string) => {
+    const clean = cleanText(text);
+    if (!clean) return;
+    const lineHeight = 4.9;
+    pdf.setFont("times", "normal");
+    pdf.setFontSize(10);
+    const bulletX = marginX + 3.5;
+    const textX = marginX + 8;
+    const lines = pdf.splitTextToSize(clean, contentWidth - 8) as string[];
+    if (lines.length === 0) return;
+
+    ensureSpace(lines.length * lineHeight + 1.5);
+    pdf.setTextColor(0, 0, 0);
+    pdf.circle(bulletX + 0.5, y - 1.15, 0.55, "F");
+
+    pdf.setTextColor(25, 25, 25);
+    for (let i = 0; i < lines.length; i++) {
+      if (i > 0) ensureSpace(lineHeight + 1);
+      pdf.text(lines[i] || "", textX, y);
+      y += lineHeight;
+    }
+    y += 0.9;
+  };
+
+  // ── 1. CENTERED HEADER ──────────────────────────────────────────────────────
+  const displayName = (cleanText(c.name) || "Healthcare Professional").toUpperCase();
+  pdf.setFont("times", "bold");
+  pdf.setFontSize(20);
+  pdf.setTextColor(0, 0, 0);
+  const nameLines = pdf.splitTextToSize(displayName, contentWidth) as string[];
+  for (const nLine of nameLines) {
+    pdf.text(nLine, pageWidth / 2, y, { align: "center" });
+    y += 6.6;
+  }
+
+  const headlineParts = isStudent
+    ? [
+        cleanText(c.course) ? `${cleanText(c.course)}${cleanText(c.studyYear) ? ` (${cleanText(c.studyYear)})` : ""}` : cleanText(c.role),
+        "Clinical Student",
+        cleanText(c.college),
+      ].filter(Boolean)
+    : [
+        cleanText(c.role),
+        cleanText(c.specialty),
+        cleanText(c.qualification),
+      ].filter(Boolean);
+
+  if (headlineParts.length > 0) {
+    pdf.setFont("times", "normal");
+    pdf.setFontSize(11);
+    pdf.setTextColor(25, 25, 25);
+    const headline = pdf.splitTextToSize(headlineParts.join("  |  "), contentWidth) as string[];
+    for (const line of headline) {
+      pdf.text(line, pageWidth / 2, y, { align: "center" });
+      y += 4.9;
+    }
+  }
+
+  const locationStr = [cleanText(c.city), cleanText(c.state)].filter(Boolean).join(", ");
+  const contactParts = [cleanText(c.email), cleanText(c.phone), locationStr].filter(Boolean);
+  if (contactParts.length > 0) {
+    pdf.setFont("times", "normal");
+    pdf.setFontSize(9.5);
+    pdf.setTextColor(65, 65, 65);
+    const contactLines = pdf.splitTextToSize(contactParts.join("  |  "), contentWidth) as string[];
+    for (const cLine of contactLines) {
+      pdf.text(cLine, pageWidth / 2, y, { align: "center" });
+      y += 4.6;
+    }
+  }
+
+  const availStr =
+    c.openToWork === false
+      ? "Not Actively Seeking"
+      : `Open to Work${cleanText(c.availability) ? ` (${cleanText(c.availability)})` : ""}`;
+
+  const credParts: string[] = [];
+  if (isStudent) {
+    if (cleanText(c.universityRegNo)) credParts.push(`University Reg: ${cleanText(c.universityRegNo)}`);
+    if (cleanText(c.expectedGraduationYear)) credParts.push(`Expected Graduation: ${cleanText(c.expectedGraduationYear)}`);
+    credParts.push("Track: Supervised Internships Only");
+  } else {
+    const councilTxt = cleanText(c.council);
+    const regTxt = cleanText(c.regNumber);
+    if (councilTxt || regTxt) {
+      credParts.push(
+        councilTxt && regTxt
+          ? `${councilTxt} (${regTxt})`
+          : councilTxt || `Reg No: ${regTxt}`
+      );
+    }
+    const statusLabel =
+      kycNormalized === "VERIFIED"
+        ? "Council Verified"
+        : kycNormalized === "REJECTED"
+        ? "KYC Action Required"
+        : "KYC Verification Pending";
+    credParts.push(`FALE Status: ${statusLabel}`);
+    credParts.push(availStr);
+  }
+
+  if (credParts.length > 0) {
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(9.2);
+    pdf.setTextColor(35, 35, 35);
+    const credLines = pdf.splitTextToSize(credParts.join("  |  "), contentWidth) as string[];
+    for (const line of credLines) {
+      pdf.text(line, pageWidth / 2, y, { align: "center" });
+      y += 4.6;
+    }
+  }
+
+  y += 3.5;
+
+  // ── 2. PROFESSIONAL SUMMARY ─────────────────────────────────────────────────
+  const bioText = cleanText(c.bio);
+  const summaryParagraph = bioText
+    ? bioText
+    : isStudent
+    ? `${cleanText(c.course) || "Healthcare"} student${cleanText(c.college) ? ` at ${cleanText(c.college)}` : ""}${locationStr ? ` in ${locationStr}` : ""}, seeking supervised clinical internship and observership postings.`
+    : `${cleanText(c.role) || "Healthcare Professional"}${cleanText(c.specialty) ? ` specializing in ${cleanText(c.specialty)}` : ""}${cleanText(c.experienceYears) ? ` with ${cleanText(c.experienceYears)} experience` : ""}${locationStr ? `, based in ${locationStr}` : ""}.`;
+
+  drawSectionHeading("Professional Summary");
+  drawWrappedLines(summaryParagraph, { fontSize: 10, lineHeight: 5.0, color: [25, 25, 25] });
+  y += 2.5;
+
+  // ── 3. CLINICAL SKILLS & COMPETENCIES ───────────────────────────────────────
+  const skillsList = (c.skills || []).map((s) => cleanText(s)).filter(Boolean);
+  const subSpecList = (c.subSpecialties || []).map((s) => cleanText(s)).filter(Boolean);
+  const langList = (c.languages || []).map((l) => cleanText(l)).filter(Boolean);
+  const prefCities = (c.preferredCities || []).map((p) => cleanText(p)).filter(Boolean);
+  const engagementBits = [cleanText(c.employmentType), cleanText(c.availability)].filter(Boolean).join(", ");
+  const prefSummary = [
+    engagementBits,
+    prefCities.length > 0 ? `Preferred Locations: ${prefCities.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join(" - ");
+
+  if (skillsList.length > 0 || subSpecList.length > 0 || langList.length > 0 || prefSummary) {
+    drawSectionHeading(isStudent ? "Clinical Skills & Academic Interests" : "Clinical Skills & Competencies");
+    if (skillsList.length > 0) drawBoldLabelRow("Core Competencies", skillsList.join(", "));
+    if (subSpecList.length > 0) drawBoldLabelRow("Sub-Specialties", subSpecList.join(", "));
+    if (langList.length > 0) drawBoldLabelRow("Languages Spoken", langList.join(", "));
+    if (prefSummary) drawBoldLabelRow("Availability & Preferences", prefSummary);
+    y += 1.8;
+  }
+
+  // ── 4. CLINICAL EXPERIENCE ──────────────────────────────────────────────────
+  const expList = (c.experiences || []).filter((e) => cleanText(e.org) || cleanText(e.role));
+  if (expList.length > 0) {
+    drawSectionHeading(isStudent ? "Clinical Postings & Rotations" : "Clinical Experience");
+    expList.forEach((exp, idx) => {
+      ensureSpace(16);
+      const roleStr = cleanText(exp.role) || (isStudent ? "Clinical Trainee" : "Clinician");
+      const orgStr = cleanText(exp.org) || "Healthcare Facility";
+      const dateStr = exp.fy
+        ? `${cleanText(exp.fy)}${exp.cur ? " - Present" : ""}`
+        : exp.cur
+        ? "Current"
+        : "";
+
+      let dateWidth = 0;
+      if (dateStr) {
+        pdf.setFont("times", "italic");
+        pdf.setFontSize(9.5);
+        dateWidth = pdf.getTextWidth(dateStr);
+      }
+
+      pdf.setFont("times", "bold");
+      pdf.setFontSize(10);
+      pdf.setTextColor(0, 0, 0);
+      const headerLeft = `${roleStr}  |  ${orgStr}`;
+      const maxLeftWidth = dateStr ? Math.max(60, contentWidth - dateWidth - 6) : contentWidth;
+      const leftLines = pdf.splitTextToSize(headerLeft, maxLeftWidth) as string[];
+
+      if (dateStr) {
+        pdf.setFont("times", "italic");
+        pdf.setFontSize(9.5);
+        pdf.setTextColor(55, 55, 55);
+        pdf.text(dateStr, pageWidth - marginX, y, { align: "right" });
+      }
+
+      pdf.setFont("times", "bold");
+      pdf.setFontSize(10);
+      pdf.setTextColor(0, 0, 0);
+      for (const lLine of leftLines) {
+        ensureSpace(5.0);
+        pdf.text(lLine, marginX, y);
+        y += 4.8;
+      }
+
+      if (cleanText(exp.location)) {
+        pdf.setFont("times", "italic");
+        pdf.setFontSize(9.5);
+        pdf.setTextColor(70, 70, 70);
+        pdf.text(cleanText(exp.location), marginX, y);
+        y += 4.8;
+      }
+
+      if (exp.bullets && exp.bullets.length > 0) {
+        y += 0.5;
+        for (const bullet of exp.bullets) {
+          drawBulletLine(bullet);
+        }
+      }
+
+      if (idx < expList.length - 1) {
+        y += 2.6;
+      }
+    });
+    y += 2.0;
+  }
+
+  // ── 5. EDUCATION ────────────────────────────────────────────────────────────
+  const hasEduInfo =
+    cleanText(c.qualification) || cleanText(c.college) || cleanText(c.course) || cleanText(c.studyYear);
+  if (hasEduInfo) {
+    drawSectionHeading("Education");
+    if (isStudent) {
+      const courseTitle = `${cleanText(c.course) || "Healthcare Program"}${cleanText(c.studyYear) ? ` (${cleanText(c.studyYear)})` : ""}`;
+      const eduHead = cleanText(c.college) ? `${courseTitle} - ${cleanText(c.college)}` : courseTitle;
+      drawWrappedLines(eduHead, { fontSize: 10, style: "bold", lineHeight: 4.9, color: [0, 0, 0] });
+      const stuMeta = [
+        cleanText(c.universityRegNo) ? `University Reg No: ${cleanText(c.universityRegNo)}` : "",
+        cleanText(c.expectedGraduationYear) ? `Expected Graduation: ${cleanText(c.expectedGraduationYear)}` : "",
+      ]
+        .filter(Boolean)
+        .join("  |  ");
+      if (stuMeta) {
+        drawWrappedLines(stuMeta, { fontSize: 9.5, style: "italic", lineHeight: 4.7, color: [65, 65, 65] });
+      }
+    } else {
+      const deg = cleanText(c.qualification) || cleanText(c.role) || "Clinical Qualification";
+      const eduHead = cleanText(c.college) ? `${deg} - ${cleanText(c.college)}` : deg;
+      drawWrappedLines(eduHead, { fontSize: 10, style: "bold", lineHeight: 4.9, color: [0, 0, 0] });
+      const gradMeta = [
+        cleanText(c.regYear) ? `Council Registration Year: ${cleanText(c.regYear)}` : "",
+        cleanText(c.experienceYears) ? `Clinical Experience: ${cleanText(c.experienceYears)}` : "",
+      ]
+        .filter(Boolean)
+        .join("  |  ");
+      if (gradMeta) {
+        drawWrappedLines(gradMeta, { fontSize: 9.5, style: "italic", lineHeight: 4.7, color: [65, 65, 65] });
+      }
+    }
+    y += 2.2;
+  }
+
+  // ── 6. LICENSURE & VERIFIED CREDENTIALS ─────────────────────────────────────
+  const credBullets: string[] = [];
+  if (isStudent) {
+    credBullets.push(
+      `Enrollment Verification: ${
+        kycNormalized === "VERIFIED"
+          ? "Verified Student Record on FALE Healthcare"
+          : kycNormalized === "REJECTED"
+          ? "Student Verification Action Required"
+          : "Student Verification Under Review"
+      }`
+    );
+    credBullets.push("Practice Scope: Eligible strictly for supervised clinical internships until graduation licensure.");
+  } else {
+    const councilName = cleanText(c.council) || "Statutory State Council (Not specified)";
+    const regNoText = cleanText(c.regNumber) || "Pending";
+    const statusText = isVerified
+      ? "Council Verified via FALE Compliance"
+      : kycNormalized === "REJECTED"
+      ? "KYC Verification Action Required"
+      : "KYC Verification Pending Review";
+    credBullets.push(`State Council Registration: ${councilName} - Reg No: ${regNoText} (${statusText})`);
+    if (c.verifiedAt && isVerified) {
+      const vDt = new Date(c.verifiedAt);
+      if (!Number.isNaN(vDt.getTime())) {
+        credBullets.push(
+          `Verified On: ${vDt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+        );
+      }
+    }
+    if (c.isMentor) {
+      credBullets.push("FALE Clinical Mentor Accreditation: Accredited Senior Clinical Mentor");
+    }
+  }
+
+  if (c.documents && c.documents.length > 0) {
+    for (const doc of c.documents) {
+      const title = cleanText(doc.title) || cleanText(doc.fileName) || "Uploaded Document";
+      const filePart = cleanText(doc.fileName) ? ` (${cleanText(doc.fileName)})` : "";
+      credBullets.push(`${title}${filePart} - ${doc.verified ? "Verified" : "Uploaded (Pending Review)"}`);
+    }
+  }
+
+  if (credBullets.length > 0) {
+    drawSectionHeading(isStudent ? "Academic Verification & Documents" : "Licensure & Verified Credentials");
+    for (const item of credBullets) {
+      drawBulletLine(item);
+    }
+  }
+
+  // ── 7. SUBTLE BLACK & WHITE FOOTER ON EVERY PAGE ────────────────────────────
+  const totalPages = pdf.getNumberOfPages();
+  const generatedStamp = new Date().toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
   });
+  const footerSummary = isStudent
+    ? `FALE Healthcare  |  Student Academic Portfolio  |  Generated ${generatedStamp}`
+    : isVerified
+    ? `FALE Healthcare  |  Official Verified Clinical Resume  |  Generated ${generatedStamp}`
+    : `FALE Healthcare  |  Draft Clinical Resume (KYC ${kycNormalized || "PENDING"})  |  Generated ${generatedStamp}`;
 
-  y += 32;
-
-  // Statutory Certification / Authenticity Stamp
-  pdf.setFillColor(255, 247, 237);
-  pdf.setDrawColor(254, 215, 170);
-  pdf.roundedRect(margin + 6, y, contentWidth - 12, 28, 2, 2, "FD");
-
-  pdf.setTextColor(194, 65, 12);
-  pdf.setFontSize(8);
-  pdf.setFont("helvetica", "bold");
-  pdf.text("FALE STATUTORY REGULATORY VERIFICATION SEAL", margin + 10, y + 6);
-
-  pdf.setTextColor(124, 45, 18);
-  pdf.setFontSize(7);
-  pdf.setFont("helvetica", "normal");
-  const sealText = [
-    "This Clinical Credential Dossier was generated directly from verified records authenticated on the FALE Healthcare Platform.",
-    `Registered Clinician ID: FALE-CAND-${(c.regNumber || "KAC456").toUpperCase()} • Verification Timestamp: ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST.`,
-    "All stated state council licenses and verified qualifications have been cross-referenced with national healthcare governance bodies.",
-  ];
-  sealText.forEach((st, i) => {
-    pdf.text(st, margin + 10, y + 12 + i * 5);
-  });
-
-  // Footer
-  const footerY = pageHeight - margin - 6;
-  pdf.setDrawColor(226, 232, 240);
-  pdf.line(margin + 6, footerY - 4, pageWidth - margin - 6, footerY - 4);
-
-  pdf.setTextColor(148, 163, 184);
-  pdf.setFontSize(7);
-  pdf.setFont("helvetica", "normal");
-  pdf.text("FALE Healthcare Platform • Verified Clinician Credential Dossier • Strictly for Clinical Recruitment & Credentialing", margin + 6, footerY);
-  pdf.text("Page 1 of 1", pageWidth - margin - 18, footerY);
+  for (let pNum = 1; pNum <= totalPages; pNum++) {
+    pdf.setPage(pNum);
+    const footerY = pageHeight - 11;
+    pdf.setDrawColor(190, 190, 190);
+    pdf.setLineWidth(0.25);
+    pdf.line(marginX, footerY - 4.0, pageWidth - marginX, footerY - 4.0);
+    pdf.setFont("times", "normal");
+    pdf.setFontSize(8.2);
+    pdf.setTextColor(100, 100, 100);
+    pdf.text(footerSummary, marginX, footerY);
+    pdf.text(`Page ${pNum} of ${totalPages}`, pageWidth - marginX, footerY, { align: "right" });
+  }
 
   return pdf.output("blob");
+}
+
+export interface DownloadedCvResult {
+  filename: string;
+  label: string;
+  toastTitle: string;
+  toastDescription: string;
+}
+
+export function getCvPreparingToastText(isStudent?: boolean, kycStatus?: string): string {
+  if (isStudent) return "Preparing your Academic Portfolio PDF...";
+  return cleanText(kycStatus).toUpperCase() === "VERIFIED"
+    ? "Preparing your Verified Clinical CV PDF..."
+    : "Preparing your Draft Clinical CV PDF...";
+}
+
+/**
+ * Generates and triggers immediate browser download for a candidate's live ATS resume/portfolio PDF.
+ */
+export function downloadCandidateCvPdf(c: CandidateDossierInfo): DownloadedCvResult {
+  const blob = generateCandidateDossierBlob(c);
+  const safeName = (cleanText(c.name) || "Candidate").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const isStudent = Boolean(c.isStudent);
+  const isVerified = !isStudent && cleanText(c.kycStatus).toUpperCase() === "VERIFIED";
+
+  const suffix = isStudent ? "Academic_Portfolio" : isVerified ? "Verified_CV" : "Draft_CV";
+  const label = isStudent ? "Academic Portfolio" : isVerified ? "Verified Clinical CV" : "Draft Clinical CV";
+  const filename = `FALE_${safeName || "Candidate"}_${suffix}.pdf`;
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  const toastTitle = `${label} downloaded`;
+  const toastDescription = isStudent
+    ? `Saved ${filename} with your college & clinical posting summary.`
+    : isVerified
+    ? `Saved ${filename} with your verified FALE council credentials.`
+    : `Saved ${filename}. Complete council KYC verification to unlock the Verified CV seal.`;
+
+  return { filename, label, toastTitle, toastDescription };
+}
+
+export interface RawProfileForCv {
+  name?: string | undefined;
+  email?: string | undefined;
+  phone?: string | undefined;
+  city?: string | undefined;
+  state?: string | undefined;
+  isStudent?: boolean | undefined;
+  course?: string | undefined;
+  college?: string | undefined;
+  studyYear?: string | undefined;
+  universityRegNo?: string | undefined;
+  expectedGraduationYear?: number | string | undefined;
+  profession?: string | undefined;
+  specialty?: string | undefined;
+  subSpecialties?: string[] | undefined;
+  qualification?: string | undefined;
+  council?: string | undefined;
+  regNumber?: string | undefined;
+  regYear?: string | undefined;
+  experienceYears?: string | undefined;
+  bio?: string | undefined;
+  availability?: string | undefined;
+  employmentType?: string | undefined;
+  skills?: string[] | undefined;
+  languages?: string[] | undefined;
+  preferredCities?: string[] | undefined;
+  openToWork?: boolean | undefined;
+  kycStatus?: string | undefined;
+  isMentor?: boolean | undefined;
+  verifiedAt?: string | undefined;
+  documents?: Array<{
+    documentType: string;
+    originalFileName: string;
+    verified?: boolean | undefined;
+  }> | undefined;
+}
+
+export function buildCandidateDossierFromProfile(
+  apiProfile: RawProfileForCv | null | undefined,
+  storeProfile: Record<string, any> = {},
+  contactFallback = ""
+): CandidateDossierInfo {
+  const isStudent = Boolean(
+    apiProfile
+      ? apiProfile.isStudent
+      : storeProfile["level"] === "student" || storeProfile["cadreLevel"] === "student"
+  );
+
+  const rawExps = Array.isArray(storeProfile["exps"])
+    ? (storeProfile["exps"] as CandidateCvExperienceItem[])
+    : storeProfile["employer"]
+    ? [
+        {
+          org: String(storeProfile["employer"]),
+          role: String(storeProfile["designation"] || apiProfile?.profession || storeProfile["role"] || "Clinician"),
+          fy: "",
+          cur: true,
+        },
+      ]
+    : [];
+
+  const docs = (apiProfile?.documents || [])
+    .filter(
+      (d) =>
+        d.documentType !== "PHOTO" &&
+        d.documentType !== "PROFILE_PHOTO" &&
+        !d.originalFileName?.toLowerCase().includes("profilephoto")
+    )
+    .map((d) => ({
+      title: formatDocTypeTitle(d.documentType),
+      fileName: d.originalFileName,
+      verified: Boolean(d.verified),
+    }));
+
+  return {
+    name: cleanText(apiProfile?.name || storeProfile["name"] || contactFallback || "Clinician"),
+    role: cleanText(apiProfile?.profession || storeProfile["role"] || (isStudent ? apiProfile?.course : "Healthcare Professional")),
+    specialty: cleanText(apiProfile?.specialty || storeProfile["specialty"]),
+    qualification: cleanText(apiProfile?.qualification || storeProfile["qual"] || storeProfile["qualification"]),
+    council: cleanText(apiProfile?.council || storeProfile["council"]),
+    regNumber: cleanText(apiProfile?.regNumber || storeProfile["regNo"]),
+    regYear: cleanText(apiProfile?.regYear || storeProfile["regYear"]),
+    experienceYears: cleanText(apiProfile?.experienceYears || storeProfile["exp"]),
+    city: cleanText(apiProfile?.city || storeProfile["city"]),
+    state: cleanText(apiProfile?.state || storeProfile["state"]),
+    email: cleanText(apiProfile?.email || storeProfile["email"]),
+    phone: cleanText(apiProfile?.phone || storeProfile["mobile"] || contactFallback),
+    college: cleanText(apiProfile?.college || storeProfile["college"] || storeProfile["institution"]),
+    bio: cleanText(apiProfile?.bio || storeProfile["bio"] || storeProfile["about"]),
+    skills: apiProfile?.skills && apiProfile.skills.length > 0
+      ? apiProfile.skills
+      : Array.isArray(storeProfile["skills"])
+      ? storeProfile["skills"]
+      : [],
+    subSpecialties: apiProfile?.subSpecialties || [],
+    languages: apiProfile?.languages && apiProfile.languages.length > 0
+      ? apiProfile.languages
+      : Array.isArray(storeProfile["languages"])
+      ? storeProfile["languages"]
+      : [],
+    preferredCities: apiProfile?.preferredCities && apiProfile.preferredCities.length > 0
+      ? apiProfile.preferredCities
+      : Array.isArray(storeProfile["preferredCity"])
+      ? storeProfile["preferredCity"]
+      : [],
+    availability: cleanText(apiProfile?.availability || storeProfile["availability"] || storeProfile["notice"]),
+    employmentType: cleanText(apiProfile?.employmentType || storeProfile["employmentType"]),
+    openToWork:
+      apiProfile?.openToWork !== undefined
+        ? Boolean(apiProfile.openToWork)
+        : storeProfile["openToWork"] !== undefined
+        ? Boolean(storeProfile["openToWork"])
+        : true,
+    kycStatus: cleanText(apiProfile?.kycStatus || storeProfile["kycStatus"] || "PENDING"),
+    verifiedAt: apiProfile?.verifiedAt,
+    isStudent,
+    course: cleanText(apiProfile?.course || storeProfile["course"]),
+    studyYear: cleanText(apiProfile?.studyYear || storeProfile["studyYear"]),
+    universityRegNo: cleanText(apiProfile?.universityRegNo || storeProfile["universityRegNo"]),
+    expectedGraduationYear: apiProfile?.expectedGraduationYear ?? storeProfile["expectedGraduationYear"],
+    isMentor: Boolean(apiProfile?.isMentor),
+    experiences: rawExps,
+    documents: docs,
+  };
 }

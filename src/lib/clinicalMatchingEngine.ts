@@ -1,35 +1,35 @@
 // src/lib/clinicalMatchingEngine.ts
-// Clinical-grade multi-factor matching engine for FALE Healthcare
-// Evaluates clinical cadre, subspecialties, certifications, procedure skills, and council requirements.
+// Canonical 6-factor Clinical Matching Engine (1:1 parity with backend ClinicalMatchingEngine.java)
+// Evaluates clinical cadre, specialty domains, skills, experience years, geography, and KYC standing.
 
 export type ClinicalCadre = "DOCTOR" | "NURSE" | "PHYSIOTHERAPIST" | "PHARMACIST" | "TECHNICIAN" | "STUDENT" | "UNKNOWN";
 
 export interface MatchCandidateInput {
-  role?: string;
-  profession?: string;
-  specialty?: string;
-  subSpecialties?: string[];
-  qualification?: string;
-  skills?: string[];
-  city?: string;
-  state?: string;
-  preferredCities?: string[];
-  relocate?: boolean;
-  kycStatus?: string;
-  isStudent?: boolean;
-  experienceYears?: string | number;
+  role?: string | undefined;
+  profession?: string | undefined;
+  specialty?: string | undefined;
+  subSpecialties?: string[] | undefined;
+  qualification?: string | undefined;
+  skills?: string[] | undefined;
+  city?: string | undefined;
+  state?: string | undefined;
+  preferredCities?: string[] | undefined;
+  relocate?: boolean | undefined;
+  kycStatus?: string | undefined;
+  isStudent?: boolean | undefined;
+  experienceYears?: string | number | undefined;
 }
 
 export interface MatchJobInput {
   title: string;
-  dept?: string;
-  city?: string;
-  qualification?: string;
-  tags?: string[];
-  exp?: string;
-  urgent?: boolean;
-  kind?: string;
-  type?: string;
+  dept?: string | undefined;
+  city?: string | undefined;
+  qualification?: string | undefined;
+  tags?: string[] | undefined;
+  exp?: string | undefined;
+  urgent?: boolean | undefined;
+  kind?: string | undefined;
+  type?: string | undefined;
 }
 
 export interface MatchResult {
@@ -40,6 +40,7 @@ export interface MatchResult {
     professionScore: number;
     specialtyScore: number;
     skillsScore: number;
+    experienceScore: number;
     locationScore: number;
     qualificationScore: number;
   };
@@ -57,28 +58,30 @@ const CADRE_KEYWORDS: Record<ClinicalCadre, string[]> = {
     "consultant", "resident", "registrar", "fellow", "intensivist", "anesthesiologist",
     "anaesthesiologist", "cardiologist", "pediatrician", "paediatrician", "gynaecologist",
     "gynecologist", "orthopedist", "orthopaedic surgeon", "general practitioner", "gp",
-    "medical officer", "cmo", "gdmo", "rso", "duty doctor", "casuality medical officer"
+    "medical officer", "cmo", "gdmo", "rso", "duty doctor", "casualty medical officer", "casuality medical officer",
   ],
   NURSE: [
-    "nurse", "nursing", "staff nurse", "sister", "gnm", "b.sc nursing", "m.sc nursing",
-    "anm", "charge nurse", "nursing officer", "matron", "scrub nurse", "bedside nurse",
-    "icu nurse", "ot nurse", "critical care nurse", "neonatal nurse", "sister in charge"
+    "nurse", "nursing", "staff nurse", "sister", "gnm", "b.sc nursing", "bsc nursing",
+    "m.sc nursing", "msc nursing", "anm", "charge nurse", "nursing officer", "matron",
+    "scrub nurse", "bedside nurse", "icu nurse", "ot nurse", "critical care nurse",
+    "neonatal nurse", "sister in charge",
   ],
   PHYSIOTHERAPIST: [
     "physio", "physiotherapy", "physiotherapist", "bpt", "mpt", "dpt", "rehabilitation",
-    "physical therapist", "neuro physio", "ortho physio", "sports therapist"
+    "physical therapist", "neuro physio", "ortho physio", "sports therapist",
   ],
   PHARMACIST: [
-    "pharmacist", "pharmacy", "b.pharm", "m.pharm", "d.pharm", "pharm.d",
-    "dispensing pharmacist", "clinical pharmacist", "hospital pharmacist"
+    "pharmacist", "pharmacy", "b.pharm", "bpharm", "m.pharm", "mpharm",
+    "d.pharm", "dpharm", "pharm.d", "pharmd", "dispensing pharmacist",
+    "clinical pharmacist", "hospital pharmacist",
   ],
   TECHNICIAN: [
     "technician", "technologist", "bmlt", "dmlt", "lab tech", "medical lab",
-    "radiographer", "x-ray", "mri", "ct scan", "dialysis tech", "ot tech",
-    "anesthesia tech", "ecg tech", "cath lab tech", "perfusionist", "phlebotomist", "mit"
+    "radiographer", "x-ray", "xray", "mri", "ct scan", "dialysis tech", "ot tech",
+    "anesthesia tech", "ecg tech", "cath lab tech", "perfusionist", "phlebotomist", "mit",
   ],
   STUDENT: [
-    "student", "intern", "internship", "trainee", "clinical rotation", "shadowing", "scholar"
+    "student", "intern", "internship", "trainee", "clinical rotation", "shadowing", "scholar",
   ],
   UNKNOWN: [],
 };
@@ -98,8 +101,8 @@ const SPECIALTY_DOMAINS: SpecialtyDomain[] = [
     domain: "CRITICAL_CARE",
     keywords: [
       "icu", "ccu", "micu", "sicu", "picu", "nicu", "critical care", "intensive care",
-      "acute care", "resuscitation", "emergency", "trauma", "casualty", "triage",
-      "ventilator", "intubation", "central line", "bls", "acls", "code blue", "abg", "airway"
+      "acute care", "resuscitation", "ventilator", "intubation", "central line",
+      "bls", "acls", "code blue", "abg", "airway",
     ],
     relatedDomains: ["EMERGENCY", "CARDIOLOGY", "SURGERY_OT"],
   },
@@ -112,7 +115,7 @@ const SPECIALTY_DOMAINS: SpecialtyDomain[] = [
     domain: "CARDIOLOGY",
     keywords: [
       "cardiology", "cardiac", "cath lab", "coronary", "cardiothoracic", "ctvs",
-      "echo", "ecg", "angioplasty", "stemi", "arrhythmia", "heart"
+      "echo", "ecg", "angioplasty", "stemi", "arrhythmia", "heart",
     ],
     relatedDomains: ["CRITICAL_CARE"],
   },
@@ -120,7 +123,7 @@ const SPECIALTY_DOMAINS: SpecialtyDomain[] = [
     domain: "SURGERY_OT",
     keywords: [
       "operation theatre", "operation theater", "ot", "general surgery", "surgical",
-      "laparoscopic", "post-op", "pacu", "scrub", "circulating", "sterilization", "cssd", "anesthesia"
+      "laparoscopic", "post-op", "pacu", "scrub", "circulating", "sterilization", "cssd", "anesthesia",
     ],
     relatedDomains: ["CRITICAL_CARE", "EMERGENCY"],
   },
@@ -128,7 +131,7 @@ const SPECIALTY_DOMAINS: SpecialtyDomain[] = [
     domain: "PEDIATRICS_NEONATOLOGY",
     keywords: [
       "pediatrics", "paediatrics", "pediatric", "neonatology", "neonatal", "nicu", "picu",
-      "child health", "pals", "immunization", "newborn"
+      "child health", "pals", "immunization", "newborn",
     ],
     relatedDomains: ["CRITICAL_CARE"],
   },
@@ -136,7 +139,7 @@ const SPECIALTY_DOMAINS: SpecialtyDomain[] = [
     domain: "OBSTETRICS_GYNECOLOGY",
     keywords: [
       "obstetrics", "gynecology", "ob-gyn", "obg", "maternity", "labor room", "labour room",
-      "delivery", "antenatal", "postnatal", "l&d", "midwifery", "cesarean"
+      "delivery", "antenatal", "postnatal", "l&d", "midwifery", "cesarean",
     ],
     relatedDomains: ["PEDIATRICS_NEONATOLOGY", "SURGERY_OT"],
   },
@@ -144,7 +147,7 @@ const SPECIALTY_DOMAINS: SpecialtyDomain[] = [
     domain: "ORTHOPEDICS",
     keywords: [
       "orthopedics", "ortho", "orthopaedic", "bone", "joint", "spine", "fracture",
-      "arthroplasty", "trauma surgery", "musculoskeletal", "replacement"
+      "arthroplasty", "trauma surgery", "musculoskeletal", "replacement",
     ],
     relatedDomains: ["SURGERY_OT", "PHYSIOTHERAPY"],
   },
@@ -167,7 +170,7 @@ const SPECIALTY_DOMAINS: SpecialtyDomain[] = [
     domain: "GENERAL_MEDICINE",
     keywords: [
       "general medicine", "internal medicine", "physician", "opd", "inpatient", "ward",
-      "family medicine", "primary care", "infection", "fever", "hypertension", "diabetes"
+      "family medicine", "primary care", "fever", "hypertension", "diabetes",
     ],
     relatedDomains: ["CRITICAL_CARE"],
   },
@@ -175,7 +178,7 @@ const SPECIALTY_DOMAINS: SpecialtyDomain[] = [
     domain: "DIAGNOSTICS_PATHOLOGY_RADIOLOGY",
     keywords: [
       "pathology", "hematology", "biochemistry", "microbiology", "blood bank", "histopathology",
-      "radiology", "ultrasound", "usg", "ct scan", "mri", "x-ray", "sample", "analyzer"
+      "radiology", "ultrasound", "usg", "ct scan", "mri", "x-ray", "analyzer",
     ],
   },
   {
@@ -186,14 +189,26 @@ const SPECIALTY_DOMAINS: SpecialtyDomain[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. HELPER FUNCTIONS
+// 3. HELPER FUNCTIONS (Word-boundary & Numeric Parsers)
 // ─────────────────────────────────────────────────────────────────────────────
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function containsWordBoundary(haystack: string, needle: string): boolean {
+  if (!haystack || !needle) return false;
+  const cleanNeedle = needle.trim().toLowerCase();
+  if (!cleanNeedle) return false;
+  const pattern = new RegExp(`(?:^|[^a-z0-9])${escapeRegex(cleanNeedle)}(?:$|[^a-z0-9])`, "i");
+  return pattern.test(haystack);
+}
+
 function detectCadre(text: string): ClinicalCadre {
-  const lower = text.toLowerCase();
+  if (!text) return "UNKNOWN";
   for (const [cadre, keywords] of Object.entries(CADRE_KEYWORDS)) {
     if (cadre === "UNKNOWN") continue;
-    if (keywords.some((kw) => lower.includes(kw))) {
+    if (keywords.some((kw) => containsWordBoundary(text, kw))) {
       return cadre as ClinicalCadre;
     }
   }
@@ -201,18 +216,37 @@ function detectCadre(text: string): ClinicalCadre {
 }
 
 function findSpecialtyDomains(text: string): string[] {
-  const lower = text.toLowerCase();
+  if (!text) return [];
   const matched: string[] = [];
   for (const s of SPECIALTY_DOMAINS) {
-    if (s.keywords.some((kw) => lower.includes(kw))) {
+    if (s.keywords.some((kw) => containsWordBoundary(text, kw))) {
       matched.push(s.domain);
     }
   }
   return matched;
 }
 
+function parseMinYears(raw?: string | number): number | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  const lower = raw.trim().toLowerCase();
+  if (!lower) return null;
+  if (lower.includes("fresher") || lower.includes("student") || lower.includes("intern") || lower.includes("entry")) {
+    return 0;
+  }
+  const match = lower.match(/(\d+(?:\.\d+)?)/);
+  if (match && match[1]) {
+    const val = parseFloat(match[1]);
+    if (lower.includes("month") && !lower.includes("year") && !lower.includes("yr")) {
+      return val / 12;
+    }
+    return val;
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. CORE CLINICAL MATCHING ENGINE
+// 4. CORE 6-FACTOR CLINICAL MATCHING ENGINE (Max 100 pts)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function calculateClinicalMatch(
@@ -224,30 +258,35 @@ export function calculateClinicalMatch(
   const candidateRoleStr = `${candidate.role || ""} ${candidate.profession || ""} ${candidate.qualification || ""}`;
   const candidateCadre = candidate.isStudent ? "STUDENT" : detectCadre(candidateRoleStr);
 
+  const jobHeaderText = `${job.title} ${job.dept || ""} ${job.qualification || ""}`;
   const jobRoleStr = `${job.title} ${job.dept || ""} ${(job.tags || []).join(" ")} ${job.qualification || ""}`;
-  const jobCadre = detectCadre(jobRoleStr);
+  const jobCadre = detectCadre(jobHeaderText);
 
-  // ── FACTOR 1: CLINICAL PROFESSION / CADRE SAFETY (Max: 40 points) ─────────
+  // ── FACTOR 1: CLINICAL PROFESSION / CADRE SAFETY (Max: 35 points) ─────────
   let professionScore = 0;
+  let cadreMismatch = false;
 
   if (candidate.isStudent) {
-    const isInternshipJob = job.kind === "internship" || job.type === "Internship" || job.exp?.toLowerCase().includes("student");
+    const isInternshipJob =
+      job.kind === "internship" ||
+      job.type === "Internship" ||
+      Boolean(job.exp?.toLowerCase().includes("student"));
     if (isInternshipJob) {
-      professionScore = 40;
+      professionScore = 35;
       reasons.push("Eligible clinical internship tailored for student enrolment");
     } else {
-      professionScore = 10; // Student viewing graduate duty
+      professionScore = 0;
+      cadreMismatch = true;
       reasons.push("Independent role (patient duty requires completed registration)");
     }
   } else if (candidateCadre === "UNKNOWN" || jobCadre === "UNKNOWN") {
-    // Cannot determine strict cadre mismatch; give neutral mid-score
-    professionScore = 25;
+    professionScore = 20;
   } else if (candidateCadre === jobCadre) {
-    professionScore = 40;
+    professionScore = 35;
     reasons.push(`Profession verified (${candidateCadre})`);
   } else {
-    // HARD MISMATCH: Doctor viewing Nurse role, or Nurse viewing Doctor surgery, etc.
     professionScore = 0;
+    cadreMismatch = true;
     reasons.push(`Different clinical cadre (${candidateCadre} vs. required ${jobCadre})`);
   }
 
@@ -263,7 +302,6 @@ export function calculateClinicalMatch(
     specialtyScore = 25;
     reasons.push("Direct clinical specialty & department alignment");
   } else {
-    // Check related / neighbouring emergency or ICU overlap
     const hasRelatedDomain = candidateDomains.some((cd) => {
       const def = SPECIALTY_DOMAINS.find((d) => d.domain === cd);
       return def?.relatedDomains?.some((rd) => jobDomains.includes(rd));
@@ -275,97 +313,113 @@ export function calculateClinicalMatch(
     } else if (jobDomains.includes("GENERAL_MEDICINE") || candidateDomains.includes("GENERAL_MEDICINE")) {
       specialtyScore = 12;
       reasons.push("General clinical medicine coverage");
-    } else if (!candidate.specialty) {
+    } else if (!candidateSpecText.trim()) {
       specialtyScore = 8;
     } else {
-      specialtyScore = 0;
+      specialtyScore = 2;
     }
   }
 
   // ── FACTOR 3: PROCEDURE SKILLS & CLINICAL COMPETENCIES (Max: 15 points) ──
   let skillsScore = 0;
-  const candidateSkills = (candidate.skills || []).map((s) => s.toLowerCase());
-  const jobTextLower = jobRoleStr.toLowerCase();
+  const candidateSkills = (candidate.skills || []).map((s) => s.trim().toLowerCase()).filter(Boolean);
 
   if (candidateSkills.length > 0) {
     let skillHits = 0;
     for (const skill of candidateSkills) {
-      if (jobTextLower.includes(skill)) {
+      if (containsWordBoundary(jobRoleStr, skill)) {
         skillHits++;
       }
     }
     if (skillHits >= 3) {
       skillsScore = 15;
       reasons.push("Strong alignment with required clinical procedures");
-    } else if (skillHits > 0) {
-      skillsScore = 10;
+    } else if (skillHits === 2) {
+      skillsScore = 12;
       reasons.push("Matching clinical procedure skills");
+    } else if (skillHits === 1) {
+      skillsScore = 9;
+      reasons.push("Matching clinical procedure skill");
     } else {
-      skillsScore = 4;
+      skillsScore = 3;
     }
   } else {
-    // Fallback: check if standard essential badges (BLS/ACLS/NABH) align
-    if (jobTextLower.includes("nabh") || jobTextLower.includes("registration")) {
-      skillsScore = 8;
-    } else {
-      skillsScore = 5;
-    }
+    skillsScore = candidateCadre === jobCadre && candidateCadre !== "UNKNOWN" ? 7 : 4;
   }
 
-  // ── FACTOR 4: GEOGRAPHIC & RELOCATION FEASIBILITY (Max: 10 points) ────────
+  // ── FACTOR 4: EXPERIENCE YEARS ALIGNMENT (Max: 10 points) ─────────────────
+  let experienceScore = 0;
+  const reqMin = parseMinYears(job.exp);
+  const candYrs = parseMinYears(candidate.experienceYears);
+
+  if (reqMin === null) {
+    experienceScore = candYrs !== null && candYrs > 0 ? 9 : 7;
+  } else if (reqMin <= 0) {
+    experienceScore = 10;
+  } else if (candYrs === null) {
+    experienceScore = 5;
+  } else if (candYrs >= reqMin) {
+    experienceScore = 10;
+    reasons.push("Meets required clinical experience");
+  } else if (candYrs >= reqMin - 1) {
+    experienceScore = 6;
+  } else {
+    experienceScore = 2;
+  }
+
+  // ── FACTOR 5: GEOGRAPHIC & RELOCATION FEASIBILITY (Max: 8 points) ─────────
   let locationScore = 0;
   const cCity = (candidate.city || "").trim().toLowerCase();
   const jCity = (job.city || "").trim().toLowerCase();
-  const preferred = (candidate.preferredCities || []).map((c) => c.toLowerCase());
-  const isPermanentJob = job.kind !== "internship" && job.type !== "Internship";
+  const preferred = (candidate.preferredCities || []).map((c) => c.trim().toLowerCase()).filter(Boolean);
 
   if (cCity && jCity && (cCity.includes(jCity) || jCity.includes(cCity))) {
-    locationScore = 10;
-    reasons.push(`Located in your registered city (${job.city})`);
-  } else if (preferred.some((p) => jCity.includes(p) || p.includes(jCity))) {
-    locationScore = 10;
-    reasons.push(`Matches your preferred practice city (${job.city})`);
-  } else if (candidate.relocate || isPermanentJob) {
-    // For full-time hospital positions, candidates regularly relocate across Indian states
     locationScore = 8;
-    reasons.push("Pan-India mobility & inter-city relocation viable");
+    reasons.push(`Located in your registered city (${job.city})`);
+  } else if (jCity && preferred.some((p) => jCity.includes(p) || p.includes(jCity))) {
+    locationScore = 8;
+    reasons.push(`Matches your preferred practice city (${job.city})`);
+  } else if (candidate.relocate) {
+    locationScore = 5;
+    reasons.push("Open to inter-city relocation");
   } else if (!cCity || !jCity) {
-    locationScore = 6;
+    locationScore = 5;
   } else {
-    locationScore = 3;
+    locationScore = 2;
   }
 
-  // ── FACTOR 5: REGULATORY & COUNCIL VERIFICATION (Max: 10 points) ─────────
+  // ── FACTOR 6: REGULATORY & COUNCIL VERIFICATION (Max: 7 points) ──────────
   let qualificationScore = 0;
-  const qualText = (candidate.qualification || "").toLowerCase();
-  const reqQual = (job.qualification || "").toLowerCase();
+  const qualText = (candidate.qualification || "").trim().toLowerCase();
+  const reqQual = (job.qualification || "").trim().toLowerCase();
 
-  if (qualText && reqQual && (qualText.includes(reqQual) || reqQual.includes(qualText))) {
-    qualificationScore += 6;
-  } else if (
-    (qualText.includes("mbbs") && jobTextLower.includes("mbbs")) ||
-    ((qualText.includes("gnm") || qualText.includes("b.sc")) && (jobTextLower.includes("nurs") || jobTextLower.includes("gnm"))) ||
-    (qualText.includes("bpt") && jobTextLower.includes("physio"))
-  ) {
-    qualificationScore += 6;
+  if (reqQual) {
+    if (
+      qualText &&
+      (containsWordBoundary(qualText, reqQual) ||
+        containsWordBoundary(reqQual, qualText) ||
+        containsWordBoundary(jobRoleStr, qualText))
+    ) {
+      qualificationScore += 4;
+    } else {
+      qualificationScore += 1;
+    }
   } else {
-    qualificationScore += 2;
+    qualificationScore += qualText ? 3 : 2;
   }
 
-  if (candidate.kycStatus === "VERIFIED") {
-    qualificationScore += 4;
+  if (candidate.kycStatus?.toUpperCase() === "VERIFIED") {
+    qualificationScore += 3;
     reasons.push("Council Registration Verified");
-  } else {
+  } else if (candidate.kycStatus?.toUpperCase() !== "REJECTED") {
     qualificationScore += 1;
   }
 
   // ── COMPUTE TOTAL AND APPLY STRICT SAFETY BARRIER ─────────────────────────
-  let totalScore = professionScore + specialtyScore + skillsScore + locationScore + qualificationScore;
+  let totalScore =
+    professionScore + specialtyScore + skillsScore + experienceScore + locationScore + qualificationScore;
 
-  // SAFETY HARD BARRIER:
-  // If the candidate's profession is completely mismatched with the job,
-  // cap score below 30% so it can NEVER mistakenly reach the 70% threshold.
-  if (candidateCadre !== "UNKNOWN" && jobCadre !== "UNKNOWN" && candidateCadre !== jobCadre) {
+  if (cadreMismatch) {
     totalScore = Math.min(28, totalScore);
   }
 
@@ -379,6 +433,7 @@ export function calculateClinicalMatch(
       professionScore,
       specialtyScore,
       skillsScore,
+      experienceScore,
       locationScore,
       qualificationScore,
     },
@@ -386,4 +441,3 @@ export function calculateClinicalMatch(
     reasons,
   };
 }
-

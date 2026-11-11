@@ -53,7 +53,9 @@ import {
 } from "@/lib/adapters/candidateAdapter";
 import {
   generateClinicalDocumentBlob,
-  generateCandidateDossierBlob,
+  downloadCandidateCvPdf,
+  buildCandidateDossierFromProfile,
+  getCvPreparingToastText,
   formatDocTypeTitle,
 } from "@/lib/clinicalDocumentPdf";
 import { generateProfileBioWithAi } from "@/lib/adapters/aiAdapter";
@@ -373,40 +375,33 @@ function Profile() {
     }
   };
 
+  const effectiveKycStatus = String(
+    candidateData?.kycStatus || p["kycStatus"] || "PENDING"
+  ).toUpperCase();
+
   const handleDownloadDossier = () => {
     setIsDownloadingDossier(true);
+    const toastId = toast.loading(getCvPreparingToastText(isStudent, effectiveKycStatus));
     try {
-      const blob = generateCandidateDossierBlob({
-        name,
-        role,
-        specialty,
-        qualification: qual,
-        council,
-        regNumber: regNo,
-        experienceYears: exp,
-        city,
-        state: stateName,
-        email,
-        phone: mobile,
-        college: collegeName,
-        bio,
-        skills,
-        languages,
-        cmeCredits: 12,
-        documentsCount: documentsList.length,
-        isMentor: false,
+      const dossierInput = buildCandidateDossierFromProfile(candidateData, p, s.contact);
+      // Merge documentsList if offline/store docs are present when candidateData isn't loaded
+      if ((!dossierInput.documents || dossierInput.documents.length === 0) && documentsList.length > 0) {
+        dossierInput.documents = documentsList.map((d) => ({
+          title: d.title,
+          fileName: d.fileName,
+          verified: Boolean(d.verified),
+        }));
+      }
+      const { toastTitle, toastDescription } = downloadCandidateCvPdf(dossierInput);
+      toast.success(toastTitle, {
+        id: toastId,
+        description: toastDescription,
       });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `FALE_${name.replace(/\s+/g, "_")}_CV.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success("Profile CV & Dossier Downloaded!");
     } catch (err: any) {
-      toast.error("Could not generate PDF: " + (err?.message || "Error"));
+      toast.error("Failed to download resume PDF", {
+        id: toastId,
+        description: err?.message || "Please try again in a moment.",
+      });
     } finally {
       setIsDownloadingDossier(false);
     }
@@ -826,8 +821,16 @@ function Profile() {
                   className="rounded-xl font-bold text-xs gap-1.5 border-primary/30 text-primary hover:bg-primary-soft h-9.5 px-3 sm:px-4 cursor-pointer shadow-xs justify-center"
                 >
                   <HiOutlineArrowDownTray className="h-4 w-4 shrink-0" />
-                  <span className="sm:hidden">Download CV</span>
-                  <span className="hidden sm:inline">Download Verified CV</span>
+                  <span className="sm:hidden">
+                    {isStudent ? "Portfolio" : effectiveKycStatus === "VERIFIED" ? "Download CV" : "Draft CV"}
+                  </span>
+                  <span className="hidden sm:inline">
+                    {isStudent
+                      ? "Export Academic Portfolio"
+                      : effectiveKycStatus === "VERIFIED"
+                      ? "Download Verified CV"
+                      : "Export Draft CV"}
+                  </span>
                 </Button>
               </div>
             </div>

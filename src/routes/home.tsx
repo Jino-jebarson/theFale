@@ -44,8 +44,14 @@ import {
   exportCandidateCv,
   updateOpenToWork,
   getCandidateViewStats,
+  type CandidateProfile,
   type CandidateViewStats,
 } from "@/lib/adapters/candidateAdapter";
+import {
+  buildCandidateDossierFromProfile,
+  downloadCandidateCvPdf,
+  getCvPreparingToastText,
+} from "@/lib/clinicalDocumentPdf";
 import { calculateClinicalMatch, type MatchCandidateInput } from "@/lib/clinicalMatchingEngine";
 
 export const Route = createFileRoute("/home")({
@@ -68,6 +74,8 @@ function Home() {
   const s = useApp();
   const [filter, setFilter] = useState<FilterTab>("All");
   const [claimedShifts, setClaimedShifts] = useState<Record<string, boolean>>({});
+  const [downloadingCv, setDownloadingCv] = useState(false);
+  const [liveCandidateProfile, setLiveCandidateProfile] = useState<CandidateProfile | null>(null);
   const [isOpenToWork, setIsOpenToWork] = useState(() =>
     s.profile["openToWork"] !== undefined ? Boolean(s.profile["openToWork"]) : true
   );
@@ -137,6 +145,7 @@ function Home() {
         }
 
         if (profileData) {
+          setLiveCandidateProfile(profileData);
           const openVal = profileData.openToWork != null ? Boolean(profileData.openToWork) : true;
           setIsOpenToWork(openVal);
           setState((prev) => ({
@@ -437,25 +446,30 @@ const handleClaimShift = async (shiftId: string, title: string, org: string) => 
 };
 
 const handleDownloadCV = async () => {
-  if (isApiEnabled) {
-    try {
-      const cvUrl = await exportCandidateCv();
-      if (cvUrl && (cvUrl.startsWith("http://") || cvUrl.startsWith("https://"))) {
-        window.open(cvUrl, "_blank");
-      }
-      toast.success(isStudent ? "Student Academic Portfolio exported!" : "Clinical CV exported!", {
-        description: "Downloaded verified medical resume in standard NABH format.",
-      });
-      return;
-    } catch (err: any) {
-      // Fallback
+  if (downloadingCv) return;
+  setDownloadingCv(true);
+  const currentKyc = String(liveCandidateProfile?.kycStatus || s.profile["kycStatus"] || "PENDING");
+  const toastId = toast.loading(getCvPreparingToastText(isStudent, currentKyc));
+  try {
+    let profileSnapshot = liveCandidateProfile;
+    if (isApiEnabled && !profileSnapshot) {
+      profileSnapshot = await exportCandidateCv();
+      setLiveCandidateProfile(profileSnapshot);
     }
+    const dossierInput = buildCandidateDossierFromProfile(profileSnapshot, s.profile, s.contact);
+    const { toastTitle, toastDescription } = downloadCandidateCvPdf(dossierInput);
+    toast.success(toastTitle, {
+      id: toastId,
+      description: toastDescription,
+    });
+  } catch (err: any) {
+    toast.error("Failed to download resume PDF", {
+      id: toastId,
+      description: err?.message || "Please try again in a moment.",
+    });
+  } finally {
+    setDownloadingCv(false);
   }
-  toast.success(isStudent ? "Student Academic Portfolio exported!" : "Clinical CV exported!", {
-    description: isStudent
-      ? "Downloaded verified student profile with college accreditation."
-      : "Downloaded verified medical resume in standard NABH format.",
-  });
 };
 
 const handleToggleOpenToWork = async () => {
@@ -629,11 +643,20 @@ return (
               <Button
                 variant="outline"
                 size="sm"
+                disabled={downloadingCv}
+                isLoading={downloadingCv}
+                loadingText="Generating..."
                 onClick={handleDownloadCV}
                 className="h-10 px-4 rounded-xl border-border/80 hover:bg-primary-soft hover:border-primary/40 font-bold text-xs shadow-none gap-2 justify-center transition-colors text-foreground w-full sm:w-auto"
               >
                 <HiOutlineArrowDownTray className="h-4 w-4 text-primary shrink-0" />
-                <span>{isStudent ? "Export Academic Portfolio" : "Export Clinical CV"}</span>
+                <span>
+                  {isStudent
+                    ? "Export Academic Portfolio"
+                    : String(liveCandidateProfile?.kycStatus || s.profile["kycStatus"] || "").toUpperCase() === "VERIFIED"
+                    ? "Download Verified CV"
+                    : "Export Draft CV"}
+                </span>
               </Button>
               <Button
                 size="sm"

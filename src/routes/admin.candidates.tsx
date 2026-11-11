@@ -194,6 +194,9 @@ function CandidateKYCAdmin() {
         });
         const rawText = res.response || res.content || "";
         const embeddedJson = extractJsonPayload(rawText);
+        if (!rawText.trim() && !embeddedJson && !res.structuredData) {
+          throw new Error("Ally returned an empty verification response.");
+        }
         const sData: Record<string, any> = {
           ...(embeddedJson || {}),
           ...(res.structuredData || {}),
@@ -202,10 +205,15 @@ function CandidateKYCAdmin() {
         const extractedAssessment = cleanMarkdownAndJsonNoise(
           typeof sData["assessment"] === "string" && sData["assessment"].trim()
             ? sData["assessment"]
+            : typeof sData["verdict"] === "string" && sData["verdict"].trim()
+            ? sData["verdict"]
             : embeddedJson
             ? ""
             : rawText
         );
+        if (!extractedAssessment) {
+          throw new Error("Ally did not return a verification assessment.");
+        }
         const extractedRecommendation = cleanMarkdownAndJsonNoise(
           typeof sData["recommendation"] === "string" ? sData["recommendation"] : ""
         );
@@ -226,23 +234,18 @@ function CandidateKYCAdmin() {
           !c.regNumber ||
           c.regNumber.toLowerCase().includes("pending");
 
-        const confidence = formatConfidencePercent(sData["confidence"], isFlagged);
+        const confidence =
+          typeof sData["confidence"] === "number" && !Number.isNaN(sData["confidence"])
+            ? formatConfidencePercent(sData["confidence"], isFlagged)
+            : null;
 
         const resultObj: AllyPreCheckResult = {
           status: isFlagged ? "FLAGGED" : "CLEAR",
-          assessment:
-            extractedAssessment ||
-            (isFlagged
-              ? `Registration #${c.regNumber || "UNSPECIFIED"} does not match statutory nomenclature standards for ${c.council}.`
-              : `Council Registration #${c.regNumber} adheres to ${c.council} statutory pattern. Candidate identity alignment verified for ${c.name}.`),
+          assessment: extractedAssessment,
           confidence,
           formatValid: !isFlagged,
           nameAligned: sData["nameAligned"] !== false && !isFlagged,
-          recommendation:
-            extractedRecommendation ||
-            (isFlagged
-              ? "Discrepancy detected. Manual compliance audit and document re-upload required."
-              : "Ally pre-check flags clear. Ready for human administrator approval."),
+          recommendation: extractedRecommendation,
           cacheKey: key,
         };
 
@@ -1306,6 +1309,10 @@ function CandidateKYCAdmin() {
                             </>
                           ) : preCheck.confidence !== null ? (
                             <span>Match Confidence: {preCheck.confidence.toFixed(1)}%</span>
+                          ) : isClear ? (
+                            <span>Ally Verified</span>
+                          ) : isFlagged ? (
+                            <span>Ally Flagged</span>
                           ) : isError ? (
                             <span>Ally Audit Unavailable</span>
                           ) : (
@@ -1337,12 +1344,12 @@ function CandidateKYCAdmin() {
                     <div className="max-h-36 sm:max-h-44 overflow-y-auto pr-1.5 space-y-2 text-xs text-foreground/90 leading-relaxed break-words [scrollbar-width:thin]">
                       <p
                         className={cn(
-                          "flex items-start gap-2 font-semibold",
+                          "flex items-start gap-2 font-medium",
                           isFlagged
                             ? "text-amber-700 dark:text-amber-300"
                             : isError
                             ? "text-rose-700 dark:text-rose-300"
-                            : "text-primary"
+                            : "text-foreground/90"
                         )}
                       >
                         <HiOutlineCheckBadge
@@ -1351,23 +1358,14 @@ function CandidateKYCAdmin() {
                             isFlagged ? "text-amber-600" : isError ? "text-rose-600" : "text-primary"
                           )}
                         />
-                        <span className="min-w-0">
-                          {isClear
-                            ? `Council Registration #${selectedCandidate.regNumber} verified against ${selectedCandidate.council} statutory format.`
-                            : isFlagged
-                            ? `Council Registration #${selectedCandidate.regNumber || "UNSPECIFIED"} has formatting discrepancies under ${selectedCandidate.council}.`
-                            : `Council Registration #${selectedCandidate.regNumber || "UNSPECIFIED"} under ${selectedCandidate.council}.`}
-                        </span>
-                      </p>
-
-                      <p className="flex items-start gap-2 text-foreground/85">
-                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
                         <span className="min-w-0">{preCheck.assessment}</span>
                       </p>
 
-                      <p className="text-[11px] italic pt-1.5 border-t border-primary/15 text-muted-foreground">
-                        * {preCheck.recommendation}
-                      </p>
+                      {preCheck.recommendation && (
+                        <p className="text-[11px] italic pt-1.5 border-t border-primary/15 text-muted-foreground">
+                          * {preCheck.recommendation}
+                        </p>
+                      )}
                     </div>
                   </div>
                 );

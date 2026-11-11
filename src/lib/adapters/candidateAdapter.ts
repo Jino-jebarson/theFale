@@ -144,16 +144,20 @@ export interface CandidateOnboardingPayload {
   studentIdCardFileName?: string;
 }
 
-/**
- * Fetch candidate profile from Spring Boot backend.
- */
-export async function getCandidateProfile(): Promise<CandidateProfile> {
-  const profile = await apiFetch<CandidateProfile>("/candidates/me/profile");
+function normalizeCandidateProfile(profile: CandidateProfile): CandidateProfile {
   return {
     ...profile,
     expectedSalaryMinRupees: paiseToRupees(profile.expectedSalaryMinPaise),
     expectedSalaryMaxRupees: paiseToRupees(profile.expectedSalaryMaxPaise),
   };
+}
+
+/**
+ * Fetch candidate profile from Spring Boot backend.
+ */
+export async function getCandidateProfile(): Promise<CandidateProfile> {
+  const profile = await apiFetch<CandidateProfile>("/candidates/me/profile");
+  return normalizeCandidateProfile(profile);
 }
 
 /**
@@ -287,10 +291,11 @@ export async function getPayoutMethod(): Promise<CandidatePayoutMethod | null> {
 }
 
 /**
- * Export standardized verified CV.
+ * Export standardized live candidate profile data for verified CV generation.
  */
-export async function exportCandidateCv(): Promise<string> {
-  return apiFetch<string>("/candidates/me/export-cv");
+export async function exportCandidateCv(): Promise<CandidateProfile> {
+  const profile = await apiFetch<CandidateProfile>("/candidates/me/export-cv");
+  return normalizeCandidateProfile(profile);
 }
 
 export interface CandidateViewStats {
