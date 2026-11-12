@@ -198,7 +198,7 @@ function SignInPage() {
   // Submit entered 6-digit OTP
   const submitOtp = async (code: string) => {
     const digits = phone.replace(/\D/g, "");
-    if (isApiEnabled) {
+    {
       setIsSubmitting(true);
       setOtpErr("");
       try {
@@ -250,8 +250,6 @@ function SignInPage() {
       } finally {
         setIsSubmitting(false);
       }
-    } else {
-      completeSignIn(`+91 ${digits}`);
     }
   };
 
@@ -267,7 +265,7 @@ function SignInPage() {
     setPhoneErr("");
     setOtpErr("");
 
-    if (isApiEnabled) {
+    {
       setIsSubmitting(true);
       try {
         await sendOtp(digits, mode === "hire" ? "ROLE_FACILITY" : "ROLE_CANDIDATE");
@@ -283,12 +281,6 @@ function SignInPage() {
       } finally {
         setIsSubmitting(false);
       }
-    } else {
-      setOtpValues(["", "", "", "", "", ""]);
-      setView("otp");
-      setTimeout(() => {
-        otpInputs.current[0]?.focus();
-      }, 60);
     }
   };
 
@@ -669,7 +661,7 @@ function SignInPage() {
                   onClick={async () => {
                     setOtpValues(["", "", "", "", "", ""]);
                     setOtpErr("");
-                    if (isApiEnabled) {
+                    {
                       const digits = phone.replace(/\D/g, "");
                       try {
                         await sendOtp(digits, mode === "hire" ? "ROLE_FACILITY" : "ROLE_CANDIDATE");

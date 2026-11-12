@@ -1,3 +1,5 @@
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -122,6 +124,7 @@ const perkOpts = [
 
 
 function Jobs() {
+  const pageLoad = usePageLoad();
   const s = useApp();
   const candidateLevel =
     s.candidateLevel ||
@@ -168,11 +171,10 @@ function Jobs() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     setLoading(true);
     Promise.all([
-      getJobs().catch(() => []),
-      getCandidateProfile().catch(() => null),
+      getJobs(),
+      getCandidateProfile(),
     ])
       .then(([jobsData, profileData]) => {
         setApiJobs(jobsData || []);
@@ -191,7 +193,7 @@ function Jobs() {
               state: profileData.state || prev.profile["state"],
               role: profileData.profession || (profileData.isStudent ? profileData.course : "Doctor"),
               specialty: profileData.specialty || "General medicine",
-              qual: profileData.qualification || "MBBS",
+              qual: profileData.qualification || "",
               college: profileData.college || prev.profile["college"],
               institution: profileData.college || prev.profile["institution"],
               council: profileData.council || prev.profile["council"],
@@ -209,14 +211,15 @@ function Jobs() {
         }
       })
       .catch((err) => {
+        pageLoad.fail(err);
         console.error(err);
         setError("Unable to load jobs right now. Please try again.");
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [pageLoad.retryKey]);
 
   const baseJobs = useMemo(() => {
-    const source = isApiEnabled ? apiJobs : jobs;
+    const source = apiJobs;
 
     const candidateInput = {
       role: String(s.profile["role"] || ""),
@@ -894,6 +897,7 @@ function Jobs() {
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       {/* ================= SEARCH HERO DOCK ================= */}
       <div className="relative sm:sticky sm:top-[var(--header-offset,4rem)] z-10 sm:z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2 sm:pt-3 pb-2 sm:pb-3 mb-3 sm:mb-6 bg-background/95 sm:backdrop-blur-md transition-all duration-300 ease-in-out">
         <div className="surface rounded-3xl border border-border/80 bg-card p-3 sm:p-4 shadow-sm">
@@ -1405,7 +1409,7 @@ function Jobs() {
                   size="sm"
                   onClick={() => {
                     setLoading(true);
-                    getJobs().then(setApiJobs).catch(console.error).finally(() => setLoading(false));
+                    getJobs().then(setApiJobs).catch(pageLoad.fail).finally(() => setLoading(false));
                   }}
                   className="mt-4 rounded-xl font-bold"
                 >

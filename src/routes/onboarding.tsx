@@ -1,3 +1,5 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { applyTheme, getEffectiveTheme } from "@/lib/theme";
@@ -49,7 +51,7 @@ import { executeAiTask } from "@/lib/adapters/aiAdapter";
 import { toast } from "sonner";
 import { Logo } from "@/components/fale/Logo";
 import { initials } from "@/components/fale/AppShell";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import { DigiLockerModal } from "@/components/fale/DigiLockerModal";
 import { ResumeParserModal } from "@/components/fale/ResumeParserModal";
 import type { ParsedResumeData } from "@/lib/resumeParser";
@@ -405,6 +407,7 @@ function CandidatePathwayChooser({
 }
 
 function Onboarding() {
+  const onboardingAction = useConfirmedAction();
   const s = useApp();
   const navigate = useNavigate();
   const search = Route.useSearch();
@@ -489,14 +492,14 @@ function Onboarding() {
     const profile = (s.profile as P) || {};
     const isFresher = profile["fresher"] === true || profile["exp"] === "Fresher";
     return {
-      mobile: s.contact.startsWith("+91") ? s.contact.replace("+91 ", "") : "",
+      mobile: s.contact.startsWith("+91") ? s.contact.replace(/^\+91\s*/, "") : "",
       email: s.contact.includes("@") && !s.contact.endsWith("@account") ? s.contact : "",
-      course: "BPT (Physiotherapy)",
-      studyYear: "3rd year",
-      grad: "2026-12",
+      course: "",
+      studyYear: "",
+      grad: "",
       proof: "college_id",
       univReg: "",
-      adult: true,
+      adult: false,
       area: (profile["area"] as string) || (profile["city"] as string) || "",
       ...profile,
       fresher: isFresher,
@@ -610,7 +613,7 @@ function Onboarding() {
 
       const reportedConfidence = typeof structured?.confidence === "number"
         ? Math.round(structured.confidence)
-        : (isFlagged ? 38 : 98);
+        : undefined;
 
       const noteText = isFlagged && clientFlaggedDummy && !aiText.includes("nomenclature")
         ? `Registration number '${num}' does not conform to ${currentCouncil} statutory nomenclature. It lacks the required council prefix (e.g. KSNC, KMC, TNC) or 14-digit NUID format.`
@@ -621,7 +624,7 @@ function Onboarding() {
           status: "not_found",
           num,
           aiNote: noteText,
-          confidence: reportedConfidence,
+          ...(reportedConfidence === undefined ? {} : { confidence: reportedConfidence }),
         });
         toast.error("Statutory Format Discrepancy Flagged", {
           description: "Lacks official council prefix. Please check certificate.",
@@ -631,10 +634,10 @@ function Onboarding() {
           status: "ok",
           num,
           aiNote: noteText,
-          confidence: reportedConfidence,
+          ...(reportedConfidence === undefined ? {} : { confidence: reportedConfidence }),
         });
-        toast.success("Ally Pre-Check Verified", {
-          description: `Validated against ${currentCouncil} standards.`,
+        toast.success("Registration format pre-check completed", {
+          description: "This is an AI format check. Council registration still requires verification.",
         });
       }
     } catch {
@@ -643,7 +646,7 @@ function Onboarding() {
         num,
         aiNote: "Registration format recorded. FALE compliance team will perform secondary audit.",
       });
-      toast.info("Registration format recorded for manual compliance review.");
+      toast.info("Automatic pre-check is unavailable. You can submit your documents for manual review.");
     } finally {
       setVerifyingReg(false);
     }
@@ -724,11 +727,11 @@ function Onboarding() {
     setState({ profile: profileToSave as unknown as Record<string, string | boolean>, docs });
   };
 
-  const handleFinishStudentOnboarding = () => {
+  const handleFinishStudentOnboarding = async () => onboardingAction.run(async () => {
     const selectedCourseObj = STUDENT_COURSES.find((c) => c.label === str("course"));
     const inferredRole = selectedCourseObj ? selectedCourseObj.role : "Student";
     const proof = str("proof") || "college_id";
-    const proofDoc = proof === "univ_reg" ? `Verified Reg · ${str("univReg")}` : docs["Proof of study"] || "college-id-sample.jpg";
+    const proofDoc = proof === "univ_reg" ? `University registration · ${str("univReg")}` : docs["Proof of study"] || "";
     const proofLabel = proof === "college_id"
       ? "College ID card"
       : proof === "bonafide"
@@ -764,7 +767,7 @@ function Onboarding() {
       "Proof of study": proofDoc,
     };
 
-    if (isApiEnabled) {
+    {
       const studentResumeName = docs["Resume / CV"] || docs["CV / Resume"] || docs["Resume"] || undefined;
       const studentResumeUrl = docDataUrls["Resume / CV"] || docDataUrls["CV / Resume"] || docDataUrls["Resume"] || studentResumeName;
       const studentIdDocName = docs["Identity proof"] || undefined;
@@ -772,7 +775,7 @@ function Onboarding() {
       const proofDocName = docs["Proof of study"];
       const proofDocUrl = docDataUrls["Proof of study"] || proofDocName;
 
-      onboardCandidate({
+      await onboardCandidate({
         fullName: str("name").trim(),
         email: str("email") || undefined,
         gender: str("gender") || undefined,
@@ -787,10 +790,10 @@ function Onboarding() {
         studyYear: str("studyYear"),
         universityRegNo: str("univReg") || undefined,
         expectedGraduationYear: parseInt(str("grad")) || new Date().getFullYear() + 2,
-        bonafideCertificateUrl: proof === "bonafide" ? (proofDocUrl || "bonafide.pdf") : undefined,
-        bonafideCertificateFileName: proof === "bonafide" ? (proofDocName || "bonafide.pdf") : undefined,
-        studentIdCardUrl: proof === "college_id" ? (proofDocUrl || "student_id.pdf") : undefined,
-        studentIdCardFileName: proof === "college_id" ? (proofDocName || "student_id.pdf") : undefined,
+        bonafideCertificateUrl: proof === "bonafide" ? (proofDocUrl) : undefined,
+        bonafideCertificateFileName: proof === "bonafide" ? (proofDocName) : undefined,
+        studentIdCardUrl: proof === "college_id" ? (proofDocUrl) : undefined,
+        studentIdCardFileName: proof === "college_id" ? (proofDocName) : undefined,
         identityProofUrl: studentIdDocUrl,
         identityProofFileName: studentIdDocName,
         resumeUrl: studentResumeUrl,
@@ -798,8 +801,6 @@ function Onboarding() {
         languages: arr("languages"),
         profilePhotoUrl: photoPreview || undefined,
         profilePhotoFileName: photoPreview ? "ProfilePhoto.jpg" : undefined,
-      }).catch((err) => {
-        console.error("API onboarding error:", err);
       });
     }
 
@@ -815,7 +816,7 @@ function Onboarding() {
     });
 
     navigate({ to: "/huddle" });
-  };
+  });
 
   const next = (e: React.FormEvent) => {
     e.preventDefault();
@@ -825,7 +826,7 @@ function Onboarding() {
           toast.error("Please enter your full name as on your college ID.");
           return;
         }
-        if (!str("area").trim()) {
+        if (!str("area").trim() && !str("city").trim()) {
           toast.error("Please enter or select where you live / current city.");
           return;
         }
@@ -860,7 +861,7 @@ function Onboarding() {
           }
         } else {
           if (!docs["Proof of study"]) {
-            toast.error(`Please upload your ${proof === "bonafide" ? "bonafide certificate" : "college ID card"} or click demo sample.`);
+            toast.error(`Please upload your ${proof === "bonafide" ? "bonafide certificate" : "college ID card"}.`);
             return;
           }
         }
@@ -917,7 +918,7 @@ function Onboarding() {
     }
   };
 
-  const handleFinishOnboarding = (uploadedPhoto?: string) => {
+  const handleFinishOnboarding = async (uploadedPhoto?: string) => onboardingAction.run(async () => {
     const finalPhoto = uploadedPhoto || photoPreview;
     const isStudent = p["cadreLevel"] === "student" || p["level"] === "student";
     const isFresher = !isStudent && (!!p["fresher"] || p["cadreLevel"] === "fresher");
@@ -943,7 +944,7 @@ function Onboarding() {
       finalDocs["Profile photo"] = finalPhoto;
     }
 
-    if (isApiEnabled && !f) {
+    if (!f) {
       let minSalary: number | undefined = undefined;
       let maxSalary: number | undefined = undefined;
       const salaryStr = str("salary");
@@ -966,7 +967,7 @@ function Onboarding() {
       const resolvedGradYear = parseInt(str("year")) || parseInt(str("grad")) || undefined;
       const resolvedUnivReg = str("univReg") || undefined;
 
-      onboardCandidate({
+      await onboardCandidate({
         fullName: str("name").trim() || "Candidate",
         email: str("email") || undefined,
         gender: str("gender") || undefined,
@@ -982,7 +983,7 @@ function Onboarding() {
         universityRegNo: resolvedUnivReg,
         profession: str("role") || "Doctor",
         primarySpecialty: p["specialty"] === "Other" && p["deptOwn"] ? p["deptOwn"] : (p["specialty"] as string) || "General",
-        qualification: p["qual"] === "Other" && p["qualOwn"] ? p["qualOwn"] : (p["qual"] as string) || "MBBS",
+        qualification: p["qual"] === "Other" && p["qualOwn"] ? p["qualOwn"] : (p["qual"] as string) || "",
         council: str("council") || undefined,
         councilRegistrationNumber: str("regNo") || undefined,
         councilState: str("councilState") || str("state") || undefined,
@@ -1010,8 +1011,6 @@ function Onboarding() {
         qualificationCertificateFileName: docs["Highest qualification certificate"] || docs["Degree certificate"] || undefined,
         identityProofUrl: docDataUrls["Identity proof"] || docs["Identity proof"] || undefined,
         identityProofFileName: docs["Identity proof"] || undefined,
-      }).catch((err) => {
-        console.error("API onboarding error:", err);
       });
     }
 
@@ -1031,9 +1030,9 @@ function Onboarding() {
       toast.success("Profile submitted for verification", { description: "Review usually takes up to 48 hours." });
       navigate({ to: f ? "/employer" : "/profile" });
     }
-  };
+  });
 
-  const handleFinishHospitalOnboarding = async (primary?: string, gallery?: string[]) => {
+  const handleFinishHospitalOnboarding = async (primary?: string, gallery?: string[]) => onboardingAction.run(async () => {
     const finalPrimary = primary || hospitalLogoPreview || (hospitalPhotos.length > 0 ? hospitalPhotos[0] : "");
     const finalPhotos = gallery || hospitalPhotos;
     const profileToSave = {
@@ -1049,12 +1048,12 @@ function Onboarding() {
       finalDocs["Facility photos"] = `${finalPhotos.length} photos uploaded`;
     }
 
-    if (isApiEnabled) {
+    {
       try {
         const rawPhone = str("mobile") || s.contact.replace(/\D/g, "");
         const cleanDigits = rawPhone.replace(/\D/g, "").slice(-10);
-        const contactPhone = cleanDigits.length === 10 ? `+91${cleanDigits}` : "+919999933333";
-        const contactEmail = str("email") || (s.contact.includes("@") ? s.contact : `admin@${str("org").toLowerCase().replace(/[^a-z0-9]/g, "") || "hospital"}.com`);
+        const contactPhone = cleanDigits.length === 10 ? `+91${cleanDigits}` : "";
+        const contactEmail = str("email") || (s.contact.includes("@") ? s.contact : "");
 
         // Build document list directly in onboarding payload (exact candidate pattern)
         const facilityDocMapping: Record<string, string> = {
@@ -1119,7 +1118,7 @@ function Onboarding() {
           documents: docsToUpload.length > 0 ? docsToUpload : undefined,
         });
       } catch (err: any) {
-        console.error("Facility API onboarding error:", err);
+        throw err;
       }
     }
 
@@ -1134,9 +1133,9 @@ function Onboarding() {
       description: "Hospital review usually takes under 24 hours.",
     });
     navigate({ to: "/employer" });
-  };
+  });
 
-  const SAMPLE_PDF_BASE64 = "data:application/pdf;base64,JVBERi0xLjQKJcOkw7zDtsOfCjEgMCBvYmoKPDwvVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlIC9QYWdlcwovS2lkcyBbMyAwIFJdCi9Db3VudCAxPj4KZW5kb2JqCjMgMCBvYmoKPDwvVHlwZSAvUGFnZQovUGFyZW50IDIgMCBSCi9NZWRpYUJveCBbMCAwIDYxMiA3OTJdCi9SZXNvdXJjZXMgPDw+Pj4+CmVuZG9iago0IDAgb2JqCjw8L0xlbmd0aCAwPj4Kc3RyZWFtCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDUKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4gCjAwMDAwMDAwNjggMDAwMDAgbiAKMDAwMDAwMDEyMSAwMDAwMCBuIAowMDAwMDAwMjEzIDAwMDAwIG4gCnRyYWlsZXIKPDwvU2l6ZSA1Ci9Sb290IDEgMCBSPj4Kc3RhcnR4cmVmCjI2MQolJUVPRg==";
+
 
   const handleApplyResumeData = (data: ParsedResumeData, fileName: string, fileDataUrl?: string) => {
     setP((prev) => {
@@ -1196,14 +1195,7 @@ function Onboarding() {
     }
   };
 
-  const fillDemo = () => {
-    const needed = neededDocs(f ? "facility" : "candidate", str("role") || "Nurse");
-    const allDocs = Object.fromEntries(needed.map((d) => [d.label, `${(d.label.split(" ")[0] ?? "document").toLowerCase()}-sample.pdf`]));
-    const allUrls = Object.fromEntries(needed.map((d) => [d.label, SAMPLE_PDF_BASE64]));
-    setDocs(allDocs);
-    setDocDataUrls(allUrls);
-    toast.success("Sample documents attached");
-  };
+
 
   const address = { address: str("address"), city: str("city"), state: str("state"), pincode: str("pincode") };
   const setAddress = (v: AddressValue) => setP((x) => ({ ...x, ...v } as P));
@@ -1482,7 +1474,7 @@ function Onboarding() {
                         >
                           {verifyingReg ? (
                             <span className="inline-flex items-center gap-1.5">
-                              <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin" />
+                              <ButtonSpinner className="h-3.5 w-3.5 animate-spin" />
                               <span>Verifying...</span>
                             </span>
                           ) : regVerification?.status === "ok" ? (
@@ -1500,7 +1492,7 @@ function Onboarding() {
                   {/* Real-time council check status banner (matching thefale_website (19).html) */}
                   {verifyingReg && (
                     <div className="flex items-center gap-2.5 rounded-xl border border-primary/20 bg-primary-soft/60 p-3 text-xs text-primary font-medium animate-in fade-in duration-200">
-                      <HiOutlineArrowPath className="h-4 w-4 animate-spin text-primary shrink-0" />
+                      <ButtonSpinner className="h-4 w-4 animate-spin text-primary shrink-0" />
                       <span>Checking with the {onlineRegisterName || selectedCouncil}…</span>
                     </div>
                   )}
@@ -1510,9 +1502,9 @@ function Onboarding() {
                       <BotMessageSquare className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                       <div className="space-y-1 min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <b className="font-bold text-foreground">Ally Pre-Check Verified • {regVerification.num}</b>
+                          <b className="font-bold text-foreground">AI format pre-check • {regVerification.num}</b>
                           <span className="rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-bold text-primary">
-                            {regVerification.confidence ?? 98}% Statutory Confidence
+                            {regVerification.confidence !== undefined ? `${regVerification.confidence}% AI confidence` : "AI confidence not provided"}
                           </span>
                         </div>
                         <p className="text-[11.5px] text-muted-foreground leading-relaxed max-h-[72px] overflow-y-auto pr-1.5 [scrollbar-width:thin] [scrollbar-color:rgba(255,90,0,0.3)_transparent]">
@@ -1544,7 +1536,7 @@ function Onboarding() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <b className="font-bold text-rose-950">Statutory Discrepancy Flagged • {regVerification.num}</b>
                           <span className="rounded-full bg-rose-600/10 border border-rose-300 px-2 py-0.5 text-[10px] font-bold text-rose-700">
-                            {regVerification.confidence ?? 38}% Statutory Confidence
+                            {regVerification.confidence !== undefined ? `${regVerification.confidence}% AI confidence` : "AI confidence not provided"}
                           </span>
                         </div>
                         <p className="text-[11.5px] text-rose-800 leading-relaxed max-h-[72px] overflow-y-auto pr-1.5 [scrollbar-width:thin] [scrollbar-color:rgba(225,29,72,0.3)_transparent]">
@@ -1904,11 +1896,7 @@ function Onboarding() {
         icon={<HiOutlineDocumentCheck className="h-4 w-4" />}
         title="Upload Verification Documents"
         subtitle="Clear copies in PDF, JPG, or PNG under 10 MB"
-        action={
-          <Button type="button" variant="outline" size="sm" onClick={fillDemo} className="rounded-lg text-xs font-semibold text-primary border-primary/30 hover:bg-primary-soft">
-            Use sample files
-          </Button>
-        }
+
       >
         <div className="grid gap-4">
           {neededDocs(f ? "facility" : "candidate", str("role")).map((d) => {
@@ -2722,7 +2710,8 @@ function Onboarding() {
           required
           icon={<HiOutlineAcademicCap />}
           options={STUDENT_COURSES.map((c) => c.label)}
-          value={str("course") || (STUDENT_COURSES[0]?.label ?? "BPT (Physiotherapy)")}
+          value={str("course")}
+          placeholder="Select your course"
           onChange={set("course")}
         />
 
@@ -2732,7 +2721,7 @@ function Onboarding() {
             required
             icon={<HiOutlineBuildingLibrary />}
             {...input("college")}
-            placeholder="e.g. Sample Allied Health College"
+            placeholder="Enter your college name"
           />
 
           <SelectField
@@ -2740,7 +2729,7 @@ function Onboarding() {
             required
             icon={<HiOutlineCalendar />}
             options={STUDENT_YEARS}
-            value={str("studyYear") || STUDENT_YEARS[0]}
+            value={str("studyYear")}
             onChange={set("studyYear")}
             placeholder="Select year of study"
           />
@@ -2833,64 +2822,32 @@ function Onboarding() {
 
         {/* Dynamic Proof Field */}
         {(str("proof") || "college_id") === "univ_reg" ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
-            <Field
-              label="Registration number"
-              required
-              icon={<HiOutlineAcademicCap />}
-              {...input("univReg")}
-              placeholder="e.g. 21BPT0456"
-            />
-            <p className="text-[11px] text-slate-500">
-              We verify your enrollment record directly with the affiliating university registrar.
-            </p>
-          </div>
+          <Field
+            label="Registration number"
+            required
+            {...input("univReg")}
+            placeholder="Enter your university registration number"
+          />
         ) : (
-          <div className="space-y-3">
-            <UploadBox
-              label="Upload a photo or PDF"
-              hint="Up to 5 MB"
-              file={docs["Proof of study"]}
-              onFile={(fileName: string | undefined, dataUrl?: string) => {
-                setDocs((prev) => {
-                  const copy = { ...prev };
-                  if (fileName) {
-                    copy["Proof of study"] = fileName;
-                  } else {
-                    delete copy["Proof of study"];
-                  }
-                  return copy;
-                });
-                setDocDataUrls((prev) => {
-                  const copy = { ...prev };
-                  if (dataUrl) {
-                    copy["Proof of study"] = dataUrl;
-                  } else {
-                    delete copy["Proof of study"];
-                  }
-                  return copy;
-                });
-              }}
-            />
-
-            {!docs["Proof of study"] && (
-              <div className="flex items-center justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const sampleName = str("proof") === "bonafide" ? "bonafide-certificate.pdf" : "college-id-card.jpg";
-                    setDocs((prev) => ({ ...prev, "Proof of study": sampleName }));
-                    setDocDataUrls((prev) => ({ ...prev, "Proof of study": SAMPLE_PDF_BASE64 }));
-                    toast.success(`Attached ${sampleName} for demo`);
-                  }}
-                  className="text-xs font-semibold text-primary hover:underline cursor-pointer inline-flex items-center gap-1"
-                >
-                  <HiOutlineSparkles className="h-3.5 w-3.5" />
-                  Use a sample file for this demo
-                </button>
-              </div>
-            )}
-          </div>
+          <UploadBox
+            label="Upload a photo or PDF"
+            hint="Up to 5 MB"
+            file={docs["Proof of study"]}
+            onFile={(fileName: string | undefined, dataUrl?: string) => {
+              setDocs((previous) => {
+                const updated = { ...previous };
+                if (fileName) updated["Proof of study"] = fileName;
+                else delete updated["Proof of study"];
+                return updated;
+              });
+              setDocDataUrls((previous) => {
+                const updated = { ...previous };
+                if (dataUrl) updated["Proof of study"] = dataUrl;
+                else delete updated["Proof of study"];
+                return updated;
+              });
+            }}
+          />
         )}
       </FormSection>
     </div>,
@@ -3113,6 +3070,7 @@ function Onboarding() {
       )}
       data-theme="light"
     >
+      <RequestError message={onboardingAction.error} />
       {/* Top Professional Sticky Header (Apple/LinkedIn inspired) */}
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
@@ -3363,6 +3321,7 @@ function Onboarding() {
               <Button
                 type="submit"
                 size="lg"
+                disabled={onboardingAction.isPending}
                 onClick={handleButtonClick}
                 className={cn(
                   "relative overflow-hidden w-full sm:w-auto group gap-2.5 rounded-xl bg-primary px-8 font-semibold text-white shadow-md shadow-primary/25 hover:shadow-lg hover:shadow-primary/35 hover:bg-primary/95 transition-all cursor-pointer select-none",

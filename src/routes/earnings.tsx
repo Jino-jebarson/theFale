@@ -1,3 +1,6 @@
+import { copyText } from "@/lib/copyText";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useMemo, useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -75,11 +78,6 @@ export const Route = createFileRoute("/earnings")({
   component: CandidateEarningsPage,
 });
 
-const mockTdsRecords = [
-  { id: "TDS-2026-Q3-01", period: "Oct 2026", gross: 24200, tdsRate: "10% (Sec 194J)", tdsAmount: 2420, netCredited: 21780, status: "Deposited to TRACES" },
-  { id: "TDS-2026-Q2-02", period: "Sep 2026", gross: 19800, tdsRate: "10% (Sec 194J)", tdsAmount: 1980, netCredited: 17820, status: "Deposited to TRACES" },
-  { id: "TDS-2026-Q2-01", period: "Aug 2026", gross: 14500, tdsRate: "10% (Sec 194J)", tdsAmount: 1450, netCredited: 13050, status: "Deposited to TRACES" },
-];
 
 function amountInWords(num: number): string {
   const a = [
@@ -120,6 +118,7 @@ function formatMobilePayoutMethod(method: string): string {
 }
 
 function CandidateEarningsPage() {
+  const pageLoad = usePageLoad();
   const store = useApp();
   const [activeTab, setActiveTab] = useState<"all" | "pending" | "tds">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -139,12 +138,11 @@ function CandidateEarningsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     setLoading(true);
     Promise.all([
-      getMyClaims().catch(() => []),
-      getCandidateProfile().catch(() => null),
-      getPayoutMethod().catch(() => null),
+      getMyClaims(),
+      getCandidateProfile(),
+      getPayoutMethod(),
     ])
       .then(([claims, profile, pmApi]) => {
         const pm = pmApi || profile?.payoutMethod;
@@ -160,19 +158,17 @@ function CandidateEarningsPage() {
                   bankName: pm.bankName,
                   ifsc: pm.ifsc,
                   accountHolderName: pm.accountHolderName || profile.name,
-                  status: (pm.status as any) || "Verified",
-                  verifiedAt: pm.verifiedAt ? "Cashfree VPA Validated" : "Cashfree Instant VPA Validated",
+                  status: (pm.status as any) || "Pending",
+                  verifiedAt: pm.verifiedAt || "Pending verification",
                 }
-              : isApiEnabled
-              ? undefined
-              : prev.candidatePayoutMethod,
+              : undefined,
             profile: {
               ...prev.profile,
-              name: profile.name || prev.profile["name"],
-              email: profile.email || prev.profile["email"],
-              phone: profile.phone || prev.profile["phone"],
-              city: profile.city || prev.profile["city"],
-              regNumber: profile.regNumber || prev.profile["regNumber"],
+              name: profile.name || prev.profile["name"] || "",
+              email: profile.email || prev.profile["email"] || "",
+              phone: profile.phone || prev.profile["phone"] || "",
+              city: profile.city || prev.profile["city"] || "",
+              regNumber: profile.regNumber || prev.profile["regNumber"] || "",
             },
           }));
 
@@ -266,81 +262,20 @@ function CandidateEarningsPage() {
         setLoadError(null);
       })
       .catch((err) => {
+        pageLoad.fail(err);
         console.error("Failed to load claims:", err);
         setLoadError("Unable to load earnings and payouts.");
         setApiPayouts([]);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [pageLoad.retryKey]);
 
   const candidateName = String(store.profile["name"] || "Clinician");
   const candidatePayoutMethod: CandidatePayoutMethod | null = store.candidatePayoutMethod || null;
   const hasLinkedPayout = Boolean(candidatePayoutMethod && (candidatePayoutMethod.upiId || candidatePayoutMethod.accountNumber));
 
-  const studentPayouts: CandidatePayoutTransaction[] = useMemo(
-    () => [
-      {
-        id: "pay-stu-101",
-        shiftId: "intern-1",
-        shiftTitle: "Clinical Physiotherapy Internship — Monthly Stipend",
-        hospitalName: "Apollo Hospitals",
-        dept: "Physiotherapy & Rehab",
-        shiftDate: "Oct 2026 Academic Rotation",
-        hours: 160,
-        rate: 112.5,
-        amount: 18000,
-        payoutDate: "Releasing 01 Nov 2026 · 10:00 AM",
-        status: "In Escrow (24h SLA)",
-        payoutMethodUsed: candidatePayoutMethod
-          ? `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName}`
-          : "Cashfree Escrow Disbursement",
-        slipRef: "FALE-STU-8812",
-      },
-      {
-        id: "pay-stu-102",
-        shiftId: "intern-1",
-        shiftTitle: "Clinical Physiotherapy Internship — Monthly Stipend",
-        hospitalName: "Apollo Hospitals",
-        dept: "Physiotherapy & Rehab",
-        shiftDate: "Sep 2026 Academic Rotation",
-        hours: 160,
-        rate: 112.5,
-        amount: 18000,
-        payoutDate: "01 Oct 2026 · 10:30 AM",
-        status: "Disbursed",
-        payoutMethodUsed: candidatePayoutMethod
-          ? `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName}`
-          : "Cashfree Escrow Disbursement",
-        utr: "CFUPI2026100199412",
-        slipRef: "FALE-STU-7901",
-      },
-      {
-        id: "pay-stu-103",
-        shiftId: "intern-acad",
-        shiftTitle: "Clinical Observership Travel & Book Allowance",
-        hospitalName: "Manipal Hospital",
-        dept: "Academic Research Desk",
-        shiftDate: "Aug 2026 Academic Rotation",
-        hours: 40,
-        rate: 125,
-        amount: 5000,
-        payoutDate: "15 Aug 2026 · 02:15 PM",
-        status: "Disbursed",
-        payoutMethodUsed: candidatePayoutMethod
-          ? `Cashfree Direct ${candidatePayoutMethod.type === "upi" ? "UPI" : "Bank"} · ${candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId : candidatePayoutMethod.bankName}`
-          : "Cashfree Escrow Disbursement",
-        utr: "CFUPI2026081512044",
-        slipRef: "FALE-STU-6520",
-      },
-    ],
-    [candidatePayoutMethod]
-  );
 
-  const payouts: UiPayoutTransaction[] = isApiEnabled
-    ? (apiPayouts || [])
-    : isStudent
-    ? studentPayouts
-    : (store.candidatePayouts as any) || [];
+  const payouts: UiPayoutTransaction[] = (apiPayouts || []);
 
   // Payout Form Modal State
   const [payoutType, setPayoutType] = useState<"upi" | "bank">(candidatePayoutMethod?.type || "upi");
@@ -368,7 +303,7 @@ function CandidateEarningsPage() {
   }, [inEscrowPayouts]);
 
   const tdsList = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return payouts
         .filter((p) => p.status === "Disbursed")
         .map((p) => {
@@ -385,13 +320,7 @@ function CandidateEarningsPage() {
           };
         });
     }
-    return isStudent
-      ? [
-          { id: "EDU-2026-Q3-01", period: "Oct 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
-          { id: "EDU-2026-Q2-02", period: "Sep 2026", gross: 18000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 18000, status: "Tax-Free Stipend" },
-          { id: "EDU-2026-Q2-01", period: "Aug 2026", gross: 5000, tdsRate: "0% (Sec 10(16))", tdsAmount: 0, netCredited: 5000, status: "Tax-Free Stipend" },
-        ]
-      : mockTdsRecords;
+
   }, [isApiEnabled, isStudent, payouts]);
 
   const filteredPayouts = useMemo(() => {
@@ -410,8 +339,8 @@ function CandidateEarningsPage() {
     );
   }, [payouts, activeTab, searchQuery]);
 
-  const handleCopy = (text: string, key: string, label: string) => {
-    navigator.clipboard.writeText(text);
+  const handleCopy = async (text: string, key: string, label: string) => {
+    if (!await copyText(text)) return;
     setCopiedKey(key);
     toast.success(`${label} copied`);
     setTimeout(() => setCopiedKey(null), 2000);
@@ -442,8 +371,7 @@ function CandidateEarningsPage() {
 
     setIsVerifying(true);
     try {
-      if (isApiEnabled) {
-        await apiSavePayoutMethod({
+        const saved = await apiSavePayoutMethod({
           methodType: payoutType,
           upiId: payoutType === "upi" ? formUpiId.trim().toLowerCase() : undefined,
           accountNumber: payoutType === "bank" ? formAccNumber.trim() : undefined,
@@ -451,7 +379,6 @@ function CandidateEarningsPage() {
           bankName: payoutType === "bank" ? formBankName.trim() : undefined,
           accountHolderName: formHolderName.trim() || candidateName,
         });
-      }
 
       const updated: CandidatePayoutMethod = {
         type: payoutType,
@@ -461,28 +388,16 @@ function CandidateEarningsPage() {
         ifsc: payoutType === "bank" ? formIfsc.toUpperCase() : undefined,
         bankName: payoutType === "bank" ? formBankName : undefined,
         accountHolderName: formHolderName || candidateName,
-        status: "Verified",
-        verifiedAt: payoutType === "upi" ? "Cashfree Instant VPA Validated" : "Cashfree ₹1 Penny Drop Validated",
+        status: saved.status === "Verified" ? "Verified" : "Pending",
+        verifiedAt: saved.verifiedAt || "",
       };
 
       setState(() => ({
         candidatePayoutMethod: updated,
       }));
 
-      const desc = payoutType === "upi"
-        ? `Cashfree Instant UPI · ${formUpiId.toLowerCase()}`
-        : `Cashfree Direct Bank · ${formBankName} (****${formAccNumber.slice(-4)})`;
-      setApiPayouts((prev) => (prev || []).map((p) => ({ ...p, payoutMethodUsed: desc })));
-
       setPayoutModalOpen(false);
-      toast.success(
-        payoutType === "upi"
-          ? "UPI ID verified via Cashfree VPA!"
-          : "Bank Account verified via Cashfree Penny Drop!",
-        {
-          description: `All future disbursements will be sent to ${payoutType === "upi" ? formUpiId : formBankName}.`,
-        }
-      );
+      toast.success("Payout details saved", { description: "Ownership verification is pending." });
     } catch (err: any) {
       toast.error("Verification failed", {
         description: err?.message || "Could not save payout destination.",
@@ -494,6 +409,7 @@ function CandidateEarningsPage() {
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="max-w-7xl mx-auto space-y-6 pb-16 min-w-0">
 
         {/* ================= PAGE HEADER (MATCHING HUDDLE) ================= */}
@@ -575,7 +491,7 @@ function CandidateEarningsPage() {
                     <HiOutlineBanknotes className="h-5 w-5" />
                   </span>
                   <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
-                    100% on-time
+                    Payout history
                   </span>
                 </div>
                 <div>
@@ -633,7 +549,7 @@ function CandidateEarningsPage() {
                     {isStudent ? "Monthly Stipend Rate" : "This Month's Earnings"}
                   </span>
                   <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
-                    ₹{Math.round(isStudent ? 18000 : totalDisbursed + inEscrowAmount).toLocaleString("en-IN")}
+                    ₹{Math.round(totalDisbursed + inEscrowAmount).toLocaleString("en-IN")}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     {isStudent ? "Accredited teaching hospital" : "Gross locum earnings"}
@@ -734,7 +650,7 @@ function CandidateEarningsPage() {
                           Active Cashfree 24-Hour Payout Destination
                         </h3>
                         <span className="text-[10px] text-primary bg-primary-soft border border-primary/20 px-2.5 py-0.5 rounded-full font-bold shrink-0">
-                          {candidatePayoutMethod.verifiedAt || "Cashfree VPA Validated"}
+                          {candidatePayoutMethod.verifiedAt || "Pending verification"}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground font-medium">
@@ -1158,7 +1074,7 @@ function CandidateEarningsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => toast.success(isStudent ? "Stipend Tax-Exemption summary emailed." : "Consolidated Form 16A summary scheduled for email delivery.")}
+                      onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
                       className="h-8 text-xs text-primary font-bold hover:bg-muted cursor-pointer shrink-0 self-start sm:self-auto"
                     >
                       {isStudent ? "Email Exemption Slip" : "Email Form 16A Summary"}
@@ -1200,7 +1116,7 @@ function CandidateEarningsPage() {
                           </span>
                           <button
                             type="button"
-                            onClick={() => toast.success(`Statement ${t.id} downloaded.`)}
+                            onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary-soft hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer border border-primary/20"
                           >
                             <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
@@ -1266,7 +1182,7 @@ function CandidateEarningsPage() {
                             <td className="py-4 px-5 whitespace-nowrap text-right">
                               <button
                                 type="button"
-                                onClick={() => toast.success(`Statement ${t.id} downloaded.`)}
+                                onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
                               >
                                 <HiOutlineArrowDownTray className="h-3.5 w-3.5" />

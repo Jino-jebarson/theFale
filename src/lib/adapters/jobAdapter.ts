@@ -1,7 +1,7 @@
 // src/lib/adapters/jobAdapter.ts
 // Job and application adapter for permanent and clinical internship postings
 
-import { apiFetch, paiseToRupees } from "@/lib/api";
+import { ApiError, apiFetch, paiseToRupees } from "@/lib/api";
 import type { Job } from "@/lib/data";
 import { setState } from "@/lib/store";
 
@@ -28,6 +28,10 @@ export interface JobPostingDto {
   status?: string;
   postedAt?: string;
   createdAt?: string;
+  shift?: string;
+  urgent?: boolean;
+  matchScore?: number;
+  perks?: string[];
   hasApplied?: boolean;
   isSaved?: boolean;
 }
@@ -58,50 +62,26 @@ export function mapJobPostingToUi(dto: JobPostingDto): Job {
       ? `₹${minRupees.toLocaleString("en-IN")} – ₹${maxRupees.toLocaleString("en-IN")}`
       : minRupees
       ? `₹${minRupees.toLocaleString("en-IN")}+`
-      : "Competitive");
-
-  const textCorpus = `${dto.title || ""} ${dto.description || ""} ${dto.department || ""} ${dto.employmentType || ""}`.toLowerCase();
-
-  // Intelligent Shift inference
-  let shift = "Day";
-  if (textCorpus.includes("night") || textCorpus.includes("nocturnist")) {
-    shift = "Night";
-  } else if (textCorpus.includes("rotat") || textCorpus.includes("24/7") || textCorpus.includes("24x7") || textCorpus.includes("emergency") || textCorpus.includes("icu")) {
-    shift = "Rotational";
-  } else if (textCorpus.includes("day") || textCorpus.includes("morning") || textCorpus.includes("opd") || textCorpus.includes("clinic") || textCorpus.includes("general duty")) {
-    shift = "Day";
-  } else {
-    const hash = (dto.id || dto.title || "").split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    shift = hash % 2 === 0 ? "Day" : "Rotational";
-  }
-
-  // Intelligent Urgency inference
-  const isUrgent =
-    textCorpus.includes("urgent") ||
-    textCorpus.includes("immediate") ||
-    textCorpus.includes("critical") ||
-    textCorpus.includes("fast-track") ||
-    textCorpus.includes("priority") ||
-    (dto.openings != null && dto.openings >= 3) ||
-    ((dto.id || dto.title || "").split("").reduce((acc, c) => acc + c.charCodeAt(0), 0) % 3 === 0);
+      : "Not specified");
 
   return {
     id: dto.id,
     title: dto.title,
+    description: dto.description || "",
     org: dto.facilityName || "Hospital Partner",
-    city: dto.workLocation || dto.city || dto.facilityCity || "Bengaluru",
+    city: dto.workLocation || dto.city || dto.facilityCity || "Not provided",
     salary: salaryStr,
     stipend: isIntern ? salaryStr : undefined,
-    exp: dto.experienceRequired || (isIntern ? "Student / Intern" : "0–2 yrs"),
-    type: dto.employmentType || (isIntern ? "Internship" : "Full-time"),
-    shift,
+    exp: dto.experienceRequired || "Not provided",
+    type: dto.employmentType || (isIntern ? "Internship" : "Not provided"),
+    shift: dto.shift || "Not provided",
     posted: formatPostedTime(dto.postedAt || dto.createdAt),
     tags: [dto.department, dto.qualificationRequired, dto.employmentType].filter(Boolean) as string[],
-    match: 95,
-    urgent: isUrgent,
+    match: dto.matchScore ?? 0,
+    urgent: dto.urgent === true,
     dept: dto.department || "General",
-    qualification: dto.qualificationRequired || "Medical Degree / Diploma",
-    perks: ["Hospital Certificate", "Health Insurance"],
+    qualification: dto.qualificationRequired || "Not provided",
+    perks: dto.perks || [],
     accredited: Boolean(dto.facilityAccreditation),
     kind: isIntern ? "internship" : "job",
     forStudents: isIntern,
@@ -116,7 +96,7 @@ export function mapJobPostingToUi(dto: JobPostingDto): Job {
  */
 export async function getJobs(city?: string): Promise<Job[]> {
   const query = city ? `?city=${encodeURIComponent(city)}` : "";
-  const dtos = await apiFetch<JobPostingDto[]>(`/jobs${query}`);
+  const dtos = await apiFetch<JobPostingDto[]>(`/jobs${query}`, { validate: Array.isArray });
   const savedIds = dtos.filter((d) => d.isSaved).map((d) => d.id);
   if (savedIds.length > 0) {
     setState((prev) => ({

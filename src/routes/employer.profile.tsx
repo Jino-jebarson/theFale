@@ -1,3 +1,6 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -115,6 +118,8 @@ interface PreviewModalState {
 }
 
 function HospitalProfileScreen() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const store = useApp();
   const profile = (store.profile || {}) as Record<string, any>;
 
@@ -127,22 +132,22 @@ function HospitalProfileScreen() {
   const [hospitalName, setHospitalName] = useState(profile["org"] || "Healthcare Facility");
   const [facilityType, setFacilityType] = useState("Multispecialty Hospital");
   const [about, setAbout] = useState("");
-  const [city, setCity] = useState(profile["city"] || "Chennai");
-  const [stateName, setStateName] = useState("Tamil Nadu");
+  const [city, setCity] = useState(profile["city"] || "");
+  const [stateName, setStateName] = useState("");
   const [pincode, setPincode] = useState("");
   const [addressLine, setAddressLine] = useState(profile["address"] || "");
-  const [beds, setBeds] = useState("50");
-  const [icuBeds, setIcuBeds] = useState("10");
+  const [beds, setBeds] = useState("");
+  const [icuBeds, setIcuBeds] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
   const [gst, setGst] = useState("");
   const [nabhNumber, setNabhNumber] = useState("");
-  const [accreditationLevel, setAccreditationLevel] = useState("NABH Full Accreditation");
+  const [accreditationLevel, setAccreditationLevel] = useState("");
   const [contactPerson, setContactPerson] = useState("Facility Administrator");
-  const [designation, setDesignation] = useState("Medical Superintendent");
+  const [designation, setDesignation] = useState("");
   const [contactPhone, setContactPhone] = useState(profile["phone"] || "");
   const [contactEmail, setContactEmail] = useState(profile["email"] || "");
   const [website, setWebsite] = useState("");
-  const [departments, setDepartments] = useState<string[]>(defaultDepartments);
+  const [departments, setDepartments] = useState<string[]>([]);
   const [newDeptInput, setNewDeptInput] = useState("");
 
   // Section Edit Modal
@@ -159,13 +164,9 @@ function HospitalProfileScreen() {
     let isMounted = true;
     async function loadData() {
       try {
-        if (!isApiEnabled) {
-          setLoading(false);
-          return;
-        }
         const [data, docs] = await Promise.all([
-          getFacilityProfile().catch(() => null),
-          getFacilityDocuments().catch(() => []),
+          getFacilityProfile(),
+          getFacilityDocuments(),
         ]);
 
         if (data && isMounted) {
@@ -199,6 +200,7 @@ function HospitalProfileScreen() {
           }
         }
       } catch (err) {
+      pageLoad.fail(err);
         console.error("Failed to load facility profile:", err);
       } finally {
         if (isMounted) setLoading(false);
@@ -208,7 +210,7 @@ function HospitalProfileScreen() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [pageLoad.retryKey]);
 
   const handleAddDepartment = () => {
     const val = newDeptInput.trim();
@@ -225,7 +227,7 @@ function HospitalProfileScreen() {
     setDepartments(departments.filter((d) => d !== depToRemove));
   };
 
-  const handleSaveSection = async () => {
+  const handleSaveSection = async () => { await pageAction.run(async () => {
     try {
       setSaving(true);
       const parsedBeds = parseInt(beds, 10) || 50;
@@ -254,7 +256,7 @@ function HospitalProfileScreen() {
         logoUrl: logoUrl || undefined,
       };
 
-      if (isApiEnabled) {
+      {
         const updated = await updateFacilityProfile(payload);
         setFacilityData(updated);
       }
@@ -282,7 +284,7 @@ function HospitalProfileScreen() {
     } finally {
       setSaving(false);
     }
-  };
+  }); };
 
   const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -303,15 +305,13 @@ function HospitalProfileScreen() {
       if (!dataUrl) return;
       setLogoUrl(dataUrl);
 
-      if (isApiEnabled) {
+      {
         try {
           await updateFacilityProfile({ logoUrl: dataUrl });
           toast.success("Hospital logo updated");
         } catch {
           toast.info("Logo updated locally");
         }
-      } else {
-        toast.success("Hospital logo updated");
       }
     };
     reader.readAsDataURL(file);
@@ -340,9 +340,10 @@ function HospitalProfileScreen() {
             fileUrl: base64Url,
           });
           toast.success(`${docTitle} uploaded successfully!`, { id: "vault-upload" });
-          const docs = await getFacilityDocuments().catch(() => []);
+          const docs = await getFacilityDocuments();
           setFacilityDocs(docs);
         } catch (err: any) {
+      pageLoad.fail(err);
           toast.error("Upload failed: " + (err?.message || "Server error"), { id: "vault-upload" });
         }
       };
@@ -357,48 +358,14 @@ function HospitalProfileScreen() {
     type: string;
     fileUrl?: string;
   }) => {
-    try {
-      const rawUrl = doc.fileUrl;
-      const isBlankSample = !rawUrl || rawUrl.length < 1000 || rawUrl.includes("JVBERi0xLjQKJcOkw7zDtsOfCjEgMCBvYmoKPDwvVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFI");
-
-      let finalPreviewUrl = rawUrl;
-      let isImg = false;
-
-        if (isBlankSample) {
-          const blob = generateFacilityDocumentBlob(
-            {
-              documentType: doc.type,
-              originalFileName: doc.fileName,
-              fileSizeBytes: 256000,
-            },
-            {
-              hospitalName,
-              city,
-              state: stateName,
-              licenseNumber,
-              nabhNumber,
-              accreditationLevel,
-              facilityType,
-            }
-          );
-          finalPreviewUrl = URL.createObjectURL(blob);
-          isImg = false;
-        } else {
-          if (rawUrl?.startsWith("data:image/") || (!rawUrl?.startsWith("data:application/pdf") && /\.(png|jpe?g|webp|gif|svg)$/i.test(doc.fileName))) {
-            isImg = true;
-          }
-        }
-
-        setPreviewDoc({
-          title: doc.title,
-          fileName: doc.fileName,
-          url: finalPreviewUrl,
-          isImage: isImg,
-        });
-      } catch (err: any) {
-        toast.error("Could not preview document: " + (err?.message || "Format error"));
-      }
-    };
+    const url = doc.fileUrl;
+    if (!url || !/^(https?:|blob:|data:application\/pdf|data:image\/|\/)/i.test(url)) {
+      toast.error("No uploaded document is available. Please upload a document first.");
+      return;
+    }
+    const isImage = url.startsWith("data:image/") || /\.(png|jpe?g|webp|gif)$/i.test(doc.fileName);
+    setPreviewDoc({ title: doc.title, fileName: doc.fileName, url, isImage });
+  };
 
     const handleCopyAddress = () => {
       const fullAddr = [addressLine, city, stateName, pincode].filter(Boolean).join(", ");
@@ -490,6 +457,7 @@ function HospitalProfileScreen() {
 
     return (
       <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
         <div className="mx-auto max-w-6xl space-y-6 pb-20 min-w-0">
           {/* ========================================================================= */}
           {/* 1. EXECUTIVE SAFFRON MESH HEADER BANNER (Exact Candidate Match)           */}
@@ -1442,7 +1410,7 @@ function HospitalProfileScreen() {
               <Button
                 type="button"
                 size="sm"
-                disabled={saving}
+                disabled={pageAction.isPending || (saving)}
                 onClick={handleSaveSection}
                 className="rounded-xl text-xs font-bold h-9 px-5 bg-primary text-white hover:bg-primary-hover shadow-xs cursor-pointer"
               >

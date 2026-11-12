@@ -1,3 +1,5 @@
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -31,7 +33,7 @@ import { MdWavingHand } from "react-icons/md";
 import { toast } from "sonner";
 import { BotMessageSquare } from "lucide-react";
 import { AdminLayout } from "@/components/fale/AdminLayout";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -74,6 +76,7 @@ export const Route = createFileRoute("/admin/")({
 });
 
 function AdminDashboard() {
+  const pageLoad = usePageLoad();
   const s = useApp();
   const navigate = useNavigate();
   const [activeQueueTab, setActiveQueueTab] = useState<"all" | "postings" | "candidates" | "facilities" | "applications" | "huddle">("all");
@@ -96,18 +99,17 @@ function AdminDashboard() {
   const [intelTab, setIntelTab] = useState<"brief" | "forecast">("brief");
 
   const loadDashboardData = async () => {
-    if (!isApiEnabled) return;
     try {
       setLoading(true);
       const [metricsRes, jobsRes, facRes, candRes, appsRes, huddleRes, shiftsRes, shiftClaimsRes] = await Promise.all([
-        getAdminDashboardMetrics().catch(() => null),
-        getPendingJobPostings("all").catch(() => []),
-        getPendingFacilityKyc("all").catch(() => []),
-        getPendingCandidateKyc("all").catch(() => []),
-        getAdminApplications("all").catch(() => []),
-        getFlaggedHuddlePosts().catch(() => []),
-        getPendingShifts().catch(() => []),
-        getPendingShiftClaims().catch(() => []),
+        getAdminDashboardMetrics(),
+        getPendingJobPostings("all"),
+        getPendingFacilityKyc("all"),
+        getPendingCandidateKyc("all"),
+        getAdminApplications("all"),
+        getFlaggedHuddlePosts(),
+        getPendingShifts(),
+        getPendingShiftClaims(),
       ]);
 
       if (metricsRes) setMetrics(metricsRes);
@@ -126,7 +128,7 @@ function AdminDashboard() {
           title: j.title,
           dept: j.department || "Clinical Medicine",
           org: j.facilityName || "Partner Hospital",
-          city: j.city || j.facilityCity || "Chennai",
+          city: j.city || j.facilityCity || "",
           compensation: comp,
           openings: j.openings || 1,
           type: "job" as const,
@@ -151,7 +153,7 @@ function AdminDashboard() {
           title: s.title,
           dept: s.department || "Clinical Medicine",
           org: s.facilityName || "Partner Hospital",
-          city: s.city || "Chennai",
+          city: s.city || "",
           compensation: comp,
           openings: s.openings || 1,
           type: "shift" as const,
@@ -173,11 +175,11 @@ function AdminDashboard() {
           id: f.id,
           name: f.facilityName || f.hospitalName || "Hospital Facility",
           type: f.facilityType || "Multispecialty Hospital",
-          city: f.city || "Chennai",
-          state: f.state || "Tamil Nadu",
+          city: f.city || "",
+          state: f.state || "",
           licenseNumber: f.licenseNumber || f.ceaRegistrationNumber || "CEA-REG-ACTIVE",
           nabhNumber: f.nabhNumber || f.nabhAccreditationNumber || "NABH-AUDIT-ACTIVE",
-          beds: f.bedCapacity || 100,
+          beds: f.bedCapacity || 0,
           contactPerson: f.administratorName || f.contactPerson || "Facility Administrator",
           contactPhone: f.phone || "+91 6380102652",
           docName: "Establishment_License_NABH.pdf",
@@ -201,7 +203,7 @@ function AdminDashboard() {
           qualification: c.qualification || "MBBS / B.Sc Nursing",
           council: c.council || "State Medical / Nursing Council",
           regNumber: c.regNumber || "REG-VERIFICATION-PENDING",
-          state: c.state || c.city || "Tamil Nadu",
+          state: c.state || c.city || "",
           docName: "Council_Registration_Certificate.pdf",
           status,
           submittedDate: c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "Recent",
@@ -221,7 +223,7 @@ function AdminDashboard() {
           id: a.id,
           candidateName: a.candidateName || "Candidate",
           candidateRole: a.candidateRole || a.department || "Clinical Professional",
-          candidateCity: a.candidateCity || a.city || "Chennai",
+          candidateCity: a.candidateCity || a.city || "",
           jobId: a.jobId,
           jobTitle: a.jobTitle || "Healthcare Opening",
           hospitalName: a.facilityName || "Partner Hospital",
@@ -251,7 +253,7 @@ function AdminDashboard() {
           id: sc.id,
           candidateName: sc.candidateName || "Healthcare Professional",
           candidateRole: sc.candidateRole || "Clinical Practitioner",
-          candidateCity: sc.candidateCity || "Chennai",
+          candidateCity: sc.candidateCity || "",
           jobId: sc.shiftId,
           jobTitle: `[Shift] ${sc.shiftTitle || "Locum Duty"}`,
           hospitalName: sc.facilityName || "Partner Hospital",
@@ -287,6 +289,7 @@ function AdminDashboard() {
         createdTime: "Recent",
       })));
     } catch (err: any) {
+      pageLoad.fail(err);
       toast.error("Failed to load admin queue", { description: err?.message });
     } finally {
       setLoading(false);
@@ -295,23 +298,13 @@ function AdminDashboard() {
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [pageLoad.retryKey]);
 
-  const pendingCandidateKYC = isApiEnabled
-    ? apiCandidates.filter((c) => c.status === "pending")
-    : s.candidateKYC.filter((c) => c.status === "pending");
-  const pendingFacilityKYC = isApiEnabled
-    ? apiFacilities.filter((f) => f.status === "pending")
-    : s.facilityKYC.filter((f) => f.status === "pending");
-  const pendingJobApprovals = isApiEnabled
-    ? apiJobs.filter((j) => j.status === "pending")
-    : s.jobApprovals.filter((j) => j.status === "pending");
-  const pendingShortlisting = isApiEnabled
-    ? apiApps.filter((a) => a.status === "pending_admin")
-    : s.adminApplications.filter((a) => a.status === "pending_admin");
-  const pendingHuddleReview = isApiEnabled
-    ? apiHuddle.filter((p) => p.status === "review" || p.status === "hidden")
-    : s.huddlePosts.filter((p) => p.status === "review" || p.status === "hidden");
+  const pendingCandidateKYC = apiCandidates.filter((c) => c.status === "pending");
+  const pendingFacilityKYC = apiFacilities.filter((f) => f.status === "pending");
+  const pendingJobApprovals = apiJobs.filter((j) => j.status === "pending");
+  const pendingShortlisting = apiApps.filter((a) => a.status === "pending_admin");
+  const pendingHuddleReview = apiHuddle.filter((p) => p.status === "review" || p.status === "hidden");
 
   const totalPending =
     pendingCandidateKYC.length +
@@ -331,9 +324,7 @@ function AdminDashboard() {
   };
 
   const locumCount = useMemo(() => {
-    return isApiEnabled
-      ? apiJobs.filter((j) => j.type === "shift").length
-      : s.jobApprovals.filter((j) => j.type === "shift").length;
+    return apiJobs.filter((j) => j.type === "shift").length;
   }, [isApiEnabled, apiJobs, s.jobApprovals]);
 
   const metroCorridors = useMemo(() => {
@@ -361,11 +352,11 @@ function AdminDashboard() {
         }));
     }
     const counts: Record<string, number> = {};
-    (isApiEnabled ? apiCandidates : s.candidateKYC).forEach((c) => {
+    (apiCandidates).forEach((c) => {
       const prof = c.profession || "Clinical Practitioner";
       counts[prof] = (counts[prof] || 0) + 1;
     });
-    (isApiEnabled ? apiJobs : s.jobApprovals).forEach((j) => {
+    (apiJobs).forEach((j) => {
       const dept = j.dept || "Medical";
       counts[dept] = (counts[dept] || 0) + 1;
     });
@@ -404,6 +395,7 @@ function AdminDashboard() {
         toast.success("Morning Operations Brief updated with live Ally");
       }
     } catch (err: any) {
+      pageLoad.fail(err);
       console.warn("Brief generation error:", err);
       toast.error("Failed to generate Ally morning brief");
     } finally {
@@ -423,9 +415,10 @@ function AdminDashboard() {
       const text = res.response || res.content || "";
       if (text) {
         setForecastText(text);
-        toast.success("7-Day Demand Surge Forecast recalculated with live Ally");
+        toast.success("Staffing Planning Outlook recalculated with live Ally");
       }
     } catch (err: any) {
+      pageLoad.fail(err);
       console.warn("Forecast generation error:", err);
       toast.error("Failed to generate Ally demand forecast");
     } finally {
@@ -434,7 +427,7 @@ function AdminDashboard() {
   };
 
   const quickApproveHuddle = async (id: string, authorName: string) => {
-    if (isApiEnabled) {
+    {
       try {
         await moderateHuddlePost(id, false);
         toast.success("Huddle Post Approved & Live!", {
@@ -442,18 +435,16 @@ function AdminDashboard() {
         });
         loadDashboardData();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Moderation failed", { description: err?.message });
       }
       return;
     }
-    approveHuddlePost(id);
-    toast.success("Huddle Post Approved & Live!", {
-      description: `Post by ${authorName} is now published to the public Huddle feed.`,
-    });
+
   };
 
   const quickRejectHuddle = async (id: string) => {
-    if (isApiEnabled) {
+    {
       try {
         await moderateHuddlePost(id, true);
         toast.info("Post Removed from Huddle", {
@@ -461,18 +452,16 @@ function AdminDashboard() {
         });
         loadDashboardData();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Moderation failed", { description: err?.message });
       }
       return;
     }
-    rejectHuddlePost(id);
-    toast.info("Post Removed from Huddle", {
-      description: "Post was permanently removed for privacy or guideline violations.",
-    });
+
   };
 
   const quickApproveJob = async (id: string, title: string) => {
-    if (isApiEnabled) {
+    {
       try {
         const item = apiJobs.find((j) => j.id === id);
         if (item?.type === "shift") {
@@ -488,22 +477,16 @@ function AdminDashboard() {
         }
         loadDashboardData();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Approval failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      jobApprovals: state.jobApprovals.map((j) =>
-        j.id === id ? { ...j, status: "approved" as const } : j
-      ),
-    }));
-    toast.success("Job Requirement Approved!", {
-      description: `"${title}" is now published and live on the Candidate Portal.`,
-    });
+
   };
 
   const quickVerifyCandidate = async (id: string, name: string) => {
-    if (isApiEnabled) {
+    {
       try {
         await reviewCandidateKyc(id, "APPROVE", "Verified state council credentials");
         toast.success("Candidate Verified!", {
@@ -511,22 +494,16 @@ function AdminDashboard() {
         });
         loadDashboardData();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Verification failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      candidateKYC: state.candidateKYC.map((c) =>
-        c.id === id ? { ...c, status: "verified" as const } : c
-      ),
-    }));
-    toast.success("Candidate Verified!", {
-      description: `${name}'s state council credentials verified and granted verified seal.`,
-    });
+
   };
 
   const quickVerifyFacility = async (id: string, name: string) => {
-    if (isApiEnabled) {
+    {
       try {
         await reviewFacilityKyc(id, "APPROVE", "Verified hospital credentials");
         toast.success("Hospital Accredited!", {
@@ -534,22 +511,16 @@ function AdminDashboard() {
         });
         loadDashboardData();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Accreditation failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      facilityKYC: state.facilityKYC.map((f) =>
-        f.id === id ? { ...f, status: "verified" as const } : f
-      ),
-    }));
-    toast.success("Hospital Accredited!", {
-      description: `${name} approved as an accredited facility on FALE.`,
-    });
+
   };
 
   const quickShortlistApp = async (id: string, candidateName: string) => {
-    if (isApiEnabled) {
+    {
       try {
         const item = apiApps.find((a) => a.id === id);
         if ((item as any)?.isShiftClaim) {
@@ -565,18 +536,12 @@ function AdminDashboard() {
         }
         loadDashboardData();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Shortlisting failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      adminApplications: state.adminApplications.map((a) =>
-        a.id === id ? { ...a, status: "shortlisted" as const } : a
-      ),
-    }));
-    toast.success("Candidate Shortlisted!", {
-      description: `${candidateName}'s application shortlisted for hospital hiring desk.`,
-    });
+
   };
 
   // Pie Chart 1 Data: Workload Distribution by Queue (Exact Facility Dashboard Palette)
@@ -853,6 +818,7 @@ function AdminDashboard() {
         </div>
       }
     >
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       {/* Top 4 Modern Enterprise KPI Cards */}
       <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4 min-w-0 w-full">
         {/* 1. Total Queue Pending */}
@@ -1243,7 +1209,7 @@ function AdminDashboard() {
                 >
                   {isGeneratingBrief ? (
                     <>
-                      <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin shrink-0" />
+                      <ButtonSpinner className="h-3.5 w-3.5 animate-spin shrink-0" />
                       <span>Synthesizing...</span>
                     </>
                   ) : (
@@ -1268,7 +1234,7 @@ function AdminDashboard() {
                 >
                   {isGeneratingForecast ? (
                     <>
-                      <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin shrink-0" />
+                      <ButtonSpinner className="h-3.5 w-3.5 animate-spin shrink-0" />
                       <span>Projecting...</span>
                     </>
                   ) : (
@@ -1396,7 +1362,7 @@ function AdminDashboard() {
                     <div className="flex items-center gap-1.5 min-w-0">
                       <BotMessageSquare className="h-4 w-4 text-primary shrink-0" />
                       <span className="text-xs font-bold text-foreground truncate">
-                        Ally 7-Day Surge Forecast
+                        Ally Staffing Outlook
                       </span>
                     </div>
                     <button

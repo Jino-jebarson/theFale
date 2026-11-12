@@ -10,6 +10,7 @@ build/
 # Cache directories
 .tanstack/
 .cache/
+.qa/
 
 # Environment files
 .env

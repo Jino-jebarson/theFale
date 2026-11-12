@@ -1,7 +1,7 @@
 // src/lib/adapters/aiAdapter.ts
 // Unified AI Adapter powering all 20 FALE AI touchpoints
 
-import { API_BASE_URL, apiFetch, getAccessToken, isApiEnabled } from "@/lib/api";
+import { API_BASE_URL, ApiError, apiFetch, getAccessToken, isApiEnabled } from "@/lib/api";
 
 export type AiTaskType =
   | "chat"
@@ -56,12 +56,13 @@ export interface AiTaskResponse {
 }
 
 export async function executeAiTask(req: AiTaskRequest): Promise<AiTaskResponse> {
-  if (isApiEnabled) {
+  {
     const res = await apiFetch<AiTaskResponse>("/ai/execute", {
       method: "POST",
+      timeoutMs: 60000,
       body: JSON.stringify(req),
     });
-    if (!res || !res.success) {
+    if (!res || !res.success || (typeof res.response !== "string" && typeof res.content !== "string") || !(res.response || res.content || "").trim()) {
       throw new Error("Live Ally AI service returned an unsuccessful response.");
     }
     const text = res.response || res.content || "";
@@ -70,10 +71,8 @@ export async function executeAiTask(req: AiTaskRequest): Promise<AiTaskResponse>
     return res;
   }
 
-  // Offline UI-only fallback when backend API mode is disabled
-  const fallback = getLocalAiFallback(req);
-  fallback.content = fallback.response;
-  return fallback;
+
+
 }
 
 // 1. Ally Chat (#1)
@@ -95,127 +94,72 @@ export async function chatWithAlly(
 }
 
 export async function streamChatWithAlly(
-  prompt: string,
-  role = "clinician",
-  language = "en",
-  metadata: Record<string, any> | undefined,
-  history: AiChatTurn[] | undefined,
+  prompt: string, role = "clinician", language = "en",
+  metadata: Record<string, any> | undefined, history: AiChatTurn[] | undefined,
   onChunk: (delta: string) => void
 ): Promise<AiTaskResponse> {
-  if (!isApiEnabled) {
-    const res = await chatWithAlly(prompt, role, language, metadata, history);
-    if (res.response) onChunk(res.response);
-    return res;
-  }
-
-  const token = getAccessToken();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Accept: "text/event-stream",
-  };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  const reqBody = {
-    task: "chat",
-    prompt,
-    role,
-    language,
-    metadata,
-    history,
-  };
-
-  let resp: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    resp = await fetch(`${API_BASE_URL}/ai/chat/stream`, {
-      method: "POST",
-      headers,
-      credentials: "include",
-      body: JSON.stringify(reqBody),
+    const headers = new Headers({ "Content-Type": "application/json", Accept: "text/event-stream" });
+    const token = getAccessToken(); if (token) headers.set("Authorization", "Bearer " + token);
+    const response = await fetch(API_BASE_URL + "/ai/chat/stream", {
+      method: "POST", headers, credentials: "include", signal: controller.signal,
+      body: JSON.stringify({ task: "chat", prompt, role, language, metadata, history }),
     });
-  } catch {
-    const fallbackRes = await chatWithAlly(prompt, role, language, metadata, history);
-    if (fallbackRes.response) onChunk(fallbackRes.response);
-    return fallbackRes;
-  }
-
-  if (!resp.ok || !resp.body) {
-    const fallbackRes = await chatWithAlly(prompt, role, language, metadata, history);
-    if (fallbackRes.response) onChunk(fallbackRes.response);
-    return fallbackRes;
-  }
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buffer = "";
-  let accumulated = "";
-  let finalResponse: AiTaskResponse | null = null;
-  let currentEvent = "message";
-
-  const processLine = (rawLine: string) => {
-    const line = rawLine.replace(/\r$/, "");
-    if (line === "") {
-      currentEvent = "message";
-      return;
+    // Only retry through the standard endpoint when streaming is unsupported or
+    // authentication must be refreshed. Never replay a provider/rate-limit failure.
+    if ([401, 404, 405, 406, 501].includes(response.status)) {
+      clearTimeout(timer);
+      await response.body?.cancel();
+      const result = await chatWithAlly(prompt, role, language, metadata, history);
+      onChunk(result.response); return result;
     }
-    if (line.startsWith("event:")) {
-      currentEvent = line.slice(6).trim();
-      return;
+    if (!response.ok) throw new ApiError("Ally could not respond. Please try again.", response.status);
+    if (!response.body || !response.headers.get("Content-Type")?.includes("text/event-stream")) {
+      throw new Error("Ally returned an unexpected stream response.");
     }
-    if (!line.startsWith("data:")) return;
-
-    const payload = line.slice(5).trim();
-    if (!payload) return;
-
-    try {
-      const parsed = JSON.parse(payload);
-      if (currentEvent === "chunk" && typeof parsed.text === "string") {
-        accumulated += parsed.text;
-        onChunk(parsed.text);
-      } else if (currentEvent === "done") {
-        finalResponse = parsed as AiTaskResponse;
-      } else if (currentEvent === "error") {
-        throw new Error(parsed.message || "Live Ally AI could not respond right now.");
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "", event = "message";
+    let result: AiTaskResponse | null = null;
+    const processLine = (raw: string) => {
+      const line = raw.replace(/\r$/, "");
+      if (!line) { event = "message"; return; }
+      if (line.startsWith("event:")) { event = line.slice(6).trim(); return; }
+      if (!line.startsWith("data:")) return;
+      let data: any;
+      try { data = JSON.parse(line.slice(5).trim()); }
+      catch { throw new Error("Ally returned malformed streaming data."); }
+      if (event === "error") throw new Error("Ally could not complete this response. Please retry.");
+      if (event === "chunk" && typeof data.text === "string") onChunk(data.text);
+      if (event === "done") {
+        if (data.success !== true || typeof data.response !== "string" || !data.response.trim()) {
+          throw new Error("Ally returned an incomplete response.");
+        }
+        result = data as AiTaskResponse;
       }
-    } catch (e) {
-      if (currentEvent === "error") throw e;
-    }
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let nlIdx = buffer.indexOf("\n");
-    while (nlIdx !== -1) {
-      processLine(buffer.slice(0, nlIdx));
-      buffer = buffer.slice(nlIdx + 1);
-      nlIdx = buffer.indexOf("\n");
-    }
-  }
-  if (buffer.trim()) {
-    processLine(buffer);
-  }
-
-  if (finalResponse) {
-    const text = finalResponse.response || finalResponse.content || accumulated;
-    finalResponse.response = text;
-    finalResponse.content = text;
-    return finalResponse;
-  }
-
-  if (accumulated.trim()) {
-    return {
-      success: true,
-      task: "chat",
-      provider: "gemini",
-      response: accumulated.trim(),
-      content: accumulated.trim(),
     };
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      buffer += decoder.decode(part.value, { stream: true });
+      let newline: number;
+      while ((newline = buffer.indexOf("\n")) >= 0) {
+        processLine(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1);
+      }
+    }
+    buffer += decoder.decode(); if (buffer.trim()) processLine(buffer);
+    if (!result) throw new Error("Ally's response was interrupted. Please retry.");
+    return result;
+  } catch (error) {
+    if (controller.signal.aborted) throw new ApiError("Ally took too long to respond. Please retry.", 408);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   }
-
-  return chatWithAlly(prompt, role, language, metadata, history);
 }
 
 export interface AllyChatHistoryItem {
@@ -230,20 +174,18 @@ export interface AllyChatHistoryItem {
 }
 
 export async function getAllyChatHistory(role?: string): Promise<AllyChatHistoryItem[]> {
-  if (!isApiEnabled) return [];
   const query = role ? `?role=${encodeURIComponent(role)}` : "";
-  const data = await apiFetch<AllyChatHistoryItem[]>(`/ai/chat/history${query}`);
+  const data = await apiFetch<AllyChatHistoryItem[]>(`/ai/chat/history${query}`, { validate: Array.isArray });
   return Array.isArray(data) ? data : [];
 }
 
 export async function clearAllyChatHistory(role?: string): Promise<void> {
-  if (!isApiEnabled) return;
   const query = role ? `?role=${encodeURIComponent(role)}` : "";
   await apiFetch<void>(`/ai/chat/history${query}`, { method: "DELETE" });
 }
 
 export async function attachTicketToAllyMessage(messageId: string, ticketId: string): Promise<void> {
-  if (!isApiEnabled || !messageId || !ticketId) return;
+  if (!messageId || !ticketId) return;
   await apiFetch<void>(`/ai/chat/messages/${encodeURIComponent(messageId)}/ticket`, {
     method: "PATCH",
     body: JSON.stringify({ ticketId }),
@@ -269,13 +211,13 @@ export async function generateProfileBioWithAi(role: string, years: number, meta
 export async function explainJobMatchWithAi(
   jobTitle: string,
   hospital: string,
-  distanceKm: number,
-  matchScore: number,
+  distanceKm: number | null | undefined,
+  matchScore: number | null | undefined,
   candidateInfo?: { role?: string; qualification?: string; city?: string; council?: string }
 ) {
-  const cRole = candidateInfo?.role || candidateInfo?.qualification || "Healthcare Professional";
-  const cCity = candidateInfo?.city || "Registered Location";
-  const prompt = `Candidate Profile: ${cRole} (${candidateInfo?.qualification || "Registered"}) located in ${cCity}. Hospital Opening: ${jobTitle} at ${hospital} (Calculated distance: ${distanceKm} km), Match Score: ${matchScore}%. Explain match reasoning.`;
+  const cRole = candidateInfo?.role || candidateInfo?.qualification || "Not provided";
+  const cCity = candidateInfo?.city || "Not provided";
+  const prompt = `Candidate Profile: ${cRole} (${candidateInfo?.qualification || "Not provided"}) located in ${cCity}. Hospital Opening: ${jobTitle} at ${hospital} (Calculated distance: ${distanceKm == null ? "Not provided" : `approximately ${distanceKm} km (estimated, not measured)`}), Match Score: ${matchScore == null ? "Not provided" : `${matchScore}% (platform estimate, not a probability)`}. Explain match reasoning.`;
 
   return executeAiTask({
     task: "why_this_job",
@@ -317,6 +259,10 @@ export async function translateChatWithAi(text: string, language: "en" | "kn" | 
 
 // 9. Post a Job via WhatsApp Message (#9)
 export interface ParsedWhatsAppShift {
+  role?: string;
+  vacancies?: number;
+  shiftTiming?: string;
+  payRate?: number;
   title?: string;
   department?: string;
   requiredCount?: number;
@@ -338,149 +284,22 @@ export interface ParsedWhatsAppShift {
  * Extracts cadres, departments, phone digits, shift slots, rates, supervisor names,
  * locations, and dates directly from raw unstructured messages without static mock fallbacks.
  */
-export function parseWhatsAppShiftLocally(rawText: string): ParsedWhatsAppShift {
-  const text = (rawText || "").trim();
-  const lower = text.toLowerCase();
-  const result: ParsedWhatsAppShift = {};
 
-  // 1. Cadre & Department
-  if (lower.includes("icu") || lower.includes("ccu") || lower.includes("critical care")) {
-    result.department = "Critical care";
-    result.title = lower.includes("doctor") || lower.includes("intensivist") || lower.includes("physician") ? "ICU Intensivist" : "ICU Staff Nurse";
-  } else if (lower.includes("casualty") || lower.includes("emergency") || lower.includes("trauma") || lower.includes("er ")) {
-    result.department = "Emergency / Trauma";
-    result.title = lower.includes("nurse") ? "Emergency Staff Nurse" : "Casualty Medical Officer";
-  } else if (lower.includes("ot ") || lower.includes("theatre") || lower.includes("scrub") || lower.includes("surgery")) {
-    result.department = "Operation Theatre";
-    result.title = lower.includes("technician") ? "OT Scrub Technician" : "OT Scrub Nurse";
-  } else if (lower.includes("dialysis") || lower.includes("renal") || lower.includes("nephro")) {
-    result.department = "Dialysis & Renal";
-    result.title = lower.includes("nurse") ? "Dialysis Staff Nurse" : "Dialysis Technician";
-  } else if (lower.includes("pediatric") || lower.includes("picu") || lower.includes("nicu")) {
-    result.department = "Pediatrics";
-    result.title = lower.includes("doctor") ? "Pediatrician" : "NICU / PICU Nurse";
-  } else if (lower.includes("nurse") || lower.includes("sister")) {
-    result.title = "Staff Nurse";
-    result.department = "General Medicine";
-  } else if (lower.includes("doctor") || lower.includes("mbbs") || lower.includes("dmo")) {
-    result.title = "Duty Medical Officer";
-    result.department = "General Medicine";
-  } else if (lower.includes("pharmacist")) {
-    result.title = "Clinical Pharmacist";
-    result.department = "Pharmacy";
-  } else if (lower.includes("physio")) {
-    result.title = "Physiotherapist";
-    result.department = "Physiotherapy";
-  }
-
-  // 2. Shift Slot
-  if (lower.includes("night")) {
-    result.shiftType = "NIGHT";
-  } else if (lower.includes("evening")) {
-    result.shiftType = "EVENING";
-  } else if (lower.includes("morning") || lower.includes("day")) {
-    result.shiftType = "MORNING";
-  }
-
-  // 3. Required staff count
-  const countMatch = text.match(/(\d+)\s*(?:nurses?|doctors?|staff|vacanc(?:y|ies)|openings?|locums?|candidates?|positions?|nos?)/i);
-  if (countMatch && countMatch[1]) {
-    result.requiredCount = parseInt(countMatch[1], 10);
-  } else {
-    const needMatch = text.match(/(?:need|require|urgent)\s+(\d+)/i);
-    if (needMatch && needMatch[1]) {
-      result.requiredCount = parseInt(needMatch[1], 10);
-    }
-  }
-
-  // 4. Rate per hour or rate per shift
-  const hrMatch = text.match(/(?:₹|rs\.?|inr)?\s*(\d{3,4})\s*(?:\/|\s*per\s*)?(?:hr|hour)/i);
-  if (hrMatch && hrMatch[1]) {
-    result.hourlyRate = parseInt(hrMatch[1], 10);
-  } else {
-    const shiftMatch = text.match(/(?:₹|rs\.?|inr)?\s*(\d{3,5})\s*(?:\/|\s*per\s*)?(?:shift|duty|day)/i);
-    if (shiftMatch && shiftMatch[1]) {
-      const shiftRate = parseInt(shiftMatch[1], 10);
-      result.ratePerShift = shiftRate;
-      result.hourlyRate = Math.round(shiftRate / 8);
-    }
-  }
-
-  // 5. Urgency
-  if (/urgent|immediate|sos|emergency|asap/i.test(text)) {
-    result.isUrgent = true;
-  }
-
-  // 6. City
-  const cities = ["Bengaluru", "Bangalore", "Chennai", "Mumbai", "Hyderabad", "Delhi", "Kolkata", "Pune", "Kochi", "Coimbatore"];
-  for (const c of cities) {
-    if (lower.includes(c.toLowerCase())) {
-      result.city = c.toLowerCase() === "bangalore" ? "Bengaluru" : c;
-      break;
-    }
-  }
-
-  // 7. Date
-  if (lower.includes("tomorrow")) {
-    const tmrw = new Date();
-    tmrw.setDate(tmrw.getDate() + 1);
-    result.date = tmrw.toISOString().split("T")[0];
-  } else if (lower.includes("today") || lower.includes("tonight")) {
-    result.date = new Date().toISOString().split("T")[0];
-  }
-
-  // 8. Supervisor Phone (10 digits starting with 6-9)
-  const phoneMatch = text.match(/(?:\+91[\-\s]?)?([6-9]\d{9})/);
-  if (phoneMatch && phoneMatch[1]) {
-    result.supervisorPhone = phoneMatch[1];
-  }
-
-  // 9. Supervisor Name
-  const supMatch = text.match(/(?:contact|call|dr\.?|sister|sr\.?|in-?charge|supdt)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
-  if (supMatch && supMatch[1]) {
-    result.supervisorName = supMatch[1].trim();
-  }
-
-  // 10. Floor / Unit / Area
-  const floorMatch = text.match(/(\d+(?:st|nd|rd|th)?\s*floor|[A-Za-z0-9\s\-]+icu|[A-Za-z0-9\s\-]+ward|[A-Za-z0-9\s\-]+block)/i);
-  if (floorMatch && floorMatch[1]) {
-    result.location = floorMatch[1].trim();
-  }
-
-  // 11. Perks
-  const perks: string[] = [];
-  if (/meal|food|canteen|lunch|dinner/i.test(text)) perks.push("Duty Meals Provided");
-  if (/room|stay|rest|accommodation/i.test(text)) perks.push("Duty Room / Rest Area");
-  if (/cab|travel|transport|pickup/i.test(text)) perks.push("Travel Allowance / Cab Provided");
-  if (perks.length > 0) result.perks = perks;
-
-  // 12. Notes (clean text as duty notes)
-  result.notes = text;
-
-  return result;
-}
 
 export async function parseWhatsAppJobMessage(rawText: string) {
-  const localFallback = parseWhatsAppShiftLocally(rawText);
-  try {
-    const res = await executeAiTask({ task: "whatsapp_post_shift", prompt: rawText });
-    if (res && res.structuredData) {
-      // Merge: backend AI structuredData augmented with local extraction
-      res.structuredData = { ...localFallback, ...res.structuredData };
-      return res;
+    const result = await executeAiTask({ task: "whatsapp_post_shift", prompt: rawText });
+    if (!result.structuredData) throw new Error("The parser returned no structured data.");
+    const data = result.structuredData;
+    for (const key of ["requiredCount", "vacancies", "hourlyRate", "ratePerShift", "payRate"]) {
+      if (data[key] != null && (typeof data[key] !== "number" || !Number.isFinite(data[key]) || data[key] < 0)) {
+        throw new Error("The parser returned an invalid numeric field.");
+      }
     }
-  } catch (err) {
-    console.warn("Cloud AI parser failed, utilizing local clinical NLP parser:", err);
+    for (const key of ["title", "role", "department", "shiftTiming", "city", "location", "date", "notes", "supervisorName", "supervisorPhone"]) {
+      if (data[key] != null && typeof data[key] !== "string") throw new Error("The parser returned an invalid text field.");
+    }
+    return { ...result, structuredData: data as ParsedWhatsAppShift };
   }
-
-  return {
-    success: true,
-    task: "whatsapp_post_shift",
-    provider: "ally-local-nlp",
-    response: "Parsed clinical duty message with Ally local engine.",
-    structuredData: localFallback,
-  };
-}
 
 // 10. Job Description Writer (#10)
 /**
@@ -598,7 +417,7 @@ export async function generateJobDescriptionWithAi(
 export async function summarizeCandidateWithAi(
   candidateName: string,
   role: string,
-  expYears: number,
+  expYears: number | undefined,
   context?: {
     appliedFor?: string;
     skills?: string[];
@@ -607,58 +426,8 @@ export async function summarizeCandidateWithAi(
     matchScore?: number;
   }
 ) {
-  const matchScore = context?.matchScore ?? 78;
-  const appliedFor = context?.appliedFor || role;
-  const skillsList = (context?.skills || []).join(", ") || "Core Clinical Protocols";
-  const verified = context?.verified ?? true;
-  const city = context?.city || "";
-
-  const prompt = `Candidate: ${candidateName}, Base Role: ${role}, Experience: ${expYears} years, Applied For: ${appliedFor}, Location: ${city || "Healthcare Facility Region"}, Verified: ${verified}, Clinical Match Score: ${matchScore}%, Skills: ${skillsList}. Generate a crisp 3-bullet clinical snapshot covering: 1. Practical Unit Competence & Shift Readiness based on skills and experience, 2. Statutory Council Standing & Verification, 3. Alignment with ${appliedFor} with Match Rationale (CRITICAL: if match score is under 70%, explicitly state statutory cadre or clinical discrepancy and supervisory review recommended; if match score >= 70%, state high operational suitability). Return exactly 3 bullets each starting with •. Strictly zero emojis, strictly zero markdown bold asterisks.`;
-
-  try {
-    const res = await executeAiTask({
-      task: "candidate_summary",
-      prompt,
-      metadata: {
-        candidateName,
-        role,
-        expYears,
-        appliedFor,
-        skills: context?.skills,
-        city,
-        verified,
-        matchScore,
-      },
-    });
-    if (res && (res.response || (res.structuredData?.highlights && res.structuredData.highlights.length > 0))) {
-      return res;
-    }
-  } catch (err) {
-    console.warn("Cloud AI candidate summary failed, generating dynamic clinical snapshot locally:", err);
+    return executeAiTask({ task: "candidate_summary", prompt: "Summarize only the supplied candidate details. Do not infer credentials, verification, skills, or suitability. State missing details as not provided.", metadata: { candidateName, role, expYears, ...(context || {}) } });
   }
-
-  // Purely dynamic local clinical synthesis with ZERO static data
-  const councilStr = verified ? "State Council Verified" : "MCI/KMC Registered";
-  const cityClause = city ? ` in ${city}` : "";
-
-  const b1 = `• Documented clinical competency in ${skillsList.toLowerCase()} with ${expYears} yrs experience as ${role}.`;
-  const b2 = `• ${councilStr} with verified statutory credentials for active hospital deployment${cityClause}.`;
-  const b3 = matchScore < 70
-    ? `• Discrepancy detected with shift requirements (${role} vs ${appliedFor}); supervisory review recommended. (Match Score: ${matchScore}%)`
-    : `• High clinical suitability for immediate roster allocation in ${appliedFor}. (Match Score: ${matchScore}%)`;
-
-  const highlights = [b1, b2, b3];
-  return {
-    success: true,
-    task: "candidate_summary",
-    provider: "ally-clinical-engine",
-    response: highlights.join("\n"),
-    structuredData: {
-      highlights,
-      suitabilityScore: matchScore,
-    },
-  };
-}
 
 // 12. Candidate Interview Questions (#12)
 export async function generateInterviewQuestionsWithAi(
@@ -666,7 +435,7 @@ export async function generateInterviewQuestionsWithAi(
   role: string,
   context?: { appliedFor?: string; skills?: string[]; exp?: string; department?: string }
 ) {
-  const prompt = `Candidate: ${candidateName}, Role: ${role}, Applied For: ${context?.appliedFor || role}, Experience: ${context?.exp || "Fresher/General"}, Key Skills: ${(context?.skills || []).join(", ") || "General clinical duties"}. Generate 4 tailored, clinical viva and scenario questions strictly focused on this position. Zero emojis.`;
+  const prompt = `Candidate: ${candidateName}, Role: ${role}, Applied For: ${context?.appliedFor || role}, Experience: ${context?.exp || "Not provided"}, Key Skills: ${(context?.skills || []).join(", ") || "Not provided"}. Generate 4 tailored, clinical viva and scenario questions strictly focused on this position. Zero emojis.`;
   return executeAiTask({
     task: "interview_questions",
     prompt,
@@ -693,109 +462,30 @@ export interface ShiftPayBenchmarkResult {
 /**
  * Calculates a dynamic clinical benchmark on the client without static constants.
  */
-export function calculateShiftBenchmarkLocally(
-  role: string,
-  dept: string,
-  shiftSlot: string,
-  city: string
-): ShiftPayBenchmarkResult {
-  const r = (role || "").toLowerCase();
-  const d = (dept || "").toLowerCase();
-  const s = (shiftSlot || "").toLowerCase();
-  const c = (city || "Bengaluru").toLowerCase();
 
-  let baseRate = 350;
-  if (r.includes("doctor") || r.includes("intensivist") || r.includes("physician") || r.includes("mbbs") || r.includes("dmo") || r.includes("consultant")) {
-    baseRate = 850;
-  } else if (d.includes("icu") || d.includes("critical") || d.includes("emergency") || d.includes("casualty") || d.includes("ot ") || d.includes("theatre") || d.includes("dialysis") || r.includes("icu") || r.includes("scrub")) {
-    baseRate = 420;
-  } else if (r.includes("nurse") || r.includes("sister")) {
-    baseRate = 320;
-  } else if (r.includes("technician") || r.includes("phlebotomist") || r.includes("lab")) {
-    baseRate = 260;
-  } else if (r.includes("physio")) {
-    baseRate = 350;
-  }
-
-  // Shift timing multiplier
-  const shiftMult = s.includes("night") ? 1.15 : 1.0;
-
-  // City tier multiplier
-  let cityMult = 1.0;
-  if (c.includes("bengaluru") || c.includes("bangalore") || c.includes("mumbai") || c.includes("delhi")) {
-    cityMult = 1.1;
-  } else if (c.includes("coimbatore") || c.includes("kochi") || c.includes("mysore") || c.includes("madurai")) {
-    cityMult = 0.9;
-  }
-
-  const recommended = Math.round((baseRate * shiftMult * cityMult) / 10) * 10;
-  const min = Math.round((recommended * 0.85) / 10) * 10;
-  const max = Math.round((recommended * 1.25) / 10) * 10;
-  const fillMins = recommended >= 500 ? 18 : 25;
-
-  const slotLabel = s.includes("night") ? "Night" : (s.includes("evening") ? "Evening" : "Day");
-  const explanation = `Rate reflects ${slotLabel} clinical duty coverage for ${role || "this role"} in ${city || "Bengaluru"} with NABH council credentialing requirements.`;
-
-  return {
-    recommendedHourlyRate: recommended,
-    minHourlyRate: min,
-    maxHourlyRate: max,
-    fillTimeEstimateMinutes: fillMins,
-    explanation,
-  };
-}
 
 export async function suggestShiftPayWithAi(
   specialty: string,
   locality: string,
   context?: { roleTitle?: string; dept?: string; slot?: string }
 ) {
-  const localCalc = calculateShiftBenchmarkLocally(
-    context?.roleTitle || specialty,
-    context?.dept || "",
-    context?.slot || specialty,
-    locality
-  );
-
-  try {
-    const res = await executeAiTask({
-      task: "shift_pay_suggest",
-      prompt: specialty,
-      metadata: { specialty, locality, ...(context || {}) },
-    });
-
-    if (res && res.structuredData) {
-      const sd = res.structuredData as Record<string, unknown>;
-      const rec = Number(sd.recommendedHourlyRate || sd.recommendedRate) || localCalc.recommendedHourlyRate;
-      const min = Number(sd.minHourlyRate || sd.marketRangeMin) || localCalc.minHourlyRate;
-      const max = Number(sd.maxHourlyRate || sd.marketRangeMax) || localCalc.maxHourlyRate;
-      const fillTime = Number(sd.fillTimeEstimateMinutes) || localCalc.fillTimeEstimateMinutes;
-      const explanation = String(sd.explanation || sd.rationale || res.response || localCalc.explanation);
-
-      return {
-        ...res,
-        benchmark: {
-          recommendedHourlyRate: rec,
-          minHourlyRate: min,
-          maxHourlyRate: max,
-          fillTimeEstimateMinutes: fillTime,
-          explanation,
-        },
-      };
+      const shifts = await apiFetch<Array<{ title: string; city?: string; facilityCity?: string; ratePerHourPaise: number }>>("/shifts", { validate: Array.isArray });
+      const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const requestedRole = normalize(context?.roleTitle || specialty);
+      const observedRates = shifts.filter(shift =>
+        requestedRole && normalize(shift.title || "").includes(requestedRole) &&
+        normalize(shift.city || shift.facilityCity || "") === normalize(locality) &&
+        Number.isFinite(shift.ratePerHourPaise) && shift.ratePerHourPaise > 0
+      ).slice(0, 30).map(shift => shift.ratePerHourPaise / 100);
+      if (!observedRates.length) throw new Error("No comparable published shift rates are available for this role and city. Enter a rate manually.");
+      const result = await executeAiTask({ task: "shift_pay_suggest", prompt: specialty, metadata: { specialty, locality, ...(context || {}), observedRates, source: "Comparable published FALE shifts; not accepted pay or a market-wide benchmark" } });
+      const data = result.structuredData || {};
+      const recommendedHourlyRate = Number(data.recommendedHourlyRate || data.recommendedRate);
+      const minHourlyRate = Number(data.minHourlyRate || data.marketRangeMin);
+      const maxHourlyRate = Number(data.maxHourlyRate || data.marketRangeMax);
+      if (![recommendedHourlyRate, minHourlyRate, maxHourlyRate].every((rate) => Number.isFinite(rate) && rate > 0) || minHourlyRate > recommendedHourlyRate || recommendedHourlyRate > maxHourlyRate || minHourlyRate < Math.min(...observedRates) || maxHourlyRate > Math.max(...observedRates)) throw new Error("No valid pay recommendation returned.");
+      return { ...result, benchmark: { recommendedHourlyRate, minHourlyRate, maxHourlyRate, fillTimeEstimateMinutes: typeof data.fillTimeEstimateMinutes === "number" && Number.isFinite(data.fillTimeEstimateMinutes) && data.fillTimeEstimateMinutes > 0 ? data.fillTimeEstimateMinutes : undefined, explanation: String(data.explanation || data.rationale || result.response || "") } };
     }
-  } catch (err) {
-    console.warn("Cloud AI rate suggest failed, utilizing local dynamic benchmark:", err);
-  }
-
-  return {
-    success: true,
-    task: "shift_pay_suggest",
-    provider: "ally-local-engine",
-    response: `Recommended market rate: ₹${localCalc.recommendedHourlyRate}/hr`,
-    structuredData: localCalc,
-    benchmark: localCalc,
-  };
-}
 
 // 14. No-Show Risk Predictor (#14)
 export async function predictNoShowRiskWithAi(
@@ -803,9 +493,9 @@ export async function predictNoShowRiskWithAi(
   shiftTime: string,
   context?: { candidateName?: string; role?: string; candidateCity?: string; hospitalCity?: string }
 ) {
-  const cCity = context?.candidateCity || "Local Metro";
-  const hCity = context?.hospitalCity || "Bengaluru";
-  const prompt = `Candidate: ${context?.candidateName || "Clinician"}, Role: ${context?.role || "Staff"}, Shift: ${shiftTime}, Candidate Profile City: ${cCity}, Hospital Shift City: ${hCity}. Note: Clinician is actively stationed in hospital city (${hCity}) for duty. Evaluate attendance no-show risk (Low Risk, Moderate Risk, or High Risk) with actionable staffing recommendation. Never penalize for permanent hometown address. Strictly zero emojis.`;
+  const cCity = context?.candidateCity || "Not provided";
+  const hCity = context?.hospitalCity || "Not provided";
+  const prompt = `Candidate: ${context?.candidateName || "Clinician"}, Role: ${context?.role || "Staff"}, Shift: ${shiftTime}, Candidate Profile City: ${cCity}, Hospital Shift City: ${hCity}. Do not assume where the candidate is currently stationed. This is a qualitative planning suggestion, not a validated attendance prediction. Evaluate attendance no-show risk (Low Risk, Moderate Risk, or High Risk) with actionable staffing recommendation. Never penalize for permanent hometown address. Strictly zero emojis.`;
   return executeAiTask({
     task: "no_show_risk",
     prompt,
@@ -850,7 +540,7 @@ export async function screenApplicationWithAi(
   hospitalName: string,
   context?: { matchScore?: number; council?: string; regNumber?: string; exp?: string; isShiftClaim?: boolean }
 ) {
-  const prompt = `Candidate: ${candidateName}, Role: ${candidateRole}, Applied For: ${jobTitle}, Hospital: ${hospitalName}, Match Score: ${context?.matchScore || 90}%, Council: ${context?.council || "State Medical/Nursing Council"}, RegNo: ${context?.regNumber || "Verified"}, Exp: ${context?.exp || "Clinical experience"}. Generate a crisp 3-sentence compliance screening verdict for the admin reviewer. Strictly zero emojis.`;
+  const prompt = `Candidate: ${candidateName}, Role: ${candidateRole}, Applied For: ${jobTitle}, Hospital: ${hospitalName}, Match Score: ${context?.matchScore ?? "Not provided"}%, Council: ${context?.council || "State Medical/Nursing Council"}, RegNo: ${context?.regNumber || "Not provided"}, Exp: ${context?.exp || "Not provided"}. Generate a crisp 3-sentence compliance screening verdict for the admin reviewer. Strictly zero emojis.`;
   return executeAiTask({
     task: "application_screen",
     prompt,
@@ -874,7 +564,7 @@ export async function auditPostingComplianceWithAi(
     salaryMax?: number;
   }
 ) {
-  const prompt = `Hospital: ${org}, Position: ${jobTitle}, Specialty: ${dept}, Type: ${context?.type || "job"}, Compensation: ${compensation}, Duty Hours: ${context?.hours || 8}h, Location: ${context?.city || "India"}, Qualification Required: ${context?.qualificationRequired || "Statutory Council Registered"}, Description: ${context?.description || "Inpatient healthcare duty"}. Audit posting compliance under State Healthcare Minimum Wage Acts and continuous duty rest caps. Output 3-sentence compliance verdict. Strictly zero emojis.`;
+  const prompt = `Hospital: ${org}, Position: ${jobTitle}, Specialty: ${dept}, Type: ${context?.type || "job"}, Compensation: ${compensation}, Duty Hours: ${context?.hours ?? "Not provided"}h, Location: ${context?.city || "India"}, Qualification Required: ${context?.qualificationRequired || "Not provided"}, Description: ${context?.description || "Not provided"}. Audit posting compliance under State Healthcare Minimum Wage Acts and continuous duty rest caps. Output 3-sentence compliance verdict. Strictly zero emojis.`;
   return executeAiTask({
     task: "posting_compliance",
     prompt,
@@ -890,7 +580,7 @@ export async function auditFacilityWithAi(
   gstin?: string,
   context?: { beds?: number; icuBeds?: number; city?: string; state?: string }
 ) {
-  const prompt = `Hospital: ${name}, License: ${licenseNumber}, Accreditation: ${accreditation}, GSTIN: ${gstin || "Pending"}, Beds: ${context?.beds || 50}, ICU Beds: ${context?.icuBeds || 10}, City: ${context?.city || "India"}, State: ${context?.state || "State"}. Audit Clinical Establishment Act statutory registry adherence, accreditation standing, and capacity balance. Output 3-sentence compliance verdict. Strictly zero emojis.`;
+  const prompt = `Hospital: ${name}, License: ${licenseNumber}, Accreditation: ${accreditation}, GSTIN: ${gstin || "Pending"}, Beds: ${context?.beds ?? "Not provided"}, ICU Beds: ${context?.icuBeds ?? "Not provided"}, City: ${context?.city || "India"}, State: ${context?.state || "State"}. Audit Clinical Establishment Act statutory registry adherence, accreditation standing, and capacity balance. Output 3-sentence compliance verdict. Strictly zero emojis.`;
   return executeAiTask({
     task: "facility_audit",
     prompt,
@@ -906,11 +596,11 @@ export async function getDailyMorningBriefWithAi(metrics?: {
   activeShifts?: number;
   disputes?: number;
 }) {
-  const pKyc = metrics?.pendingKyc ?? 4;
-  const pJobs = metrics?.pendingJobs ?? 3;
-  const pFac = metrics?.pendingFacilities ?? 2;
-  const aShifts = metrics?.activeShifts ?? 6;
-  const pDisputes = metrics?.disputes ?? 0;
+  const pKyc = metrics?.pendingKyc ?? "Not provided";
+  const pJobs = metrics?.pendingJobs ?? "Not provided";
+  const pFac = metrics?.pendingFacilities ?? "Not provided";
+  const aShifts = metrics?.activeShifts ?? "Not provided";
+  const pDisputes = metrics?.disputes ?? "Not provided";
 
   const prompt = `Current FALE Platform Metrics: Pending Candidate KYC = ${pKyc}, Pending Hospital Requirements = ${pJobs}, Pending Facility Accreditations = ${pFac}, Active Shifts = ${aShifts}, Escrow Disputes = ${pDisputes}. Write a concise, 3-bullet morning operations brief covering: 1. Statutory council verifications needing review, 2. Open hospital shift fulfillment and broadcast priority, 3. Escrow payout settlement status. Strictly zero emojis.`;
   return executeAiTask({ task: "daily_brief", prompt, metadata: metrics });
@@ -923,502 +613,9 @@ export async function getDemandForecastWithAi(context?: {
   surgeWeekendMultiplier?: number;
   activeShifts?: number;
 }) {
-  const metro = context?.metro || "Bengaluru & Chennai Metros";
-  const specialties = (context?.topSpecialties || ["ICU Critical Care Nurses", "Dialysis Technicians", "Emergency Medical Officers"]).join(", ");
-  const activeShifts = context?.activeShifts ?? 0;
-  const prompt = `Region: ${metro}, Monitored Specialties: ${specialties}, Active Locum Shifts: ${activeShifts}. Project upcoming 7-day locum shift demand, expected weekend surge percentage, and actionable deployment advice for hospital staffing coordinators. Strictly zero emojis.`;
+  const metro = context?.metro || "Not provided";
+  const specialties = context?.topSpecialties?.join(", ") || "Not provided";
+  const activeShifts = context?.activeShifts ?? "Not provided";
+  const prompt = `Region: ${metro}, Monitored Specialties: ${specialties}, Active Locum Shifts: ${activeShifts}. Give a qualitative staffing outlook. If historical bookings and cancellations are not supplied, state that a numeric 7-day forecast and surge percentage cannot be calculated. Offer actionable deployment advice for hospital staffing coordinators. Strictly zero emojis.`;
   return executeAiTask({ task: "demand_forecast", prompt, metadata: context });
 }
-
-function getLocalAiFallback(req: AiTaskRequest): AiTaskResponse {
-  if (req.task === "whatsapp_post_shift") {
-    return {
-      success: true,
-      task: "whatsapp_post_shift",
-      provider: "fale-local-engine",
-      response: "Parsed WhatsApp message successfully into shift parameters.",
-      structuredData: {
-        title: "ICU Staff Nurse (Night)",
-        department: "Intensive Care Unit (ICU)",
-        shiftType: "NIGHT",
-        requiredCount: 2,
-        startTime: "20:00",
-        endTime: "08:00",
-        date: new Date(Date.now() + 86400000).toISOString().split("T")[0],
-        ratePerShift: 3800,
-        location: "Koramangala, Bengaluru",
-      },
-      action: "fill_shift_form",
-    };
-  }
-
-  if (req.task === "why_this_job") {
-    const meta = req.metadata || {};
-    const dist = typeof meta.distance === "number" ? meta.distance : 0;
-    const hosp = meta.hospital || "the hospital";
-    const dept = meta.jobTitle || meta.specialty || "clinical";
-    const rationale = dist > 50
-      ? `This is an inter-city relocation opening (${dist} km away) at ${hosp}, matching your verified ${dept} credentials.`
-      : dist > 0
-        ? `Located ${dist} km away at ${hosp}, with a direct commute and aligned ${dept} credentials.`
-        : `Matches your verified clinical credentials and requirements for ${hosp}.`;
-
-    return {
-      success: true,
-      task: "why_this_job",
-      provider: "ally-clinical-engine",
-      response: rationale,
-    };
-  }
-
-  if (req.task === "candidate_summary") {
-    const meta = req.metadata || {};
-    const role = meta.role || "Healthcare Professional";
-    const appliedFor = meta.appliedFor || role;
-    const skills = Array.isArray(meta.skills) && meta.skills.length > 0 ? meta.skills.join(", ") : "Bedside monitoring, infection control";
-    const city = meta.city || "Chennai";
-    const exp = meta.expYears ? `${meta.expYears} yrs` : "Verified Clinician";
-    const contextStr = (String(appliedFor) + " " + String(role) + " " + String(skills)).toLowerCase();
-
-    let competenceBullet: string;
-    if (contextStr.includes("dialysis") || contextStr.includes("renal") || contextStr.includes("hemodialysis")) {
-      competenceBullet = `Trained in Hemodialysis machine priming, AV fistula cannulation, and dialyzer clearance monitoring with ${exp} clinical experience.`;
-    } else if (contextStr.includes("scrub") || contextStr.includes("ot") || contextStr.includes("theatre") || contextStr.includes("surgical")) {
-      competenceBullet = `Experienced in sterile surgical scrubbing, instrumentation handover, and operating theatre sterility workflows with ${exp} clinical background.`;
-    } else if (contextStr.includes("emergency") || contextStr.includes("trauma") || contextStr.includes("casualty") || contextStr.includes("er")) {
-      competenceBullet = `Competent in acute triage, emergency resuscitation, and rapid casualty stabilization under standard NABH trauma guidelines.`;
-    } else {
-      competenceBullet = `Qualified ${role} with documented competence in ${skills} and ${exp} clinical background.`;
-    }
-
-    const bullets = [
-      `• ${competenceBullet}`,
-      `• Council registered and verified for active clinical deployment in ${city}.`,
-      `• Ready for immediate duty dispatch for ${appliedFor} with verified shift telemetry.`,
-    ];
-
-    return {
-      success: true,
-      task: "candidate_summary",
-      provider: "fale-local-engine",
-      response: bullets.join("\n"),
-      structuredData: { highlights: bullets },
-    };
-  }
-
-  if (req.task === "interview_questions") {
-    const meta = req.metadata || {};
-    const pStr = ((req.prompt || "") + " " + JSON.stringify(meta)).toLowerCase();
-    let qs: string[];
-    if (pStr.includes("dialysis") || pStr.includes("renal") || pStr.includes("hemodialysis")) {
-      qs = [
-        "How do you inspect and assess an AV fistula or graft before initiating hemodialysis cannulation?",
-        "What immediate emergency protocol do you execute if a patient experiences acute intradialytic hypotension?",
-        "Walk us through your dialyzer priming and heparinization protocol under NABH infection control standards.",
-        "How do you handle severe muscle cramping and dialyzer membrane hypersensitivity reactions mid-session?",
-      ];
-    } else if (pStr.includes("scrub") || pStr.includes("ot") || pStr.includes("theatre") || pStr.includes("surgical")) {
-      qs = [
-        "Can you walk us through the surgical hand scrub and sterile gowning workflow according to NABH guidelines?",
-        "What is your exact protocol when a surgical needle or sponge count is unaccounted for during closure?",
-        "How do you manage rapid sterile field re-establishment after an accidental contamination event during surgery?",
-        "Explain the sterile instrument turnover and chemical indicator verification between high-acuity surgeries.",
-      ];
-    } else if (pStr.includes("emergency") || pStr.includes("casualty") || pStr.includes("trauma") || pStr.includes("er")) {
-      qs = [
-        "How do you prioritize triage in the Emergency Department when two critical poly-trauma patients arrive simultaneously?",
-        "Walk us through the 10-minute acute chest pain and STEMI protocol from arrival to cath lab alert.",
-        "What is your standard protocol for managing acute anaphylactic shock in casualty before physician arrival?",
-        "How do you maintain documentation and chain-of-custody for Medico-Legal Cases in emergency?",
-      ];
-    } else {
-      qs = [
-        "How do you handle sudden clinical deterioration and respiratory arrest under emergency triage?",
-        "Can you walk us through your procedure for high-alert medication titration under physician orders?",
-        "How do you ensure strict adherence to infection control bundles and statutory NABH protocols?",
-        "Explain your communication protocol when coordinating with the intensivist team during shift handovers?",
-      ];
-    }
-    return {
-      success: true,
-      task: "interview_questions",
-      provider: "fale-local-engine",
-      response: qs.map((q, i) => `${i + 1}. ${q}`).join("\n"),
-      structuredData: { questions: qs },
-    };
-  }
-
-  if (req.task === "no_show_risk") {
-    const meta = req.metadata || {};
-    const distance = typeof meta.distance === "number" ? meta.distance : 3.8;
-    const shiftTime = meta.shiftTime || "Locum Duty";
-    const candidateCity = meta.candidateCity || "";
-    const hospitalCity = meta.hospitalCity || "Bengaluru";
-    const isInterCityHometown = Boolean(candidateCity && hospitalCity && candidateCity.toLowerCase() !== hospitalCity.toLowerCase());
-
-    let riskLevel: "Low" | "Moderate" | "High";
-    let recommendation: string;
-    let evaluationText: string;
-
-    if (isInterCityHometown) {
-      riskLevel = "Low";
-      recommendation = "Verify local accommodation/PG address upon shift reporting; approve for roster.";
-      evaluationText = `Low Risk: Clinician profile lists permanent hometown (${candidateCity}), but active shift claim confirms local metro deployment in ${hospitalCity} (~3.8 km estimated local commute). Action: ${recommendation}`;
-    } else if (distance > 20) {
-      riskLevel = "High";
-      recommendation = "Broadcast 1 standby backup clinician on FALE Escrow.";
-      evaluationText = `High Risk: Clinician commute exceeds ${distance} km during ${shiftTime} with cross-city traffic friction. Action: ${recommendation}`;
-    } else if (distance > 8) {
-      riskLevel = "Moderate";
-      recommendation = "Dispatch automated SMS duty reminder 2 hours prior to shift commencement.";
-      evaluationText = `Moderate Risk: Clinician is within a ${distance} km travel corridor for ${shiftTime}. Action: ${recommendation}`;
-    } else {
-      riskLevel = "Low";
-      recommendation = "Proceed with immediate roster dispatch; zero standby required.";
-      evaluationText = `Low Risk: Clinician is located locally within ${distance} km of the facility with verified historical shift punctuality. Action: ${recommendation}`;
-    }
-
-    return {
-      success: true,
-      task: "no_show_risk",
-      provider: "fale-local-engine",
-      response: evaluationText,
-      structuredData: {
-        riskLevel,
-        distanceKm: isInterCityHometown ? 3.8 : distance,
-        recommendation,
-      },
-    };
-  }
-
-  if (req.task === "kyc_precheck" || req.task === "doc_verify") {
-    const meta = req.metadata || {};
-    const name = meta.candidateName || req.prompt || "Candidate";
-    const regNo = (meta.regNumber || "").trim();
-    const council = meta.council || "State Medical/Nursing Council";
-    const role = meta.role || "Clinical Practitioner";
-
-    // Detect dummy or invalid registration numbers
-    const isDummy =
-      !regNo ||
-      regNo.toLowerCase().includes("pending") ||
-      regNo.toLowerCase().includes("test") ||
-      /^(.)\1+$/.test(regNo) ||
-      regNo === "12345" ||
-      regNo.length < 4;
-
-    const isFlagged = isDummy;
-    const confidence = isFlagged ? 42.0 : 99.2;
-    const status = isFlagged ? "FLAGGED" : "CLEAR";
-
-    let assessment: string;
-    if (isFlagged) {
-      assessment = `Registration #${regNo || "UNSPECIFIED"} does not match statutory nomenclature standards for ${council}. Discrepancy detected during pre-check; manual audit and certificate re-upload required before approval.`;
-    } else {
-      assessment = `Council Registration #${regNo} adheres to ${council} statutory nomenclature standards. Candidate identity alignment verified for ${name} (${role}) with clear standing for immediate hospital duty.`;
-    }
-
-    return {
-      success: true,
-      task: req.task,
-      provider: "fale-clinical-engine",
-      response: assessment,
-      structuredData: {
-        status,
-        confidence,
-        formatValid: !isFlagged,
-        nameAligned: !isFlagged,
-        council,
-        regNumber: regNo,
-        recommendation: isFlagged
-          ? "Discrepancy detected. Request clear statutory council certificate re-upload."
-          : "Pre-check passed. Clear council seal and registration number detected. Ready for human admin signoff.",
-      },
-    };
-  }
-
-  if (req.task === "huddle_moderate") {
-    const text = (req.prompt || "").toLowerCase();
-    const hasPhoneOrRecruiter = /(?:\+91|whatsapp|phone|call me|contact me|telegram|dm me|hiring alert)/i.test(text);
-    const hasPhi = /\b(?:uhid|mrd|ipd|opd|patient name|bed\s*#?\d+)\b/i.test(text);
-    const hasHarassment = /(fake|scam|fraud|cheat|stupid|idiot)/i.test(text);
-
-    const isFlagged = hasPhoneOrRecruiter || hasPhi || hasHarassment;
-    let category = "Clinical Knowledge Discussion";
-    let rationale = "Clean clinical knowledge exchange adhering to FALE clinical forum governance.";
-
-    if (hasPhi) {
-      category = "Patient Privacy Risk: PHI / Identifier pattern detected";
-      rationale = "Potential patient identification numbers or un-redacted clinical identifiers detected.";
-    } else if (hasPhoneOrRecruiter) {
-      category = "Commercial Recruiter / Off-Platform Solicitation";
-      rationale = "Direct phone number, WhatsApp contact solicitation, or off-platform recruitment detected.";
-    } else if (hasHarassment) {
-      category = "Community Policy Infraction: Hostile language detected";
-      rationale = "Hostile language or non-professional phrasing detected in peer clinical forum.";
-    }
-
-    const responseText = isFlagged
-      ? `FLAGGED: ${category}. Rationale: ${rationale}`
-      : "SAFE: Clean clinical post adhering to community safety guidelines.";
-
-    return {
-      success: true,
-      task: "huddle_moderate",
-      provider: "fale-clinical-engine",
-      response: responseText,
-      structuredData: {
-        isApproved: !isFlagged,
-        status: isFlagged ? "FLAGGED" : "SAFE",
-        category,
-        rationale,
-      },
-    };
-  }
-
-  if (req.task === "ally_handoff") {
-    const topic = req.prompt || "Support Inquiry";
-    const draft = `Hello, this is FALE Clinical Operations Support regarding your inquiry on "${topic}". We have escalated this to the duty coordinator and verified your details. Your issue is being prioritized and we will keep you updated. Please reply here if you have any questions!`;
-    return {
-      success: true,
-      task: "ally_handoff",
-      provider: "fale-clinical-engine",
-      response: draft,
-      content: draft,
-      structuredData: {
-        ticketSummary: topic,
-        whatsappDraft: draft,
-      },
-    };
-  }
-
-  if (req.task === "application_screen") {
-    const name = req.metadata?.candidateName || "Candidate";
-    const role = req.metadata?.candidateRole || "Clinical Staff";
-    const title = req.metadata?.jobTitle || "Duty Shift";
-    const hospital = req.metadata?.hospitalName || "Partner Hospital";
-    const council = req.metadata?.council || "State Medical/Nursing Council";
-    const score = req.metadata?.matchScore || 92;
-
-    const verdict = `${name} demonstrates verified qualifications for ${role} with clinical competencies aligned with ${title} at ${hospital}. Statutory registry records with ${council} are active and in good standing with zero recorded infractions. Recommended for immediate administrative shortlisting and direct dispatch to the facility.`;
-
-    return {
-      success: true,
-      task: "application_screen",
-      provider: "fale-clinical-engine",
-      response: verdict,
-      content: verdict,
-      structuredData: {
-        candidateName: name,
-        suitabilityScore: score,
-        isRecommended: score >= 70,
-        status: score >= 70 ? "RECOMMENDED" : "FURTHER_REVIEW",
-        verdict,
-      },
-    };
-  }
-
-  if (req.task === "posting_compliance") {
-    const title = req.metadata?.jobTitle || "Clinical Requirement";
-    const org = req.metadata?.org || "Hospital Facility";
-    const comp = req.metadata?.compensation || "Market Rate";
-    const hours = Number(req.metadata?.hours) || 8;
-    const isHoursExceeded = hours > 12;
-    const isCompliant = !isHoursExceeded;
-
-    const wageSentence = `Remuneration package of ${comp} at ${org} complies with prevailing state clinical wage floor guidelines.`;
-    const hoursSentence = isHoursExceeded
-      ? `Duty duration of ${hours} hours violates the statutory maximum 12-hour continuous shift cap without mandatory clinical handover rest.`
-      : `Continuous duty duration of ${hours} hours adheres to occupational safety limits and mandated rest cycle standards.`;
-    const recSentence = isCompliant
-      ? `Posting fully satisfies Clinical Establishments Act and regulatory staffing criteria; approved for candidate broadcast.`
-      : `Posting flagged for duty duration safety infraction; employer roster adjustment required prior to publishing.`;
-
-    const verdict = `${wageSentence} ${hoursSentence} ${recSentence}`;
-
-    return {
-      success: true,
-      task: "posting_compliance",
-      provider: "fale-clinical-engine",
-      response: verdict,
-      content: verdict,
-      structuredData: {
-        isCompliant,
-        status: isCompliant ? "COMPLIANT" : "FLAGGED",
-        wageSentence,
-        hoursSentence,
-        recSentence,
-        verdict,
-      },
-    };
-  }
-
-  if (req.task === "facility_audit") {
-    const name = req.metadata?.name || "Hospital Facility";
-    const lic = req.metadata?.licenseNumber || "";
-    const acc = req.metadata?.accreditation || "State Registered";
-    const city = req.metadata?.city || "Metro City";
-    const beds = Number(req.metadata?.beds) || 100;
-    const icu = Number(req.metadata?.icuBeds) || 15;
-
-    const isFlagged = !lic || lic.toLowerCase().includes("pending") || lic.length < 5;
-    const isVerified = !isFlagged;
-
-    const licenseSentence = isFlagged
-      ? `Clinical Establishment Act license (#${lic || "UNSPECIFIED"}) displays pending registration nomenclature under the State Health Directorate.`
-      : `Clinical Establishment Act license #${lic} conforms to state statutory healthcare establishment registry patterns for ${city}.`;
-    const infraSentence = `Facility operates ${beds} inpatient beds with ${icu} designated ICU beds maintaining a compliant clinical critical-care capacity ratio under ${acc} standards.`;
-    const recSentence = isVerified
-      ? `Hospital institutional credentials verified active; approved for FALE clinical shifts and locum doctor deployments.`
-      : `Institutional accreditation flagged for certificate inspection; mandatory state license upload required.`;
-
-    const verdict = `${licenseSentence} ${infraSentence} ${recSentence}`;
-
-    return {
-      success: true,
-      task: "facility_audit",
-      provider: "fale-clinical-engine",
-      response: verdict,
-      content: verdict,
-      structuredData: {
-        isVerified,
-        status: isVerified ? "VERIFIED" : "FLAGGED",
-        licenseValid: !isFlagged,
-        accreditationStanding: acc,
-        confidence: isVerified ? 98.4 : 45.0,
-        licenseSentence,
-        infraSentence,
-        recSentence,
-        verdict,
-      },
-    };
-  }
-
-  if (req.task === "daily_brief") {
-    const pKyc = req.metadata?.pendingKyc ?? 0;
-    const pJobs = req.metadata?.pendingJobs ?? 0;
-    const pFac = req.metadata?.pendingFacilities ?? 0;
-    const pDisputes = req.metadata?.disputes ?? 0;
-    const brief = `• ${pKyc} candidate statutory KYC submissions awaiting state council verification check.\n• ${pJobs} hospital job and locum shift approvals pending compliance audit across partner facilities.\n• ${pDisputes} active escrow disputes reported; 100% automated same-day payout settlement rate maintained.`;
-    return {
-      success: true,
-      task: "daily_brief",
-      provider: "fale-clinical-engine",
-      response: brief,
-      content: brief,
-    };
-  }
-
-  if (req.task === "demand_forecast") {
-    const specs = req.metadata?.topSpecialties && req.metadata.topSpecialties.length > 0
-      ? req.metadata.topSpecialties.slice(0, 2).join(" and ")
-      : "Emergency Specialists and Duty Clinicians";
-    const metro = req.metadata?.metro || "Regional Healthcare Hubs";
-    const shiftsCount = req.metadata?.activeShifts ?? 0;
-    const shiftText = shiftsCount > 0 ? `${shiftsCount} locum shift broadcasts active` : "upcoming shift deployments queued";
-    const multiplier = req.metadata?.surgeWeekendMultiplier
-      ? Math.round((req.metadata.surgeWeekendMultiplier - 1) * 100)
-      : 30;
-    const forecast = `Anticipating a ${multiplier}% weekend surge in ${specs} across ${metro}. ${shiftText} with automated escrow settlement and verified compliance.`;
-    return {
-      success: true,
-      task: "demand_forecast",
-      provider: "fale-clinical-engine",
-      response: forecast,
-      content: forecast,
-    };
-  }
-
-  const promptLower = (req.prompt || "").toLowerCase();
-  const dateOptions: Intl.DateTimeFormatOptions = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
-  const today = new Date();
-  const tomorrow = new Date();
-  tomorrow.setDate(today.getDate() + 1);
-
-  if (promptLower.includes("tomorrow")) {
-    const roleHelp = req.role === "hospital"
-      ? "facility staffing, shift rosters, or escrow top-ups"
-      : req.role === "student"
-        ? "internship shifts, clinical viva prep, or study modules"
-        : req.role === "admin"
-          ? "compliance audit queues or pending hospital verifications"
-          : "locum shifts, KYC credentials, or guaranteed escrow payouts";
-
-    return {
-      success: true,
-      task: req.task,
-      provider: "fale-calendar-engine",
-      response: `Hello! Tomorrow is ${tomorrow.toLocaleDateString("en-US", dateOptions)}. How can I assist you with your ${roleHelp} today?`,
-      suggestions: req.role === "hospital"
-        ? ["Post Urgent ICU Shift", "Search Duty Doctors", "Top up Escrow Wallet", "Review Shortlisted Applicants"]
-        : req.role === "student"
-          ? ["Find Internship Shifts", "Council Exam Prep", "Connect with Clinical Mentors", "Verify My Student ID"]
-          : req.role === "admin"
-            ? ["Review Candidate KYC", "Audit Hospital Verification", "Check Job Approvals", "Open Support Tickets"]
-            : ["Set me Open to Work", "Find Night ICU Shifts", "How Escrow Payouts Work", "Handover to Support Desk"],
-    };
-  }
-
-  if (promptLower.includes("today") || (promptLower.includes("what") && promptLower.includes("day")) || promptLower.includes("date") || promptLower.includes("year")) {
-    const roleHelp = req.role === "hospital"
-      ? "hospital locum staffing or clinician sourcing"
-      : req.role === "student"
-        ? "student internship shifts or council prep"
-        : req.role === "admin"
-          ? "operations queues or support tickets"
-          : "clinical duty shifts, KYC status, or escrow earnings";
-
-    return {
-      success: true,
-      task: req.task,
-      provider: "fale-calendar-engine",
-      response: `Today is ${today.toLocaleDateString("en-US", dateOptions)}. How can I assist you with ${roleHelp} today?`,
-      suggestions: req.role === "hospital"
-        ? ["Post Urgent ICU Shift", "Search Duty Doctors", "Top up Escrow Wallet", "Review Shortlisted Applicants"]
-        : req.role === "student"
-          ? ["Find Internship Shifts", "Council Exam Prep", "Connect with Clinical Mentors", "Verify My Student ID"]
-          : req.role === "admin"
-            ? ["Review Candidate KYC", "Audit Hospital Verification", "Check Job Approvals", "Open Support Tickets"]
-            : ["Set me Open to Work", "Find Night ICU Shifts", "How Escrow Payouts Work", "Handover to Support Desk"],
-    };
-  }
-
-  if (req.role === "hospital") {
-    return {
-      success: true,
-      task: req.task,
-      provider: "fale-hospital-engine",
-      response: "Hello! I am Ally, your Hospital Staffing Copilot. How can I assist you with posting urgent shifts, sourcing duty clinicians, or escrow wallet management today?",
-      suggestions: ["Post Urgent ICU Shift", "Search Duty Doctors", "Top up Escrow Wallet", "Review Shortlisted Applicants"],
-    };
-  }
-
-  if (req.role === "admin") {
-    return {
-      success: true,
-      task: req.task,
-      provider: "fale-admin-engine",
-      response: "Hello Admin! I am Ally, your FALE Operations Copilot. How can I assist you with pending KYC approvals, facility verifications, or support escalations today?",
-      suggestions: ["Review Candidate KYC", "Audit Hospital Verification", "Check Job Approvals", "Open Support Tickets"],
-    };
-  }
-
-  if (req.role === "student") {
-    return {
-      success: true,
-      task: req.task,
-      provider: "fale-student-engine",
-      response: "Hello! I am Ally, your FALE study and internship copilot. How can I assist you with clinical internship shifts, council exam preparation, or mentor huddles today?",
-      suggestions: ["Find Internship Shifts", "Council Exam Prep", "Connect with Clinical Mentors", "Verify My Student ID"],
-    };
-  }
-
-  return {
-    success: true,
-    task: req.task,
-    provider: "fale-local-engine",
-    response: "Hello, I am Ally, your FALE clinical copilot. How can I assist you with locum shifts, KYC council credentials, or escrow payouts today?",
-    suggestions: ["Set me Open to Work", "Find Night ICU Shifts", "How Escrow Payouts Work", "Handover to Support Desk"],
-  };
-}
-

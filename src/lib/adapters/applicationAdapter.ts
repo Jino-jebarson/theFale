@@ -101,7 +101,7 @@ export function mapApplicationStatus(status: string): string {
  * Fetch candidate's active and historical job applications.
  */
 export async function getMyApplications(): Promise<UiApplicationItem[]> {
-  const dtos = await apiFetch<JobApplicationDto[]>("/applications/me");
+  const dtos = await apiFetch<JobApplicationDto[]>("/applications/me", { validate: Array.isArray });
   return dtos.map((dto) => {
     const dateFormatted = dto.appliedAt
       ? new Date(dto.appliedAt).toLocaleDateString("en-IN", {

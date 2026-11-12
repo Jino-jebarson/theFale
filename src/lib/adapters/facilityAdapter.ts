@@ -179,7 +179,7 @@ export async function onboardFacility(payload: FacilityOnboardPayload): Promise<
 }
 
 export async function getFacilityProfile(): Promise<FacilityProfileDto> {
-  return apiFetch<FacilityProfileDto>("/facility/profile");
+  return apiFetch<FacilityProfileDto>("/facility/profile", { cacheMs: 60000 });
 }
 
 export async function updateFacilityProfile(data: Partial<FacilityProfileDto>): Promise<FacilityProfileDto> {
@@ -190,12 +190,13 @@ export async function updateFacilityProfile(data: Partial<FacilityProfileDto>): 
 }
 
 export async function getFacilityJobs(): Promise<JobPostingDto[]> {
-  return apiFetch<JobPostingDto[]>("/facility/jobs");
+  return apiFetch<JobPostingDto[]>("/facility/jobs", { validate: Array.isArray });
 }
 
 export async function postFacilityJob(payload: PostJobPayload): Promise<JobPostingDto> {
   return apiFetch<JobPostingDto>("/facility/jobs", {
     method: "POST",
+    validate: (value) => Boolean(value && typeof value === "object" && "id" in value && typeof value.id === "string"),
     headers: {
       "Idempotency-Key": `job-post-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     },
@@ -208,7 +209,7 @@ export async function getFacilityApplicants(jobId?: string, status?: string): Pr
   if (jobId) params.append("jobId", jobId);
   if (status) params.append("status", status);
   const q = params.toString() ? `?${params.toString()}` : "";
-  return apiFetch<any[]>(`/employer/applications${q}`);
+  return apiFetch<any[]>(`/employer/applications${q}`, { validate: Array.isArray });
 }
 
 export async function updateApplicantStatus(
@@ -241,7 +242,7 @@ export async function searchTalentCandidates(
   if (specialty) params.append("specialty", specialty);
   if (city) params.append("city", city);
   const q = params.toString() ? `?${params.toString()}` : "";
-  return apiFetch<CandidateResdexDto[]>(`/employer/candidates${q}`);
+  return apiFetch<CandidateResdexDto[]>(`/employer/candidates${q}`, { validate: Array.isArray });
 }
 
 export async function unlockCandidateContact(candidateId: string): Promise<CandidateResdexDto> {
@@ -258,7 +259,7 @@ export async function getFacilityWallet(): Promise<FacilityWalletDto> {
 }
 
 export async function getWalletTransactions(): Promise<WalletTransactionDto[]> {
-  return apiFetch<WalletTransactionDto[]>("/employer/wallet/transactions");
+  return apiFetch<WalletTransactionDto[]>("/employer/wallet/transactions", { validate: Array.isArray });
 }
 
 export async function topUpWallet(amountPaise: number, utr: string, paymentMethod?: string): Promise<FacilityWalletDto> {
@@ -327,7 +328,7 @@ export async function uploadFacilityDocument(data: {
 }
 
 export async function getFacilityDocuments(): Promise<FacilityDocumentDto[]> {
-  return apiFetch<FacilityDocumentDto[]>("/facility/documents");
+  return apiFetch<FacilityDocumentDto[]>("/facility/documents", { validate: Array.isArray });
 }
 
 export async function deleteFacilityDocument(id: string): Promise<void> {
@@ -390,13 +391,20 @@ export function attachFocusAndPollRefresh(onRefresh: () => void, intervalMs = 15
     return () => {};
   }
 
-  const handleFocus = () => {
+  let lastRefresh = Date.now();
+  const refresh = () => {
+    if (document.visibilityState !== "visible") return;
+    const now = Date.now();
+    // Focus and visibilitychange commonly fire together.
+    if (now - lastRefresh < Math.min(intervalMs, 5000)) return;
+    lastRefresh = now;
     onRefresh();
   };
+  const handleFocus = refresh;
 
   const handleVisibilityChange = () => {
     if (document.visibilityState === "visible") {
-      onRefresh();
+      refresh();
     }
   };
 
@@ -405,7 +413,7 @@ export function attachFocusAndPollRefresh(onRefresh: () => void, intervalMs = 15
 
   const timerId = window.setInterval(() => {
     if (document.visibilityState === "visible") {
-      onRefresh();
+      refresh();
     }
   }, intervalMs);
 

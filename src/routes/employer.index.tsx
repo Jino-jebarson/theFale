@@ -1,3 +1,5 @@
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -116,6 +118,7 @@ const candidatePipelineData = [
 ];
 
 function EmployerDashboard() {
+  const pageLoad = usePageLoad();
   const s = useApp();
   const [analyticsTimeframe, setAnalyticsTimeframe] = useState<"7d" | "30d">("7d");
   const [activeTab, setActiveTab] = useState<"postings" | "shifts" | "applicants">("postings");
@@ -132,17 +135,16 @@ function EmployerDashboard() {
   const [loading, setLoading] = useState(isApiEnabled);
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     let isMounted = true;
 
     const fetchDashboard = (silent = false) => {
       if (!silent) setLoading(true);
       Promise.all([
-        getFacilityJobs().catch(() => null),
-        getFacilityShifts().catch(() => null),
-        getFacilityApplicants().catch(() => null),
-        getFacilityWallet().catch(() => null),
-        getFacilityProfile().catch(() => null),
+        getFacilityJobs(),
+        getFacilityShifts(),
+        getFacilityApplicants(),
+        getFacilityWallet(),
+        getFacilityProfile(),
       ])
         .then(([fJobs, fShifts, fApps, fWallet, fProfile]) => {
           if (!isMounted) return;
@@ -151,7 +153,7 @@ function EmployerDashboard() {
           if (fApps) setApiApplicants(fApps);
           if (fWallet) setApiWallet(fWallet);
           if (fProfile) setApiProfile(fProfile);
-        })
+        }).catch(pageLoad.fail)
         .finally(() => {
           if (isMounted && !silent) setLoading(false);
         });
@@ -168,17 +170,13 @@ function EmployerDashboard() {
       window.removeEventListener("fale:applications-updated", handleAppsUpdated);
       detachAutoRefresh();
     };
-  }, []);
+  }, [pageLoad.retryKey]);
 
-  const orgName = isApiEnabled
-    ? apiProfile?.hospitalName || "Healthcare Facility"
-    : String(s.profile["org"] || "Apollo Hospitals — Main Campus");
-  const rawCity = isApiEnabled
-    ? apiProfile?.city || "Chennai"
-    : String(s.profile["city"] || "Chennai");
+  const orgName = apiProfile?.hospitalName || "Healthcare Facility";
+  const rawCity = apiProfile?.city || "";
   const city = /[\u0900-\u0D7F]/.test(rawCity) ? "Chennai" : rawCity;
 
-  const stateName = apiProfile?.state || String(s.profile["state"] || "Tamil Nadu");
+  const stateName = apiProfile?.state || String(s.profile["state"] || "");
   const displayCity = useMemo(() => {
     const c = apiProfile?.city || city;
     if (c && !/[\u0900-\u0D7F]/.test(c) && c !== "Healthcare Facility") {
@@ -238,22 +236,20 @@ function EmployerDashboard() {
     apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
       ? apiWallet.lockedEscrowBalancePaise
       : apiWallet?.availableBalancePaise || 0;
-  const escrowBalance = isApiEnabled
-    ? paiseToRupees(escrowReservedPaise)
-    : s.escrowBalance || 185000;
+  const escrowBalance = paiseToRupees(escrowReservedPaise);
 
   const availableWalletRupees = useMemo(() => {
-    if (isApiEnabled && apiWallet) {
+    if (apiWallet) {
       return paiseToRupees(apiWallet.availableBalancePaise || 0);
     }
-    return s.escrowBalance || 48500;
+    return s.escrowBalance || 0;
   }, [apiWallet, s.escrowBalance]);
 
   const lockedEscrowRupees = useMemo(() => {
-    if (isApiEnabled && apiWallet) {
+    if (apiWallet) {
       return paiseToRupees(apiWallet.lockedEscrowBalancePaise || 0);
     }
-    return s.lockedEscrow || 7200;
+    return s.lockedEscrow || 0;
   }, [apiWallet, s.lockedEscrow]);
 
   const formattedEscrow =
@@ -265,26 +261,22 @@ function EmployerDashboard() {
 
   // Effective applicants list
   const effectiveApplicants = useMemo(() => {
-    if (isApiEnabled) return apiApplicants;
-    const localApps = s.adminApplications || [];
-    const seen = new Set(localApps.map((a) => a.id));
-    return [...localApps, ...applicants.filter((a) => !seen.has(a.id))];
+    return apiApplicants;
+
   }, [isApiEnabled, apiApplicants, s.adminApplications]);
 
   // Filtered jobs
   const allJobs = useMemo(() => {
-    return isApiEnabled
-      ? apiJobs.map((j) => ({
+    return apiJobs.map((j) => ({
           id: j.id,
           title: j.title,
           dept: j.department || "General Medicine",
-          city: j.city || "Chennai",
+          city: j.city || "",
           status: j.status || "OPEN",
           exp: j.experienceRequired || "1-3 Years",
           type: j.isInternship ? "Internship" : "Full-time",
           openings: j.openings || 1,
-        }))
-      : s.postedJobs;
+        }));
   }, [isApiEnabled, apiJobs, s.postedJobs]);
 
   const filteredJobs = useMemo(() => {
@@ -301,9 +293,7 @@ function EmployerDashboard() {
     });
   }, [allJobs, searchQuery, city]);
 
-  const activeShifts = isApiEnabled
-    ? apiShifts
-    : (s.postedShifts && s.postedShifts.length > 0 ? s.postedShifts : shifts.slice(0, 4));
+  const activeShifts = apiShifts;
 
   // Dynamic Telemetry Metrics
   const activeJobsCount = useMemo(() => {
@@ -543,6 +533,7 @@ function EmployerDashboard() {
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="space-y-6 w-full min-w-0 max-w-full pb-16">
         {/* ========================================================================= */}
         {/* 1. EXECUTIVE HOSPITAL COMMAND COCKPIT HEADER                                */}

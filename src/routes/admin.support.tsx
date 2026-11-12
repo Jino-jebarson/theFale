@@ -1,3 +1,8 @@
+import { AllyReviewNote } from "@/components/fale/AllyReviewNote";
+import { copyText } from "@/lib/copyText";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -17,7 +22,7 @@ import {
 import { toast } from "sonner";
 import { BotMessageSquare } from "lucide-react";
 import { AdminLayout } from "@/components/fale/AdminLayout";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -123,6 +128,8 @@ function getStatusBadge(status?: string) {
 }
 
 export function AdminSupportPage() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const [tickets, setTickets] = useState<AdminSupportTicketDto[]>([]);
   const [loading, setLoading] = useState(isApiEnabled);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -210,7 +217,7 @@ export function AdminSupportPage() {
           ) || `Ally triage ready for ${ticket.category || "Support"} (${ticket.userRole || "User"}).`;
 
         const entry: AllyTicketPreCheckResult = {
-          status: "VERIFIED",
+          status: "REVIEW",
           summary,
           draft: cleanedDraft,
         };
@@ -252,7 +259,7 @@ export function AdminSupportPage() {
   const renderAllyTicketBadge = (t: AdminSupportTicketDto) => {
     const check = getTicketAllyPreCheck(t);
     const isRunning = Boolean(runningPreCheckIds[t.id]);
-    const isReady = check.status === "VERIFIED";
+    const isReady = check.status === "REVIEW";
     const isError = check.status === "ERROR";
 
     return (
@@ -267,7 +274,7 @@ export function AdminSupportPage() {
         )}
       >
         {isRunning ? (
-          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+          <ButtonSpinner className="h-2.5 w-2.5 animate-spin shrink-0" />
         ) : (
           <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
         )}
@@ -283,12 +290,12 @@ export function AdminSupportPage() {
   };
 
   const loadTickets = async () => {
-    if (!isApiEnabled) return;
     try {
       setLoading(true);
       const data = await getAdminSupportTickets();
       setTickets(data || []);
     } catch (err: any) {
+      pageLoad.fail(err);
       toast.error(err?.message || "Failed to fetch support tickets");
     } finally {
       setLoading(false);
@@ -297,7 +304,7 @@ export function AdminSupportPage() {
 
   useEffect(() => {
     loadTickets();
-  }, []);
+  }, [pageLoad.retryKey]);
 
   // Performance-safe background Ally triage pre-check for active tickets (MAX_CONCURRENT = 2)
   useEffect(() => {
@@ -329,7 +336,7 @@ export function AdminSupportPage() {
     return () => {
       cancelled = true;
     };
-  }, [tickets, allyPreChecks, getTicketCacheKey, handleRunAllyTicketPreCheck]);
+  }, [tickets, allyPreChecks, getTicketCacheKey, handleRunAllyTicketPreCheck, pageLoad.retryKey]);
 
   // Prioritize Ally triage immediately when Inspect drawer opens for a ticket
   useEffect(() => {
@@ -338,7 +345,7 @@ export function AdminSupportPage() {
     if (!allyPreChecks[key] && !inFlightKeysRef.current.has(key)) {
       void handleRunAllyTicketPreCheck(selectedTicket, { silent: true });
     }
-  }, [selectedTicket, allyPreChecks, getTicketCacheKey, handleRunAllyTicketPreCheck]);
+  }, [selectedTicket, allyPreChecks, getTicketCacheKey, handleRunAllyTicketPreCheck, pageLoad.retryKey]);
 
   const counts = useMemo(() => {
     return {
@@ -377,7 +384,7 @@ export function AdminSupportPage() {
     setAdminNotes(ticket.adminNotes || "");
   };
 
-  const handleSaveStatus = async () => {
+  const handleSaveStatus = async () => { await pageAction.run(async () => {
     if (!selectedTicket) return;
     try {
       setSaving(true);
@@ -392,7 +399,7 @@ export function AdminSupportPage() {
     } finally {
       setSaving(false);
     }
-  };
+  }); };
 
   return (
     <AdminLayout
@@ -415,6 +422,8 @@ export function AdminSupportPage() {
         </Button>
       }
     >
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
+      <AllyReviewNote />
       {/* Metric Strip (4 Cards matching Candidate KYC, Hospital Verification & Job Approvals) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
@@ -542,7 +551,7 @@ export function AdminSupportPage() {
               {loading && tickets.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-12 text-xs text-muted-foreground">
-                    <HiOutlineArrowPath className="h-6 w-6 animate-spin mx-auto text-primary mb-2" />
+                    <ButtonSpinner className="h-6 w-6 animate-spin mx-auto text-primary mb-2" />
                     Loading support tickets from database…
                   </TableCell>
                 </TableRow>
@@ -628,7 +637,7 @@ export function AdminSupportPage() {
         <div className="md:hidden p-3 sm:p-4 pb-24 sm:pb-4 space-y-3.5 bg-muted/20">
           {loading && tickets.length === 0 ? (
             <div className="py-12 text-center text-xs text-muted-foreground">
-              <HiOutlineArrowPath className="h-6 w-6 animate-spin mx-auto text-primary mb-2" />
+              <ButtonSpinner className="h-6 w-6 animate-spin mx-auto text-primary mb-2" />
               Loading support tickets from database…
             </div>
           ) : filteredTickets.length === 0 ? (
@@ -776,7 +785,7 @@ export function AdminSupportPage() {
               {(() => {
                 const check = getTicketAllyPreCheck(selectedTicket);
                 const isRunning = Boolean(runningPreCheckIds[selectedTicket.id]);
-                const isReady = check.status === "VERIFIED";
+                const isReady = check.status === "REVIEW";
                 const isError = check.status === "ERROR";
 
                 return (
@@ -785,7 +794,7 @@ export function AdminSupportPage() {
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
                           {isRunning ? (
-                            <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                            <ButtonSpinner className="h-4 w-4 animate-spin" />
                           ) : (
                             <BotMessageSquare className="h-4 w-4" />
                           )}
@@ -830,7 +839,7 @@ export function AdminSupportPage() {
                           className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
                         >
                           {isRunning ? (
-                            <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                            <ButtonSpinner className="h-3 w-3 animate-spin shrink-0" />
                           ) : (
                             <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
                           )}
@@ -860,8 +869,8 @@ export function AdminSupportPage() {
                         <Button
                           type="button"
                           size="sm"
-                          onClick={() => {
-                            navigator.clipboard.writeText(check.draft);
+                          onClick={async () => {
+                            if (!await copyText(check.draft)) return;
                             toast.success("Ally response draft copied to clipboard!");
                           }}
                           className="text-xs font-bold h-8 px-3 rounded-xl bg-primary hover:bg-primary-hover text-white cursor-pointer"
@@ -944,12 +953,12 @@ export function AdminSupportPage() {
               <Button
                 type="button"
                 size="sm"
-                disabled={saving}
+                disabled={pageAction.isPending || (saving)}
                 onClick={handleSaveStatus}
                 className="flex-1 sm:flex-initial h-9 px-4 rounded-xl text-xs font-black bg-primary hover:bg-primary-hover text-white gap-1.5 shadow-xs cursor-pointer whitespace-nowrap"
               >
                 {saving ? (
-                  <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin shrink-0" />
+                  <ButtonSpinner className="h-3.5 w-3.5 animate-spin shrink-0" />
                 ) : (
                   <HiOutlineCheck className="h-3.5 w-3.5 shrink-0" />
                 )}
@@ -962,4 +971,3 @@ export function AdminSupportPage() {
     </AdminLayout>
   );
 }
-

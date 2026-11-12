@@ -130,13 +130,13 @@ function RootComponent() {
   const isLoading = useRouterState({ select: (s) => s.isLoading });
   const navigate = useNavigate();
   const s = useApp();
-  const [isRestoring, setIsRestoring] = useState(() => isApiEnabled && !getAccessToken());
+  const [isRestoring, setIsRestoring] = useState(() => !getAccessToken());
 
   useEffect(() => {
     initTheme();
 
     // On page reload in API mode, restore access token and user session via HttpOnly refresh cookie
-    if (isApiEnabled && !getAccessToken()) {
+    if (!getAccessToken()) {
       setIsRestoring(true);
       refreshSession()
         .then((auth) => {
@@ -149,6 +149,7 @@ function RootComponent() {
 
             setState({
               signedIn: true,
+              contact: auth.user?.phone || auth.user?.email || "",
               portal: targetPortal,
               candidateLevel: candidateLevel ? (candidateLevel.toLowerCase() as any) : undefined,
               onboarded: isOnboarded,
@@ -166,7 +167,7 @@ function RootComponent() {
 
   // Route protection and role boundary guard
   useEffect(() => {
-    if (isRestoring || !isApiEnabled) return;
+    if (isRestoring) return;
 
     const isPublicPath =
       pathname === "/" || pathname.startsWith("/landing") ||

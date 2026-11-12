@@ -18,14 +18,14 @@ import {
 import { toast } from "sonner";
 import { BotMessageSquare } from "lucide-react";
 import { AppShell } from "@/components/fale/AppShell";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { courses } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { getCourses, enrollCourse, mapCourseDtoToCourse } from "@/lib/adapters/learningAdapter";
-import { getAllRegistryCourses } from "@/lib/courseCurriculumRegistry";
+
 import {
   Dialog,
   DialogContent,
@@ -93,36 +93,17 @@ function Learning() {
     setInterviewModalOpen(true);
     setInterviewFeedback(null);
     setInterviewAnswer("");
+    setInterviewQuestions([]);
     setActiveQuestionIdx(0);
     setLoadingQuestions(true);
     try {
-      const role = s.profile?.role || "Healthcare Professional";
-      const res = await getInterviewPracticeWithAi(role);
-      const text = res.response || res.content || "";
-      if (text) {
-        const parsed = text
-          .split(/\n+/)
-          .map((line) => line.replace(/^[\d+*#\.\-\)]+\s*/, "").trim())
-          .filter((line) => line.length > 25);
-        if (parsed.length >= 2) {
-          setInterviewQuestions(parsed.slice(0, 3));
-          return;
-        }
-      }
-      setInterviewQuestions([
-        "A patient on mechanical ventilation triggers a sudden high-peak pressure alarm. What are your immediate assessment steps?",
-        "How do you prioritize patient handovers when admitting a post-cardiac arrest patient while managing two ongoing ICU infusions?",
-        "Explain the central line maintenance protocol to prevent CLABSI bloodstream infections under NABH guidelines.",
-      ]);
+      const result = await getInterviewPracticeWithAi(s.profile?.role || "Healthcare Professional");
+      const questions = (result.response || result.content || "").split(/\n+/).map((line) => line.replace(/^[\d+*#.\-\)]+\s*/, "").trim()).filter((line) => line.length > 25);
+      if (!questions.length) throw new Error("No questions returned");
+      setInterviewQuestions(questions.slice(0, 3));
     } catch {
-      setInterviewQuestions([
-        "A patient on mechanical ventilation triggers a sudden high-peak pressure alarm. What are your immediate assessment steps?",
-        "How do you prioritize patient handovers when admitting an acute patient?",
-        "Explain the central line maintenance protocol to prevent CLABSI bloodstream infections.",
-      ]);
-    } finally {
-      setLoadingQuestions(false);
-    }
+      toast.error("Interview practice is unavailable. Please try again later.");
+    } finally { setLoadingQuestions(false); }
   };
 
   const handleEvaluateAnswer = async () => {
@@ -149,7 +130,6 @@ function Learning() {
   };
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     setLoading(true);
     getCourses()
       .then((data) => {
@@ -171,10 +151,10 @@ function Learning() {
   }, []);
 
   const courseSource = useMemo(() => {
-    if (isApiEnabled && apiCourses && apiCourses.length > 0) {
+    if (apiCourses && apiCourses.length > 0) {
       return apiCourses.map(mapCourseDtoToCourse);
     }
-    return getAllRegistryCourses();
+    return [];
   }, [isApiEnabled, apiCourses]);
 
   // Filtered courses based on search and category
@@ -197,20 +177,15 @@ function Learning() {
     return courseSource.filter((c) => s.courses.includes(c.id));
   }, [courseSource, s.courses]);
 
-  const handleQuickEnroll = (courseId: string, courseTitle: string) => {
-    if (isApiEnabled) {
-      enrollCourse(courseId).catch((err) => {
-        console.error("Enroll error:", err);
-      });
-    }
-    if (s.courses.includes(courseId)) {
-      setState((x) => ({ courses: x.courses.filter((id) => id !== courseId) }));
-      toast.info("Unenrolled from course", { description: courseTitle });
-    } else {
-      setState((x) => ({ courses: [...x.courses, courseId] }));
-      toast.success("Enrolled successfully!", {
-        description: `You are now enrolled in ${courseTitle}. Access lessons anytime.`,
-      });
+  const handleQuickEnroll = async (courseId: string, courseTitle: string) => {
+    if (s.courses.includes(courseId)) return;
+    try {
+      const saved = await enrollCourse(courseId);
+      setApiCourses((previous) => (previous || []).map((course) => course.id === saved.id ? saved : course));
+      setState((previous) => ({ courses: Array.from(new Set([...previous.courses, saved.id])) }));
+      toast.success("Enrolled successfully", { description: courseTitle });
+    } catch (error) {
+      toast.error("Could not enroll. Please try again.");
     }
   };
 
@@ -423,7 +398,6 @@ function Learning() {
         </div>
 
 
-
         {/* ================= CONTENT: MY LEARNING VIEW ================= */}
         {viewMode === "my-learning" && (
           <div className="space-y-6 w-full min-w-0 max-w-full">
@@ -449,8 +423,8 @@ function Learning() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 pb-8 sm:pb-0 w-full min-w-0">
                 {enrolledCourses.map((c) => {
                   const totalLessons = c.modules.flatMap((m) => m.lessons).length;
-                  const completedCount = 1; // default initial demo progress
-                  const percent = Math.round((completedCount / totalLessons) * 100);
+                  const percent = apiCourses?.find((course) => course.id === c.id)?.progressPercent ?? 0;
+                  const completedCount = Math.floor(totalLessons * percent / 100);
 
                   return (
                     <div
@@ -522,7 +496,7 @@ function Learning() {
 
             {loading ? (
               <div className="surface p-12 text-center rounded-3xl border border-border/80 text-muted-foreground">
-                <HiOutlineArrowPath className="mx-auto h-8 w-8 text-primary animate-spin" />
+                <ButtonSpinner className="mx-auto h-8 w-8 text-primary animate-spin" />
                 <p className="mt-3 text-sm font-semibold">Loading CME courses...</p>
               </div>
             ) : loadError ? (
@@ -673,7 +647,7 @@ function Learning() {
           <div className="space-y-4 py-2">
             {loadingQuestions ? (
               <div className="py-8 flex flex-col items-center justify-center space-y-3 text-center">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <ButtonSpinner className="h-6 w-6 text-primary" />
                 <p className="text-xs text-muted-foreground font-medium">
                   Consulting AI Medical Examiner for realistic clinical scenarios...
                 </p>

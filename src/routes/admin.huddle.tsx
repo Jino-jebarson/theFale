@@ -1,3 +1,8 @@
+import { AllyReviewNote } from "@/components/fale/AllyReviewNote";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { RequestError } from "@/components/fale/RequestError";
+import { errorMessage } from "@/lib/errorMessage";
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -62,7 +67,7 @@ type AllyHuddleModerationResult = {
   isApproved: boolean;
 };
 import { AdminLayout } from "@/components/fale/AdminLayout";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
@@ -140,6 +145,8 @@ export const Route = createFileRoute("/admin/huddle")({
 });
 
 function AdminHuddleModeration() {
+  const pageLoad = usePageLoad();
+  const moderation = useConfirmedAction();
   const s = useApp();
   const navigate = useNavigate();
 
@@ -160,7 +167,7 @@ function AdminHuddleModeration() {
 
   // Ally Moderation Scan State (session-cached + concurrency-limited live checks)
   const getPostModCacheKey = useCallback((post: HuddlePost) => {
-    return `${post.id}:${(post.text || "").slice(0, 80)}:${post.reports?.length || 0}`;
+    return `${post.id}:${post.text || ""}:${post.reports?.length || 0}`;
   }, []);
 
   const [aiModerationResults, setAiModerationResults] = useState<Record<string, AllyHuddleModerationResult>>(() =>
@@ -190,7 +197,7 @@ function AdminHuddleModeration() {
   const handleScanPostWithAi = useCallback(
     async (post: HuddlePost, options?: { silent?: boolean }) => {
       const cacheKey = getPostModCacheKey(post);
-      if (options?.silent && inFlightScanKeysRef.current.has(cacheKey)) return;
+      if (inFlightScanKeysRef.current.has(cacheKey)) return;
 
       inFlightScanKeysRef.current.add(cacheKey);
       setScanningPostIds((prev) => ({ ...prev, [post.id]: true }));
@@ -217,20 +224,8 @@ function AdminHuddleModeration() {
         );
         const lower = plainRationale.toLowerCase();
 
-        const isFlagged =
-          rawStatus === "FLAGGED" ||
-          rawStatus === "FLAGGED_DISCREPANCY" ||
-          rawStatus === "VIOLATION" ||
-          sData["isApproved"] === false ||
-          (rawStatus !== "SAFE" &&
-            rawStatus !== "CLEAR" &&
-            rawStatus !== "APPROVED" &&
-            (lower.startsWith("flagged") ||
-              lower.includes("flagged") ||
-              lower.includes("violation") ||
-              lower.includes("patient privacy") ||
-              lower.includes("off-platform") ||
-              lower.includes("spam")));
+        if (!plainRationale.trim()) throw new Error("Ally returned no moderation rationale.");
+        const isFlagged = !(rawStatus === "SAFE" && sData["isApproved"] === true);
 
         const category =
           cleanMarkdownAndJsonNoise(typeof sData["category"] === "string" ? sData["category"] : "") ||
@@ -238,7 +233,7 @@ function AdminHuddleModeration() {
             ? lower.includes("phi") || lower.includes("patient") || lower.includes("identifier") || lower.includes("uhid")
               ? "Patient Privacy Risk: PHI / Identifier pattern detected"
               : "Policy Infraction: Off-platform solicitation / safety risk"
-            : "Community Safe: Verified Clinical Exchange");
+            : "AI review: no issue explicitly identified");
 
         const rationale =
           plainRationale ||
@@ -247,7 +242,7 @@ function AdminHuddleModeration() {
             : "Clean clinical discussion adhering to FALE Huddle community safety guidelines.");
 
         const nextEntry: AllyHuddleModerationResult = {
-          status: isFlagged ? "FLAGGED" : "VERIFIED",
+          status: isFlagged ? "FLAGGED" : "REVIEW",
           category,
           rationale,
           isApproved: !isFlagged,
@@ -260,7 +255,7 @@ function AdminHuddleModeration() {
         });
 
         if (!options?.silent) {
-          toast.success(`Ally moderation scan complete: ${isFlagged ? "Violation Detected" : "Clear"}`);
+          toast.success(`Ally moderation scan complete: ${isFlagged ? "Human review needed" : "Suggestion ready for review"}`);
         }
       } catch (err: any) {
         console.warn("Ally moderation scan failed:", err);
@@ -289,7 +284,7 @@ function AdminHuddleModeration() {
   const renderAllyModerationBadge = (post: HuddlePost) => {
     const scan = getPostAiModeration(post);
     const isScanning = Boolean(scanningPostIds[post.id]);
-    const isSafe = scan.status === "VERIFIED";
+    const isSafe = scan.status === "REVIEW";
     const isFlagged = scan.status === "FLAGGED" || scan.status === "ERROR";
 
     return (
@@ -304,14 +299,14 @@ function AdminHuddleModeration() {
         )}
       >
         {isScanning ? (
-          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+          <ButtonSpinner className="h-2.5 w-2.5 animate-spin shrink-0" />
         ) : (
           <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
         )}
         {isScanning
           ? "Ally Scanning..."
           : isSafe
-            ? "Ally Community Safe"
+            ? "Ally Review Ready"
             : scan.status === "ERROR"
               ? "Ally Retry"
               : isFlagged
@@ -336,13 +331,13 @@ function AdminHuddleModeration() {
   const [loadingMentors, setLoadingMentors] = useState(false);
 
   const fetchMentorApplications = () => {
-    if (!isApiEnabled) return;
     setLoadingMentors(true);
     getAdminMentorApplications()
       .then((apps) => {
         setMentorApplications(apps || []);
       })
       .catch((err) => {
+        pageLoad.fail(err);
         console.warn("Failed to load mentor applications:", err);
       })
       .finally(() => setLoadingMentors(false));
@@ -356,7 +351,6 @@ function AdminHuddleModeration() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchFlaggedAndCases = () => {
-    if (!isApiEnabled) return;
     setLoadingFlagged(true);
     Promise.all([getFlaggedHuddlePosts(), getReviewCases(), getHuddlePosts("All")])
       .then(([flaggedDtos, reviewDtos, liveDtos]) => {
@@ -393,6 +387,7 @@ function AdminHuddleModeration() {
         setLoadError(null);
       })
       .catch((err) => {
+        pageLoad.fail(err);
         console.error("Failed to load huddle admin queues:", err);
         setLoadError("Unable to load community posts.");
       })
@@ -402,14 +397,14 @@ function AdminHuddleModeration() {
   useEffect(() => {
     fetchFlaggedAndCases();
     fetchMentorApplications();
-  }, []);
+  }, [pageLoad.retryKey]);
 
   // Auto-refresh mentor applications when switching to the Clinical Mentors tab
   useEffect(() => {
     if (activeTab === "mentors") {
       fetchMentorApplications();
     }
-  }, [activeTab]);
+  }, [activeTab, pageLoad.retryKey]);
 
   // Checklist for clinical case review
   const [checklist, setChecklist] = useState({
@@ -423,12 +418,12 @@ function AdminHuddleModeration() {
   // Calculate queue counts - merge API queues with store review cases so admin can audit them
   const allPosts = useMemo(() => {
     const storePosts = s.huddlePosts || [];
-    if (isApiEnabled) {
+    {
       const apiIds = new Set([...apiFlaggedPosts, ...apiReviewCases, ...apiLivePosts].map((p) => p.id));
       const storeCases = storePosts.filter((p) => !apiIds.has(p.id));
       return [...apiFlaggedPosts, ...apiReviewCases, ...apiLivePosts, ...storeCases];
     }
-    return storePosts;
+
   }, [isApiEnabled, apiFlaggedPosts, apiReviewCases, apiLivePosts, s.huddlePosts]);
   const flaggedPosts = useMemo(
     () =>
@@ -474,7 +469,7 @@ function AdminHuddleModeration() {
     return () => {
       cancelled = true;
     };
-  }, [flaggedPosts, pendingCases, aiModerationResults, getPostModCacheKey, handleScanPostWithAi]);
+  }, [flaggedPosts, pendingCases, aiModerationResults, getPostModCacheKey, handleScanPostWithAi, pageLoad.retryKey]);
 
   // Prioritize Ally safety scan immediately when Inspect drawer opens for any post
   useEffect(() => {
@@ -483,99 +478,60 @@ function AdminHuddleModeration() {
     if (!aiModerationResults[key] && !inFlightScanKeysRef.current.has(key)) {
       void handleScanPostWithAi(selectedPost, { silent: true });
     }
-  }, [sheetOpen, selectedPost, aiModerationResults, getPostModCacheKey, handleScanPostWithAi]);
+  }, [sheetOpen, selectedPost, aiModerationResults, getPostModCacheKey, handleScanPostWithAi, pageLoad.retryKey]);
 
   // Handlers
-  const handleApprovePost = (post: HuddlePost) => {
-    if (isApiEnabled) {
-      if (post.status === "review") {
-        approveReviewCase(post.id).then(() => fetchFlaggedAndCases()).catch(console.error);
-      } else {
-        moderateHuddlePost(post.id, false).then(() => fetchFlaggedAndCases()).catch(console.error);
-      }
-    }
-    approveHuddlePost(post.id);
-    toast.success("Post Approved & Live!", {
-      description: `Post by ${post.authorName} is now visible to the public Huddle community.`,
-    });
-    if (selectedPost?.id === post.id) {
-      setSelectedPost({ ...selectedPost, status: "live", reports: [] });
-    }
-    setSheetOpen(false);
-  };
-
-  const handleDismissReport = (post: HuddlePost) => {
-    if (isApiEnabled) {
-      moderateHuddlePost(post.id, false).then(() => fetchFlaggedAndCases()).catch(console.error);
-    }
-    dismissHuddleReport(post.id);
-    toast.success("Report Dismissed", {
-      description: `All user reports cleared for "${post.authorName}". Post restored as Live.`,
-    });
-    if (selectedPost?.id === post.id) {
-      setSelectedPost({ ...selectedPost, status: "live", reports: [] });
-    }
-    setSheetOpen(false);
-  };
-
-  const handleDeleteConfirm = () => {
-    if (!postToDelete) return;
-    if (isApiEnabled) {
-      if (postToDelete.status === "review") {
-        rejectReviewCase(postToDelete.id).then(() => fetchFlaggedAndCases()).catch(console.error);
-      } else {
-        moderateHuddlePost(postToDelete.id, true).then(() => fetchFlaggedAndCases()).catch(console.error);
-      }
-    }
-    deleteHuddlePost(postToDelete.id);
-    toast.error("Post Permanently Removed", {
-      description: `Post by ${postToDelete.authorName} was deleted from Huddle.`,
-    });
-    if (selectedPost?.id === postToDelete.id) {
+  const handleApprovePost = async (post: HuddlePost) => {
+    await moderation.run(async () => {
+      if (post.status === "review") await approveReviewCase(post.id);
+      else await moderateHuddlePost(post.id, false);
+      approveHuddlePost(post.id);
+      if (selectedPost?.id === post.id) setSelectedPost({ ...selectedPost, status: "live", reports: [] });
       setSheetOpen(false);
-      setSelectedPost(null);
-    }
-    setDeleteModalOpen(false);
-    setPostToDelete(null);
+      toast.success("Post approved");
+      fetchFlaggedAndCases();
+    });
   };
 
-  const handleWarnConfirm = () => {
-    if (!postToWarn) return;
-    warnHuddleAuthor(postToWarn.id, warningReason);
-    toast.warning("Formal Warning Issued", {
-      description: `Warning logged for ${postToWarn.authorName}. Recorded in audit log.`,
+  const handleDismissReport = async (post: HuddlePost) => {
+    await moderation.run(async () => {
+      await moderateHuddlePost(post.id, false);
+      dismissHuddleReport(post.id);
+      if (selectedPost?.id === post.id) setSelectedPost({ ...selectedPost, status: "live", reports: [] });
+      setSheetOpen(false);
+      toast.success("Report dismissed");
+      fetchFlaggedAndCases();
     });
-    setWarnModalOpen(false);
-    setPostToWarn(null);
   };
+
+  const handleDeleteConfirm = async () => {
+    if (!postToDelete) return;
+    const post = postToDelete;
+    await moderation.run(async () => {
+      if (post.status === "review") await rejectReviewCase(post.id);
+      else await moderateHuddlePost(post.id, true);
+      deleteHuddlePost(post.id);
+      if (selectedPost?.id === post.id) { setSheetOpen(false); setSelectedPost(null); }
+      setDeleteModalOpen(false); setPostToDelete(null);
+      toast.success("Post removed");
+      fetchFlaggedAndCases();
+    });
+  };
+
+  const handleWarnConfirm = () => { toast.info("Author warnings are unavailable until server support is connected. No warning has been recorded."); };
 
   const handleTogglePin = async (post: HuddlePost) => {
-    const newPinned = !post.pinned;
-    togglePostPinned(post.id);
-
-    setApiLivePosts((prev) =>
-      prev.map((p) => (p.id === post.id ? { ...p, pinned: newPinned } : p))
-    );
-
-    if (selectedPost?.id === post.id) {
-      setSelectedPost({ ...selectedPost, pinned: newPinned });
-    }
-
-    toast.info(newPinned ? "Post Pinned to Community Top" : "Post Unpinned", {
-      description: `Pin status updated for ${post.authorName}'s discussion.`,
+    await moderation.run(async () => {
+      await togglePinHuddlePost(post.id);
+      togglePostPinned(post.id);
+      setApiLivePosts((previous) => previous.map((item) => item.id === post.id ? { ...item, pinned: !post.pinned } : item));
+      if (selectedPost?.id === post.id) setSelectedPost({ ...selectedPost, pinned: !post.pinned });
+      toast.success(post.pinned ? "Post unpinned" : "Post pinned");
     });
-
-    if (isApiEnabled) {
-      try {
-        await togglePinHuddlePost(post.id);
-      } catch (err) {
-        console.warn("Backend pin toggle sync:", err);
-      }
-    }
   };
 
   const handleToggleMentor = async (id: string, name: string) => {
-    if (isApiEnabled) {
+    {
       try {
         const updated = await toggleAdminMentorSeal(id);
         setMentorApplications((prev) =>
@@ -584,14 +540,6 @@ function AdminHuddleModeration() {
       } catch (err) {
         console.warn("Backend toggle mentor seal:", err);
       }
-    } else {
-      setMentorApplications((prev) =>
-        prev.map((a) =>
-          a.id === id
-            ? { ...a, verified: !a.verified, status: !a.verified ? "APPROVED" : "REJECTED" }
-            : a
-        )
-      );
     }
     toast.success("Mentor Status Updated", {
       description: `Verified clinical seal updated for ${name}.`,
@@ -610,18 +558,10 @@ function AdminHuddleModeration() {
 
   const handleReviewMentor = async (appId: string, approve: boolean, name?: string) => {
     try {
-      if (isApiEnabled) {
+      {
         const updated = await reviewAdminMentorApplication(appId, approve);
         setMentorApplications((prev) =>
           prev.map((a) => (a.id === appId ? updated : a))
-        );
-      } else {
-        setMentorApplications((prev) =>
-          prev.map((a) =>
-            a.id === appId
-              ? { ...a, status: approve ? "APPROVED" : "REJECTED", verified: approve }
-              : a
-          )
         );
       }
       if (approve) {
@@ -709,6 +649,9 @@ function AdminHuddleModeration() {
         </Button>
       }
     >
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
+      <AllyReviewNote />
+      <RequestError message={moderation.error} />
       {/* Top 4 Enterprise KPI Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Card 1: Clinical Privacy Queue */}
@@ -1033,7 +976,7 @@ function AdminHuddleModeration() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleDismissReport(post)}
+                            disabled={moderation.isPending} onClick={() => handleDismissReport(post)}
                             className="h-8 text-[11px] sm:text-xs font-bold gap-1 text-foreground border border-border/80 hover:bg-muted px-1.5 sm:px-2.5 justify-center min-w-0"
                           >
                             <HiCheck className="h-3.5 w-3.5 shrink-0 text-primary" />
@@ -1241,7 +1184,7 @@ function AdminHuddleModeration() {
 
                         <Button
                           size="sm"
-                          onClick={() => handleApprovePost(post)}
+                          disabled={moderation.isPending} onClick={() => handleApprovePost(post)}
                           className="h-8 text-[11px] sm:text-xs font-bold gap-1.5 bg-primary text-white hover:bg-primary-hover shadow-2xs px-2 sm:px-3 justify-center min-w-0"
                         >
                           <HiCheck className="h-3.5 w-3.5 shrink-0" />
@@ -2012,7 +1955,7 @@ function AdminHuddleModeration() {
                 {(() => {
                   const modScan = getPostAiModeration(selectedPost);
                   const isScanning = Boolean(scanningPostIds[selectedPost.id]);
-                  const isSafe = modScan.status === "VERIFIED";
+                  const isSafe = modScan.status === "REVIEW";
                   const isFlagged = modScan.status === "FLAGGED";
                   const isError = modScan.status === "ERROR";
 
@@ -2022,7 +1965,7 @@ function AdminHuddleModeration() {
                         <div className="flex items-center gap-2.5 min-w-0">
                           <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
                             {isScanning ? (
-                              <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                              <ButtonSpinner className="h-4 w-4 animate-spin" />
                             ) : (
                               <BotMessageSquare className="h-4 w-4" />
                             )}
@@ -2075,7 +2018,7 @@ function AdminHuddleModeration() {
                             className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
                           >
                             {isScanning ? (
-                              <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                              <ButtonSpinner className="h-3 w-3 animate-spin shrink-0" />
                             ) : (
                               <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
                             )}
@@ -2268,7 +2211,7 @@ function AdminHuddleModeration() {
             </Button>
             <Button
               size="sm"
-              onClick={handleDeleteConfirm}
+              disabled={moderation.isPending} onClick={handleDeleteConfirm}
               className="text-xs font-bold rounded-xl bg-primary text-white hover:bg-primary-hover"
             >
               Confirm Permanent Deletion

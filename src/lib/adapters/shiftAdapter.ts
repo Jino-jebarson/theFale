@@ -184,12 +184,12 @@ export function mapLocumShiftToUi(dto: LocumShiftDto): UiShiftItem {
 }
 
 export async function getOpenShifts(): Promise<UiShiftItem[]> {
-  const dtos = await apiFetch<LocumShiftDto[]>("/shifts");
+  const dtos = await apiFetch<LocumShiftDto[]>("/shifts", { validate: Array.isArray });
   return dtos.map(mapLocumShiftToUi);
 }
 
 export async function getFacilityShifts(): Promise<UiShiftItem[]> {
-  const dtos = await apiFetch<LocumShiftDto[]>("/shifts/facility");
+  const dtos = await apiFetch<LocumShiftDto[]>("/shifts/facility", { validate: Array.isArray });
   return dtos.map(mapLocumShiftToUi);
 }
 
@@ -200,7 +200,7 @@ export async function claimShift(shiftId: string): Promise<ShiftClaimDto> {
 }
 
 export async function getMyClaims(): Promise<ShiftClaimDto[]> {
-  return apiFetch<ShiftClaimDto[]>("/shifts/claims");
+  return apiFetch<ShiftClaimDto[]>("/shifts/claims", { validate: Array.isArray });
 }
 
 export async function checkInShift(claimId: string, pin?: string): Promise<ShiftClaimDto> {
@@ -286,7 +286,7 @@ export async function cancelShift(shiftId: string): Promise<void> {
 }
 
 export async function getDisputedShiftClaims(): Promise<ShiftClaimDto[]> {
-  return apiFetch<ShiftClaimDto[]>("/admin/shifts/claims/disputed");
+  return apiFetch<ShiftClaimDto[]>("/admin/shifts/claims/disputed", { validate: Array.isArray });
 }
 
 export interface ResolveDisputePayload {

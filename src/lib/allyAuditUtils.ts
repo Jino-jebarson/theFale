@@ -1,9 +1,10 @@
+import { getAccessToken } from "@/lib/api";
 /**
  * Shared formatting, JSON extraction, and sessionStorage cache helpers for
  * Ally pre-check / accreditation audits across admin verification views.
  */
 
-export type AllyAuditStatus = "PENDING" | "VERIFIED" | "FLAGGED" | "ERROR";
+export type AllyAuditStatus = "PENDING" | "REVIEW" | "FLAGGED" | "ERROR";
 
 /**
  * Strip markdown fences, emphasis tokens, emoji noise, and collapse whitespace
@@ -24,12 +25,12 @@ export function cleanMarkdownAndJsonNoise(raw: string): string {
  * Normalize confidence values (either 0-1 floats or 0-100 percentages) into a
  * rounded percentage with a deterministic fallback when omitted.
  */
-export function formatConfidencePercent(val: unknown, isFlagged: boolean): number {
-  if (typeof val === "number" && !Number.isNaN(val)) {
+export function formatConfidencePercent(val: unknown, _isFlagged = false): number | null {
+  if (typeof val === "number" && Number.isFinite(val)) {
     const normalized = val > 0 && val <= 1 ? val * 100 : val;
     return Math.max(0, Math.min(100, Number(normalized.toFixed(1))));
   }
-  return isFlagged ? 42.0 : 98.5;
+  return null;
 }
 
 /**
@@ -49,28 +50,22 @@ export function extractJsonPayload(rawText: string): Record<string, any> | null 
   }
 }
 
-/**
- * Read a cached Ally audit map safely from sessionStorage.
- */
+// Old sessionStorage audits are intentionally ignored: they can contain stale
+// verification claims. Keep revised assessments in memory for ten minutes.
+let auditSession: string | null = null;
+const auditCache = new Map<string, { expires: number; data: Record<string, unknown> }>();
+function scopeAuditCache() {
+  const token = getAccessToken();
+  if (token !== auditSession || token === null) { auditCache.clear(); auditSession = token; }
+  return token;
+}
 export function readSessionAuditCache<T>(storageKey: string): Record<string, T> {
-  try {
-    const raw = sessionStorage.getItem(storageKey);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, T>) : {};
-  } catch {
-    return {};
-  }
+  if (!scopeAuditCache()) return {};
+  const cached = auditCache.get(storageKey);
+  if (!cached || cached.expires <= Date.now()) { auditCache.delete(storageKey); return {}; }
+  return structuredClone(cached.data) as Record<string, T>;
 }
-
-/**
- * Persist an Ally audit map to sessionStorage without throwing on quota/private mode.
- */
 export function writeSessionAuditCache<T>(storageKey: string, next: Record<string, T>): void {
-  try {
-    sessionStorage.setItem(storageKey, JSON.stringify(next));
-  } catch {
-    // Ignore sessionStorage quota or restricted storage errors
-  }
+  if (!scopeAuditCache()) return;
+  auditCache.set(storageKey, { expires: Date.now() + 600000, data: structuredClone(next) });
 }
-

@@ -45,7 +45,7 @@ import { BotMessageSquare } from "lucide-react";
 
 export const Route = createFileRoute("/learning/$id")({
   loader: async ({ params }) => {
-    const course = (await getCourseById(params.id)) || courses.find((c) => c.id === params.id);
+    const course = await getCourseById(params.id);
     if (!course) throw notFound();
     return { course };
   },
@@ -138,13 +138,7 @@ function CourseDetailScreen() {
   // Active lesson state
   const firstLesson = course.modules[0]?.lessons[0] || null;
   const [activeLesson, setActiveLesson] = useState<CourseLesson | null>(firstLesson);
-  const [completedLessons, setCompletedLessons] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(`fale_lessons_${course.id}`);
-      if (saved) return JSON.parse(saved);
-    } catch (_) {}
-    return isEnrolled ? ["l1_1"] : [];
-  });
+  const [completedLessons, setCompletedLessons] = useState<string[]>([]);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<string>("1x");
   const [activeTab, setActiveTab] = useState<string>("classroom");
@@ -218,84 +212,50 @@ function CourseDetailScreen() {
     });
   };
 
-  // Sync enrollment and completed lessons from backend or localStorage
+  // Sync enrollment and completed lessons from the backend
   useEffect(() => {
-    if (isApiEnabled) {
+    {
       getCourses()
         .then((list) => {
           const found = list.find((c) => c.id === course.id);
           if (found) {
             if (found.enrolled) {
               setState((x) => ({ courses: Array.from(new Set([...x.courses, course.id])) }));
-              const saved = localStorage.getItem(`fale_lessons_${course.id}`);
-              if (saved) {
-                try {
-                  setCompletedLessons(JSON.parse(saved));
-                } catch (_) {}
-              } else if (found.progressPercent > 0) {
-                const count = Math.max(1, Math.round((found.progressPercent / 100) * allLessons.length));
-                setCompletedLessons(allLessons.slice(0, count).map((l) => l.id));
-              }
+              const count = Math.round(found.progressPercent / 100 * allLessons.length);
+              setCompletedLessons(allLessons.slice(0, count).map((lesson) => lesson.id));
             } else {
               setCompletedLessons([]);
             }
           }
         })
         .catch(console.error);
-    } else {
-      const saved = localStorage.getItem(`fale_lessons_${course.id}`);
-      if (saved) {
-        try {
-          setCompletedLessons(JSON.parse(saved));
-        } catch (_) {}
-      } else if (!isEnrolled) {
-        setCompletedLessons([]);
-      }
     }
   }, [course.id, isEnrolled]);
 
-  const handleEnroll = () => {
-    if (!isEnrolled) {
-      if (isApiEnabled) {
-        enrollCourse(course.id).catch((err) => {
-          console.error("Failed to enroll in course:", err);
-        });
-      }
-      setState((x) => ({ courses: [...x.courses, course.id] }));
-      toast.success("Successfully enrolled!", {
-        description: `You now have full accredited access to ${course.title}. Starting Lesson 1.`,
-      });
-      if (firstLesson) {
-        setActiveLesson(firstLesson);
-      }
+  const handleEnroll = async () => {
+    if (isEnrolled) return true;
+    try {
+      await enrollCourse(course.id);
+      setState((previous) => ({ courses: Array.from(new Set([...previous.courses, course.id])) }));
+      toast.success("Successfully enrolled", { description: course.title });
+      if (firstLesson) setActiveLesson(firstLesson);
       setActiveTab("classroom");
+      return true;
+    } catch {
+      toast.error("Could not enroll. Please try again.");
+      return false;
     }
   };
 
-  const toggleLessonComplete = (lessonId: string) => {
-    if (!isEnrolled) {
-      handleEnroll();
-    }
-    const updated = completedLessons.includes(lessonId)
-      ? completedLessons.filter((id) => id !== lessonId)
-      : [...completedLessons, lessonId];
-    setCompletedLessons(updated);
+  const toggleLessonComplete = async (lessonId: string) => {
+    if (!isEnrolled && !(await handleEnroll())) return;
+    const updated = completedLessons.includes(lessonId) ? completedLessons.filter((id) => id !== lessonId) : [...completedLessons, lessonId];
+    const percent = Math.min(100, Math.round(updated.length / Math.max(allLessons.length, 1) * 100));
     try {
-      localStorage.setItem(`fale_lessons_${course.id}`, JSON.stringify(updated));
-    } catch (_) {}
-
-    const newProgress = Math.min(
-      100,
-      Math.round((updated.length / Math.max(allLessons.length, 1)) * 100)
-    );
-    if (isApiEnabled) {
-      updateCourseProgress(course.id, newProgress).catch(console.error);
-    }
-    if (!completedLessons.includes(lessonId)) {
-      toast.success("Lesson marked as complete", {
-        description: "+25 CME Progress XP awarded.",
-      });
-    }
+      await updateCourseProgress(course.id, percent);
+      setCompletedLessons(updated);
+      toast.success("Lesson progress saved");
+    } catch { toast.error("Could not save progress. Please try again."); }
   };
 
   const handleNextLesson = () => {
@@ -401,7 +361,7 @@ function CourseDetailScreen() {
     }
   };
 
-  const handleQuizSubmit = () => {
+  const handleQuizSubmit = async () => {
     const answeredCount = Object.keys(userQuizAnswers).length;
     if (answeredCount < quizQuestions.length) {
       toast.error(`Please answer all ${quizQuestions.length} questions before submitting.`);
@@ -421,18 +381,15 @@ function CourseDetailScreen() {
 
     const passScore = correctCount / quizQuestions.length >= 0.8;
     if (passScore) {
-      toast.success("Clinical Competency Verified! Score: " + `${correctCount}/${quizQuestions.length}`, {
-        description: "+50 CME XP Awarded. Your accredited credential certificate is unlocked!",
-      });
       // Mark all lessons or quiz complete
       const allIds = allLessons.map((l) => l.id);
-      setCompletedLessons(allIds);
       try {
-        localStorage.setItem(`fale_lessons_${course.id}`, JSON.stringify(allIds));
-      } catch (_) {}
-      if (isApiEnabled) {
-        updateCourseProgress(course.id, 100).catch(console.error);
-      }
+        await updateCourseProgress(course.id, 100);
+        setCompletedLessons(allIds);
+        toast.success(`Quiz passed: ${correctCount}/${quizQuestions.length}`, {
+          description: "Course completion saved.",
+        });
+      } catch { toast.error("Could not save course completion. Please retry."); }
     } else {
       toast.error(`Score: ${correctCount}/${quizQuestions.length}. Passing standard is 80%.`, {
         description: "Review the evidence-based rationales below and retry.",
@@ -467,7 +424,7 @@ function CourseDetailScreen() {
   const candidateName =
     typeof s.profile?.["fullName"] === "string" && s.profile["fullName"].trim()
       ? s.profile["fullName"]
-      : "Nurse Priya Raman, RN";
+      : "Healthcare Professional";
 
   return (
     <AppShell>
@@ -632,7 +589,7 @@ function CourseDetailScreen() {
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] w-full max-w-full min-w-0">
               {/* Left Column: Player Viewport & Clinical Context */}
               <div className="space-y-4 w-full max-w-full min-w-0">
-                
+
                 {/* Viewport Mode Switcher Header */}
                 <div className="flex items-center justify-between gap-2 px-1">
                   <div className="flex items-center gap-2">
@@ -1536,6 +1493,7 @@ function CourseDetailScreen() {
 
           {/* TAB 4: DIGITAL CME CERTIFICATE */}
           <TabsContent value="certificate" className="space-y-6 mt-0 min-w-0">
+{!course.certificateDetails.credentialCode ? <p role="status" className="surface rounded-2xl p-6 text-sm">No certificate has been issued for this course.</p> : <>
             <div className="surface p-4 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl border border-border/80 space-y-6 min-w-0">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 pb-4">
                 <div>
@@ -1549,12 +1507,7 @@ function CourseDetailScreen() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    setCertClaimed(true);
-                    toast.success("Certificate Added to FALE Profile!", {
-                      description: "Hospitals viewing your application will now see your verified badge.",
-                    });
-                  }}
+                  onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
                   className="rounded-xl font-bold text-xs border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
                 >
                   <HiOutlineDocumentCheck className="mr-1.5 h-4 w-4" />
@@ -1629,11 +1582,7 @@ function CourseDetailScreen() {
               {/* Action Buttons */}
               <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
                 <Button
-                  onClick={() => {
-                    toast.success("Downloading Certificate PDF...", {
-                      description: `Saved as ${course.certificateDetails.credentialCode}.pdf`,
-                    });
-                  }}
+                  onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
                   className="rounded-xl font-bold bg-primary text-primary-foreground shadow-xs hover:bg-primary/95 text-xs gap-1.5 h-9"
                 >
                   <HiOutlineArrowDownTray className="h-4 w-4" /> Download Certificate (PDF)
@@ -1649,7 +1598,8 @@ function CourseDetailScreen() {
                 </Button>
               </div>
             </div>
-          </TabsContent>
+          </>}
+</TabsContent>
 
           {/* TAB 5: OVERVIEW & FACULTY */}
           <TabsContent value="overview" className="space-y-6 mt-0 min-w-0">

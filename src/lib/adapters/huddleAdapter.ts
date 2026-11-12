@@ -123,7 +123,7 @@ export async function applyForMentorSeal(): Promise<MentorApplicationDto> {
 
 export async function getHuddlePosts(field = "All"): Promise<HuddlePostDto[]> {
   const q = field && field !== "All" ? `?field=${encodeURIComponent(field)}` : "";
-  return apiFetch<HuddlePostDto[]>(`/huddle/posts${q}`);
+  return apiFetch<HuddlePostDto[]>(`/huddle/posts${q}`, { validate: Array.isArray });
 }
 
 export async function createHuddlePost(payload: {
@@ -211,7 +211,7 @@ export async function flagHuddlePost(postId: string, reason: string): Promise<vo
 }
 
 export async function getHuddleComments(postId: string): Promise<HuddleCommentDto[]> {
-  return apiFetch<HuddleCommentDto[]>(`/huddle/posts/${postId}/comments`);
+  return apiFetch<HuddleCommentDto[]>(`/huddle/posts/${postId}/comments`, { validate: Array.isArray });
 }
 
 export async function addHuddleComment(postId: string, body: string): Promise<HuddleCommentDto> {
@@ -222,7 +222,7 @@ export async function addHuddleComment(postId: string, body: string): Promise<Hu
 }
 
 export async function getHuddleQuestions(): Promise<HuddleQuestionDto[]> {
-  return apiFetch<HuddleQuestionDto[]>("/huddle/questions");
+  return apiFetch<HuddleQuestionDto[]>("/huddle/questions", { validate: Array.isArray });
 }
 
 export async function createHuddleQuestion(payload: {
@@ -276,7 +276,7 @@ export interface CreateHuddleSessionPayload {
 }
 
 export async function getHuddleSessions(): Promise<HuddleSessionDto[]> {
-  return apiFetch<HuddleSessionDto[]>("/huddle/sessions");
+  return apiFetch<HuddleSessionDto[]>("/huddle/sessions", { validate: Array.isArray });
 }
 
 export async function createHuddleSession(payload: CreateHuddleSessionPayload): Promise<HuddleSessionDto> {

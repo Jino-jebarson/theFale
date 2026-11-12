@@ -61,7 +61,7 @@ function Verify() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (search.id && isApiEnabled) {
+    if (search.id) {
       setBadgeLoading(true);
       getPublicVerificationBadge(search.id)
         .then((data) => {
@@ -87,9 +87,10 @@ function Verify() {
   const submit = async (value = code) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
-    if (isApiEnabled) {
+    {
       try {
-        const contact = s.contact || "+919876543210";
+        const contact = s.contact;
+        if (!contact) throw new Error("Enter your mobile number on the sign-in page first.");
         const roleParam = s.portal === "facility" ? "ROLE_FACILITY" : "ROLE_CANDIDATE";
         const authData = await verifyOtp(contact, value, roleParam);
         const role = authData.role ?? authData.user?.role;
@@ -119,17 +120,7 @@ function Verify() {
       return;
     }
 
-    if (value !== "123456") {
-      toast.error("That code doesn't match. Try 123456 in this preview.");
-      setIsSubmitting(false);
-      return;
-    }
-    setState({ signedIn: true, candidateLevel: undefined, onboarded: false });
-    navigate({
-      to: "/onboarding",
-      search: { role: s.portal === "facility" ? "employer" : "candidate" },
-    });
-    setIsSubmitting(false);
+
   };
 
   // If viewing a public QR credential badge
@@ -250,11 +241,7 @@ function Verify() {
         </InputOTP>
       </div>
 
-      {!isApiEnabled && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          Preview code: <b className="text-primary">123456</b>
-        </p>
-      )}
+      {false}
       <Button
         size="lg"
         className="mt-6 w-full"

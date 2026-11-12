@@ -1,3 +1,8 @@
+import { AllyReviewNote } from "@/components/fale/AllyReviewNote";
+import { copyText } from "@/lib/copyText";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -27,7 +32,7 @@ import {
 import { toast } from "sonner";
 import { BotMessageSquare } from "lucide-react";
 import { AdminLayout } from "@/components/fale/AdminLayout";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -54,6 +59,7 @@ import {
   cleanMarkdownAndJsonNoise,
   extractJsonPayload,
   formatConfidencePercent,
+  writeSessionAuditCache,
   readSessionAuditCache,
 } from "@/lib/allyAuditUtils";
 
@@ -120,6 +126,8 @@ function getExpectedSalaryText(minPaise?: any, maxPaise?: any) {
 }
 
 function CandidateKYCAdmin() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const s = useApp();
   const [filter, setFilter] = useState<"all" | "pending" | "verified" | "rejected">("pending");
   const [search, setSearch] = useState("");
@@ -127,10 +135,10 @@ function CandidateKYCAdmin() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
-  
+
   // Ally Statutory Credential Pre-Check State (#16)
   type AllyPreCheckResult = {
-    status: "CLEAR" | "FLAGGED" | "PENDING" | "ERROR";
+    status: "REVIEW" | "FLAGGED" | "PENDING" | "ERROR";
     assessment: string;
     confidence: number | null;
     formatValid: boolean;
@@ -142,7 +150,7 @@ function CandidateKYCAdmin() {
   const ALLY_CACHE_KEY = "fale_ally_kyc_audit_cache_v1";
 
   const getAuditCacheKey = useCallback((c: CandidateKYCItem) => {
-    return `${c.id}:${(c.regNumber || "").trim()}:${(c.council || "").trim()}`;
+    return `${c.id}:${(c.regNumber || "").trim()}:${(c.council || "").trim()}:${c.name}:${c.profession}:${c.qualification}`;
   }, []);
 
   const [aiPreCheckResults, setAiPreCheckResults] = useState<Record<string, AllyPreCheckResult>>(() =>
@@ -151,13 +159,7 @@ function CandidateKYCAdmin() {
   const [runningPreCheckIds, setRunningPreCheckIds] = useState<Record<string, boolean>>({});
   const inFlightKeysRef = useRef<Set<string>>(new Set());
 
-  const persistAllyCache = (next: Record<string, AllyPreCheckResult>) => {
-    try {
-      sessionStorage.setItem(ALLY_CACHE_KEY, JSON.stringify(next));
-    } catch {
-      // Ignore storage quota issues
-    }
-  };
+  const persistAllyCache = (next: Record<string, AllyPreCheckResult>) => writeSessionAuditCache(ALLY_CACHE_KEY, next);
 
   const getCandidatePreCheckStatus = useCallback(
     (c: CandidateKYCItem): AllyPreCheckResult => {
@@ -172,7 +174,7 @@ function CandidateKYCAdmin() {
         formatValid: false,
         nameAligned: false,
         assessment: `Queued for live Ally audit of registration #${c.regNumber || "UNSPECIFIED"} under ${c.council}.`,
-        recommendation: "Ally will automatically verify this registration format, or click Re-audit with Ally.",
+        recommendation: "Ally reviews supplied details only. A human must check the council record.",
         cacheKey: key,
       };
     },
@@ -182,7 +184,7 @@ function CandidateKYCAdmin() {
   const handleRunAiPreCheck = useCallback(
     async (c: CandidateKYCItem, options?: { silent?: boolean; force?: boolean }) => {
       const key = getAuditCacheKey(c);
-      if (!options?.force && inFlightKeysRef.current.has(key)) return;
+      if (inFlightKeysRef.current.has(key)) return;
       inFlightKeysRef.current.add(key);
 
       setRunningPreCheckIds((prev) => ({ ...prev, [c.id]: true }));
@@ -240,11 +242,11 @@ function CandidateKYCAdmin() {
             : null;
 
         const resultObj: AllyPreCheckResult = {
-          status: isFlagged ? "FLAGGED" : "CLEAR",
+          status: isFlagged ? "FLAGGED" : "REVIEW",
           assessment: extractedAssessment,
           confidence,
-          formatValid: !isFlagged,
-          nameAligned: sData["nameAligned"] !== false && !isFlagged,
+          formatValid: sData["formatValid"] === true && !isFlagged,
+          nameAligned: sData["nameAligned"] === true && !isFlagged,
           recommendation: extractedRecommendation,
           cacheKey: key,
         };
@@ -286,7 +288,7 @@ function CandidateKYCAdmin() {
     },
     [getAuditCacheKey]
   );
-  
+
   // Document Viewer state with non-downloading inline blob preview
   const [previewDoc, setPreviewDoc] = useState<CandidateKYCDocument | null>(null);
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
@@ -348,14 +350,14 @@ function CandidateKYCAdmin() {
       }
     }
 
-    // 4. Fallback: Generate an authentic, 100% valid clinical dossier PDF starting with %PDF- via jsPDF
-    return generateClinicalDocumentBlob(doc, selectedCandidate || undefined);
+    // Missing uploaded documents must not be replaced with generated credentials.
+    throw new Error("The uploaded document could not be loaded. Ask the candidate to upload it again.");
   };
 
   // Opens document in full new tab cleanly without triggering automatic download
-  const handleOpenInNewTab = async (doc: CandidateKYCDocument) => {
+  const handleOpenInNewTab = async (doc: CandidateKYCDocument) => { try {
     const isImg = doc.mimeType?.startsWith("image/") || doc.originalFileName.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i);
-    
+
     if (isImg) {
       const win = window.open("", "_blank");
       if (win) {
@@ -379,9 +381,9 @@ function CandidateKYCAdmin() {
 
     const win = window.open(targetUrl, "_blank");
     if (win) win.focus();
-  };
+  } catch { toast.error("The uploaded document is unavailable. Please retry or request a new upload."); } };
 
-  const handleDownloadDoc = async (doc: CandidateKYCDocument) => {
+  const handleDownloadDoc = async (doc: CandidateKYCDocument) => { try {
     const isImg = doc.mimeType?.startsWith("image/") || doc.originalFileName.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i);
     if (isImg && doc.fileUrl.startsWith("data:")) {
       const a = document.createElement("a");
@@ -402,7 +404,7 @@ function CandidateKYCAdmin() {
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-  };
+  } catch { toast.error("The uploaded document is unavailable. Please retry or request a new upload."); } };
 
   // Safely fetch and prepare PDF documents as in-memory blobs
   // This bypasses `Content-Disposition: attachment` and `X-Frame-Options` on remote hosts,
@@ -438,6 +440,7 @@ function CandidateKYCAdmin() {
         setPreviewLoading(false);
       })
       .catch((err) => {
+        pageLoad.fail(err);
         if (!active) return;
         console.error("Direct blob PDF fetch failed, using fallback viewer:", err);
         setPreviewFailed(true);
@@ -447,10 +450,9 @@ function CandidateKYCAdmin() {
     return () => {
       active = false;
     };
-  }, [previewDoc, selectedCandidate]);
+  }, [previewDoc, selectedCandidate, pageLoad.retryKey]);
 
   const fetchCandidates = async () => {
-    if (!isApiEnabled) return;
     try {
       setLoading(true);
       const res = await getPendingCandidateKyc();
@@ -516,6 +518,7 @@ function CandidateKYCAdmin() {
       });
       setApiCandidates(mapped);
     } catch (err: any) {
+      pageLoad.fail(err);
       toast.error("Failed to load candidate verifications", { description: err?.message });
     } finally {
       setLoading(false);
@@ -524,7 +527,7 @@ function CandidateKYCAdmin() {
 
   useEffect(() => {
     fetchCandidates();
-  }, []);
+  }, [pageLoad.retryKey]);
 
   // Keep selected candidate updated with fresh API data
   useEffect(() => {
@@ -534,7 +537,7 @@ function CandidateKYCAdmin() {
     }
   }, [apiCandidates]);
 
-  const candidates = isApiEnabled ? apiCandidates : s.candidateKYC;
+  const candidates = apiCandidates;
   const autoAuditedKeysRef = useRef<Set<string>>(new Set());
 
   // Automatically verify pending KYC candidates in background with max 2 concurrent Ally requests
@@ -569,7 +572,7 @@ function CandidateKYCAdmin() {
     return () => {
       cancelled = true;
     };
-  }, [candidates, getAuditCacheKey, handleRunAiPreCheck]);
+  }, [candidates, getAuditCacheKey, handleRunAiPreCheck, pageLoad.retryKey]);
 
   // Trigger live Ally audit immediately when opening Inspect Dossier if not cached yet
   useEffect(() => {
@@ -579,7 +582,7 @@ function CandidateKYCAdmin() {
     if (!cached || cached.cacheKey !== key) {
       handleRunAiPreCheck(selectedCandidate, { silent: true });
     }
-  }, [sheetOpen, selectedCandidate, aiPreCheckResults, getAuditCacheKey, handleRunAiPreCheck]);
+  }, [sheetOpen, selectedCandidate, aiPreCheckResults, getAuditCacheKey, handleRunAiPreCheck, pageLoad.retryKey]);
 
   const filtered = candidates.filter((c) => {
     const matchesFilter = filter === "all" ? true : c.status === filter;
@@ -591,8 +594,8 @@ function CandidateKYCAdmin() {
     return matchesFilter && matchesSearch;
   });
 
-  const handleVerify = async (id: string, name: string) => {
-    if (isApiEnabled) {
+  const handleVerify = async (id: string, name: string) => { await pageAction.run(async () => {
+    {
       try {
         await reviewCandidateKyc(id, "APPROVE", "Council credentials verified by compliance admin");
         toast.success("Candidate Verified!", {
@@ -601,24 +604,17 @@ function CandidateKYCAdmin() {
         setSheetOpen(false);
         fetchCandidates();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Approval failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      candidateKYC: state.candidateKYC.map((c) =>
-        c.id === id ? { ...c, status: "verified" as const } : c
-      ),
-    }));
-    toast.success("Candidate Verified!", {
-      description: `${name}'s council registration approved with Verified Clinical Seal.`,
-    });
-    setSheetOpen(false);
-  };
 
-  const handleRejectConfirm = async () => {
+  }); };
+
+  const handleRejectConfirm = async () => { await pageAction.run(async () => {
     if (!selectedCandidate) return;
-    if (isApiEnabled) {
+    {
       try {
         await reviewCandidateKyc(selectedCandidate.id, "REJECT", rejectReason || "Document verification rejected by admin.");
         toast.error("Candidate Document Rejected", {
@@ -629,22 +625,13 @@ function CandidateKYCAdmin() {
         setRejectReason("");
         fetchCandidates();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Rejection failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      candidateKYC: state.candidateKYC.map((c) =>
-        c.id === selectedCandidate.id ? { ...c, status: "rejected" as const, notes: rejectReason } : c
-      ),
-    }));
-    toast.error("Candidate Document Rejected", {
-      description: `Notification sent to ${selectedCandidate.name} to upload valid council certificate.`,
-    });
-    setRejectModalOpen(false);
-    setSheetOpen(false);
-    setRejectReason("");
-  };
+
+  }); };
 
   const pendingCount = candidates.filter((c) => c.status === "pending").length;
   const verifiedCount = candidates.filter((c) => c.status === "verified").length;
@@ -672,6 +659,8 @@ function CandidateKYCAdmin() {
         </Button>
       }
     >
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
+      <AllyReviewNote />
       {/* Metric Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
@@ -869,7 +858,7 @@ function CandidateKYCAdmin() {
                           {(() => {
                             const preCheck = getCandidatePreCheckStatus(item);
                             const isAnalyzing = Boolean(runningPreCheckIds[item.id]);
-                            const isClear = preCheck.status === "CLEAR";
+                            const isClear = preCheck.status === "REVIEW";
                             const isFlagged = preCheck.status === "FLAGGED";
                             const isError = preCheck.status === "ERROR";
                             return (
@@ -886,7 +875,7 @@ function CandidateKYCAdmin() {
                                 )}
                               >
                                 {isAnalyzing ? (
-                                  <HiOutlineArrowPath className="h-3 w-3 animate-spin text-primary shrink-0" />
+                                  <ButtonSpinner className="h-3 w-3 animate-spin text-primary shrink-0" />
                                 ) : (
                                   <BotMessageSquare
                                     className={cn(
@@ -905,7 +894,7 @@ function CandidateKYCAdmin() {
                                   {isAnalyzing
                                     ? "Ally Auditing..."
                                     : isClear
-                                    ? "Ally Pre-Check Verified"
+                                    ? "Ally Review Ready"
                                     : isFlagged
                                     ? "Ally Pre-Check Flagged"
                                     : isError
@@ -949,7 +938,7 @@ function CandidateKYCAdmin() {
 
                             <Button
                               size="sm"
-                              onClick={() => handleVerify(item.id, item.name)}
+                              disabled={pageAction.isPending} onClick={() => handleVerify(item.id, item.name)}
                               className="h-8 px-3.5 text-xs font-bold rounded-lg bg-primary hover:bg-primary-hover text-white gap-1.5 shadow-xs transition-all active:scale-[0.98] cursor-pointer"
                             >
                               <HiCheck className="h-3.5 w-3.5 stroke-[2.5]" />
@@ -982,7 +971,7 @@ function CandidateKYCAdmin() {
             const docCount = item.documents?.length || 1;
             const preCheck = getCandidatePreCheckStatus(item);
             const isPreCheckAnalyzing = Boolean(runningPreCheckIds[item.id]);
-            const isPreCheckClear = preCheck.status === "CLEAR";
+            const isPreCheckClear = preCheck.status === "REVIEW";
             const isPreCheckFlagged = preCheck.status === "FLAGGED";
             const isPreCheckError = preCheck.status === "ERROR";
 
@@ -1037,7 +1026,7 @@ function CandidateKYCAdmin() {
                       )}
                     >
                       {isPreCheckAnalyzing ? (
-                        <HiOutlineArrowPath className="h-3 w-3 animate-spin text-primary shrink-0" />
+                        <ButtonSpinner className="h-3 w-3 animate-spin text-primary shrink-0" />
                       ) : (
                         <BotMessageSquare
                           className={cn(
@@ -1056,7 +1045,7 @@ function CandidateKYCAdmin() {
                         {isPreCheckAnalyzing
                           ? "Ally Auditing..."
                           : isPreCheckClear
-                          ? "Ally Pre-Check Verified"
+                          ? "Ally Review Ready"
                           : isPreCheckFlagged
                           ? "Ally Pre-Check Flagged"
                           : isPreCheckError
@@ -1124,7 +1113,7 @@ function CandidateKYCAdmin() {
 
                       <Button
                         size="sm"
-                        onClick={() => handleVerify(item.id, item.name)}
+                        disabled={pageAction.isPending} onClick={() => handleVerify(item.id, item.name)}
                         className="w-full h-9 px-2 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1 shadow-none cursor-pointer"
                       >
                         <HiCheck className="h-3.5 w-3.5 shrink-0" />
@@ -1182,7 +1171,7 @@ function CandidateKYCAdmin() {
 
           {selectedCandidate && (
             <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3.5 sm:p-6 space-y-4 sm:space-y-5">
-              
+
               {/* 1. Candidate Identity & Demographics */}
               <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-4 shadow-xs">
                 <div className="flex flex-col xs:flex-row sm:flex-row items-start gap-3 sm:gap-4">
@@ -1244,7 +1233,7 @@ function CandidateKYCAdmin() {
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">City & State</span>
-                    <strong className="text-foreground text-xs font-bold truncate block">{selectedCandidate.city || "Chennai"}, {selectedCandidate.state || "Tamil Nadu"}</strong>
+                    <strong className="text-foreground text-xs font-bold truncate block">{selectedCandidate.city || ""}, {selectedCandidate.state || ""}</strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Pincode</span>
@@ -1275,7 +1264,7 @@ function CandidateKYCAdmin() {
               {/* Ally Credential Verification Pre-Check Card (#16) */}
               {(() => {
                 const preCheck = getCandidatePreCheckStatus(selectedCandidate);
-                const isClear = preCheck.status === "CLEAR";
+                const isClear = preCheck.status === "REVIEW";
                 const isFlagged = preCheck.status === "FLAGGED";
                 const isError = preCheck.status === "ERROR";
                 const isAnalyzing = Boolean(runningPreCheckIds[selectedCandidate.id]);
@@ -1304,13 +1293,13 @@ function CandidateKYCAdmin() {
                         >
                           {isAnalyzing ? (
                             <>
-                              <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                              <ButtonSpinner className="h-3 w-3 animate-spin shrink-0" />
                               <span>Auditing with Ally...</span>
                             </>
                           ) : preCheck.confidence !== null ? (
-                            <span>Match Confidence: {preCheck.confidence.toFixed(1)}%</span>
+                            <span>AI self-rating (uncalibrated): {preCheck.confidence.toFixed(1)}%</span>
                           ) : isClear ? (
-                            <span>Ally Verified</span>
+                            <span>Ally Review Ready</span>
                           ) : isFlagged ? (
                             <span>Ally Flagged</span>
                           ) : isError ? (
@@ -1328,7 +1317,7 @@ function CandidateKYCAdmin() {
                         >
                           {isAnalyzing ? (
                             <>
-                              <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                              <ButtonSpinner className="h-3 w-3 animate-spin shrink-0" />
                               <span>Auditing with Ally...</span>
                             </>
                           ) : (
@@ -1403,8 +1392,8 @@ function CandidateKYCAdmin() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => {
-                          navigator.clipboard.writeText(selectedCandidate.regNumber);
+                        onClick={async () => {
+                          if (!await copyText(selectedCandidate.regNumber)) return;
                           toast.success("Registration Number Copied", { description: selectedCandidate.regNumber });
                         }}
                         className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/10 gap-1 rounded-md shrink-0 cursor-pointer"
@@ -1767,7 +1756,7 @@ function CandidateKYCAdmin() {
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => handleVerify(selectedCandidate.id, selectedCandidate.name)}
+                    disabled={pageAction.isPending} onClick={() => handleVerify(selectedCandidate.id, selectedCandidate.name)}
                     className="flex-1 sm:flex-initial h-9 bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1 rounded-xl cursor-pointer whitespace-nowrap"
                   >
                     <HiCheck className="h-3.5 w-3.5 stroke-[2.5]" /> Approve &amp; Issue Seal
@@ -1837,7 +1826,7 @@ function CandidateKYCAdmin() {
           <div className="flex-1 min-h-0 relative bg-muted/20 flex flex-col items-center justify-center overflow-hidden">
             {previewLoading && (
               <div className="flex flex-col items-center justify-center gap-3 p-8 text-muted-foreground">
-                <HiOutlineArrowPath className="h-8 w-8 animate-spin text-primary" />
+                <ButtonSpinner className="h-8 w-8 animate-spin text-primary" />
                 <p className="text-xs font-bold text-foreground">Preparing document preview...</p>
                 <p className="text-[11px] text-muted-foreground">Rendering inline clinical certificate without downloading</p>
               </div>
@@ -1940,7 +1929,7 @@ function CandidateKYCAdmin() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejectModalOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleRejectConfirm} className="font-bold text-xs">
+            <Button variant="destructive" disabled={pageAction.isPending} onClick={handleRejectConfirm} className="font-bold text-xs">
               Confirm Rejection
             </Button>
           </DialogFooter>

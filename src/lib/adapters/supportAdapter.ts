@@ -23,7 +23,7 @@ export interface CreateSupportTicketRequest {
  * Fetch all support tickets submitted by current user.
  */
 export async function getMyTickets(): Promise<SupportTicketDto[]> {
-  return apiFetch<SupportTicketDto[]>("/support/tickets");
+  return apiFetch<SupportTicketDto[]>("/support/tickets", { validate: Array.isArray });
 }
 
 /**

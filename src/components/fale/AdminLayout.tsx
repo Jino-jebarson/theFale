@@ -74,7 +74,6 @@ export function AdminLayout({
   const [seenCounts, setSeenCounts] = useState<AdminRouteCounts>(() => readAdminSeenCounts());
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     getAdminDashboardMetrics()
       .then((data) => {
         if (data) setMetrics(data);
@@ -91,30 +90,30 @@ export function AdminLayout({
       .catch(() => { });
   }, [path]);
 
-  const pendingCandidateKYC = isApiEnabled && metrics
+  const pendingCandidateKYC = metrics
     ? (metrics.pendingCandidateKycCount ?? 0)
     : s.candidateKYC.filter((c) => c.status === "pending").length;
 
-  const pendingFacilityKYC = isApiEnabled && metrics
+  const pendingFacilityKYC = metrics
     ? (metrics.pendingFacilityKycCount ?? 0)
     : s.facilityKYC.filter((f) => f.status === "pending").length;
 
-  const pendingJobApprovals = isApiEnabled && metrics
+  const pendingJobApprovals = metrics
     ? (metrics.pendingPostingsCount ?? 0)
     : s.jobApprovals.filter((j) => j.status === "pending").length;
 
-  const pendingShortlisting = isApiEnabled && metrics
+  const pendingShortlisting = metrics
     ? (metrics.pendingApplicationsCount ?? 0)
     : s.adminApplications.filter((a) => a.status === "pending_admin").length;
 
-  const pendingHuddleModeration = isApiEnabled && metrics
+  const pendingHuddleModeration = metrics
     ? (metrics.flaggedHuddlePostsCount ?? 0)
     : s.huddlePosts.filter(
       (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
     ).length;
 
-  const metricsReady = !isApiEnabled || metrics !== null;
-  const ticketsReady = !isApiEnabled || ticketsLoaded;
+  const metricsReady = metrics !== null;
+  const ticketsReady = ticketsLoaded;
 
   useEffect(() => {
     const updated = syncAdminSeenCounts(

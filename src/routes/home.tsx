@@ -1,3 +1,6 @@
+import { usePageLoad } from "@/hooks/use-page-load";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { RequestError } from "@/components/fale/RequestError";
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -36,7 +39,7 @@ import { setState, useApp } from "@/lib/store";
 import { getRoleIllustration } from "@/lib/roleImages";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
-import { getJobs, applyForJob } from "@/lib/adapters/jobAdapter";
+import { getJobs, applyForJob, saveJob, unsaveJob } from "@/lib/adapters/jobAdapter";
 import { getOpenShifts, claimShift, getMyClaims, type UiShiftItem, type ShiftClaimDto } from "@/lib/adapters/shiftAdapter";
 import { getMyApplications, type JobApplicationDto } from "@/lib/adapters/applicationAdapter";
 import {
@@ -71,6 +74,8 @@ export const Route = createFileRoute("/home")({
 type FilterTab = "All" | "Top match" | "Urgent" | "Day shift" | "Internships" | "Other openings";
 
 function Home() {
+  const pageLoad = usePageLoad();
+  const jobAction = useConfirmedAction();
   const s = useApp();
   const [filter, setFilter] = useState<FilterTab>("All");
   const [claimedShifts, setClaimedShifts] = useState<Record<string, boolean>>({});
@@ -123,15 +128,14 @@ function Home() {
   };
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     setLoading(true);
     Promise.all([
-      getJobs().catch(() => []),
-      getOpenShifts().catch(() => []),
-      getMyApplications().catch(() => []),
-      getMyClaims().catch(() => []),
-      getCandidateProfile().catch(() => null),
-      getCandidateViewStats().catch(() => null),
+      getJobs(),
+      getOpenShifts(),
+      getMyApplications(),
+      getMyClaims(),
+      getCandidateProfile(),
+      getCandidateViewStats(),
     ])
       .then(([jobsData, shiftsData, myApps, myClaimsData, profileData, viewStatsData]) => {
         setApiJobs(jobsData as Job[]);
@@ -162,7 +166,7 @@ function Home() {
               state: profileData.state || prev.profile["state"],
               role: profileData.profession || (profileData.isStudent ? profileData.course : "Doctor"),
               specialty: profileData.specialty || "General medicine",
-              qual: profileData.qualification || "MBBS",
+              qual: profileData.qualification || "",
               college: profileData.college || prev.profile["college"],
               institution: profileData.college || prev.profile["institution"],
               council: profileData.council || prev.profile["council"],
@@ -181,11 +185,11 @@ function Home() {
               : prev.docs,
           }));
         }
-      })
+      }).catch(pageLoad.fail)
       .finally(() => {
         setLoading(false);
       });
-  }, []);
+  }, [pageLoad.retryKey]);
 
   const candidateLevel =
     s.candidateLevel ||
@@ -199,7 +203,7 @@ function Home() {
   const studyYear = String(s.profile["studyYear"] || "Final Year");
   const candidateLocation = String(s.profile["city"] || s.profile["area"] || "").trim();
 
-  const fullName = String(s.profile["name"] || (isStudent ? "Healthcare Student" : "Dr. Ananya Patel")).trim();
+  const fullName = String(s.profile["name"] || (isStudent ? "Healthcare Student" : "Healthcare Professional")).trim();
   const firstName = fullName.split(" ")[0]?.replace(",", "") || "there";
   const roleName = isStudent ? `Student (${courseName})` : String(s.profile["role"] || "Doctor");
   const specialty = isStudent ? `${courseName} · ${collegeName}` : String(s.profile["specialty"] || "General medicine");
@@ -240,7 +244,7 @@ function Home() {
 
   // Dynamic Candidate-Tailored Jobs with Clinical-Grade Matching Engine (0% - 100%)
   const effectiveJobs = useMemo(() => {
-    const rawList = isApiEnabled ? apiJobs : jobs;
+    const rawList = apiJobs;
 
     return rawList.map((j) => {
       const matchResult = calculateClinicalMatch(candidateInput, {
@@ -263,7 +267,7 @@ function Home() {
     });
   }, [isApiEnabled, apiJobs, jobs, candidateInput]);
 
-const effectiveShifts = isApiEnabled ? apiShifts : shifts;
+const effectiveShifts = apiShifts;
 const studentInternships = effectiveJobs.filter((j) => j.kind === "internship" || j.type === "Internship");
 
 // Dynamic Set of Applied Job IDs
@@ -301,7 +305,7 @@ const candidateTotalEarnings = useMemo(() => {
 
   const matchedShifts = effectiveShifts.filter((sh) => claimedShiftIds.has(sh.id));
   return matchedShifts.reduce((sum, sh) => {
-    const r = typeof sh.rate === "number" ? sh.rate : (sh.rateNumber || 500);
+    const r = typeof sh.rate === "number" ? sh.rate : (sh.rateNumber || 0);
     const h = sh.hours || 8;
     return sum + (sh.totalPayNumber || (r * h));
   }, 0);
@@ -347,19 +351,19 @@ const urgentRolesCount = useMemo(() => {
 const instantShiftsCount = effectiveShifts.length;
 const minHourlyRate = useMemo(() => {
   if (!effectiveShifts.length) return 350;
-  const rates = effectiveShifts.map((sh) => (typeof sh.rate === "number" ? sh.rate : (sh.rateNumber || 350)));
+  const rates = effectiveShifts.map((sh) => (typeof sh.rate === "number" ? sh.rate : (sh.rateNumber || 0)));
   return Math.min(...rates);
 }, [effectiveShifts]);
 const urgentShiftsCount = useMemo(() => {
   return effectiveShifts.filter((sh) => sh.urgent).length;
 }, [effectiveShifts]);
 
-const totalSubmissionsCount = isApiEnabled ? apiApplications.length : s.applied.length;
+const totalSubmissionsCount = apiApplications.length;
 const activeApplicationsCount = useMemo(() => {
-  if (isApiEnabled) {
+  {
     return apiApplications.filter((a) => !["REJECTED", "WITHDRAWN"].includes((a.status || "").toUpperCase())).length;
   }
-  return s.applied.filter((a) => !["Not selected", "Withdrawn"].includes(a.status)).length;
+
 }, [isApiEnabled, apiApplications, s.applied]);
 
 const filteredJobs = useMemo(() => {
@@ -397,7 +401,7 @@ const handleClaimShift = async (shiftId: string, title: string, org: string) => 
     });
     return;
   }
-  if (isApiEnabled) {
+  {
     try {
       const claim = await claimShift(shiftId);
       setApiClaims((prev) => [...prev, claim]);
@@ -436,13 +440,7 @@ const handleClaimShift = async (shiftId: string, title: string, org: string) => 
     }
     return;
   }
-  setClaimedShifts((prev) => ({ ...prev, [shiftId]: true }));
-  setState((x) => ({
-    shiftApps: Array.from(new Set([...(x.shiftApps || []), shiftId])),
-  }));
-  toast.success("Shift claim submitted!", {
-    description: `Your interest in ${title} at ${org} was sent. Facility HR will confirm shortly.`,
-  });
+
 };
 
 const handleDownloadCV = async () => {
@@ -452,7 +450,7 @@ const handleDownloadCV = async () => {
   const toastId = toast.loading(getCvPreparingToastText(isStudent, currentKyc));
   try {
     let profileSnapshot = liveCandidateProfile;
-    if (isApiEnabled && !profileSnapshot) {
+    if (!profileSnapshot) {
       profileSnapshot = await exportCandidateCv();
       setLiveCandidateProfile(profileSnapshot);
     }
@@ -481,7 +479,7 @@ const handleToggleOpenToWork = async () => {
       openToWork: next,
     },
   }));
-  if (isApiEnabled) {
+  {
     setUpdatingOpenToWork(true);
     try {
       await updateOpenToWork(next);
@@ -507,68 +505,32 @@ const handleToggleOpenToWork = async () => {
     } finally {
       setUpdatingOpenToWork(false);
     }
-  } else {
-    toast.success(
-      next ? "Open to Work activated!" : "Open to Work paused"
-    );
   }
 };
 
-const toggleSave = (jobId: string) => {
-  const isSaved = s.saved.includes(jobId);
-  setState((x) => ({
-    saved: isSaved ? x.saved.filter((id) => id !== jobId) : [...x.saved, jobId],
-  }));
-  if (!isSaved) {
-    toast.success("Role saved to your wishlist");
-  }
-};
+const toggleSave = async (jobId: string) => jobAction.run(async () => {
+    const saved = s.saved.includes(jobId);
+    if (saved) await unsaveJob(jobId); else await saveJob(jobId);
+    setState((previous) => ({ saved: saved ? previous.saved.filter((id) => id !== jobId) : [...previous.saved, jobId] }));
+    toast.success(saved ? "Role removed from saved jobs" : "Role saved");
+  });
 
 const handleQuickApply = async (job: Job) => {
-  const isIntern = job.kind === "internship" || job.type === "Internship";
-  if (isStudent && !isIntern) {
-    toast.info("Internships only for students", {
-      description: "Full-time hospital positions unlock once you graduate with council registration.",
+    if (isStudent && job.kind !== "internship" && job.type !== "Internship") { toast.info("Students can apply for internships only."); return; }
+    if (appliedJobIds.has(job.id)) return;
+    return jobAction.run(async () => {
+      const saved = await applyForJob(job.id);
+      setApiApplications((previous) => [...previous, saved as any]);
+      setState((previous) => ({ applied: [{ jobId: job.id, status: "Applied", date: new Date().toLocaleDateString("en-IN") }, ...previous.applied.filter((item) => item.jobId !== job.id)] }));
+      setApiAppliedCount((count) => count + 1);
+      toast.success("Application submitted");
     });
-    return;
-  }
-
-  if (appliedJobIds.has(job.id)) {
-    toast.info("Already applied to this position");
-    return;
-  }
-
-  if (isApiEnabled) {
-    try {
-      const app = await applyForJob(job.id);
-      const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-      setApiApplications((prev) => [...prev, app as any]);
-      setState((x) => ({
-        applied: [{ jobId: job.id, status: "Applied", date: now }, ...x.applied],
-      }));
-      setApiAppliedCount((c) => c + 1);
-      toast.success("Application submitted via Easy Apply!", {
-        description: `Your verified profile was sent to ${job.org}.`,
-      });
-    } catch (err: any) {
-      toast.error("Application failed", {
-        description: err?.message || "Could not submit application.",
-      });
-    }
-    return;
-  }
-
-  const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  setState((x) => ({
-    applied: [{ jobId: job.id, status: "Applied", date: now }, ...x.applied],
-  }));
-  toast.success("Application submitted via Easy Apply!", {
-    description: `Your verified profile was sent to ${job.org}.`,
-  });
-};
+  };
 
 return (
   <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
+      <RequestError message={jobAction.error} />
     <div className="max-w-[1440px] mx-auto space-y-6 sm:space-y-8 pb-10">
       {/* ========================================================================= */}
       {/* 1. EXECUTIVE WELCOME & IDENTITY COCKPIT                                   */}
@@ -1316,7 +1278,7 @@ return (
                   <span>{isStudent ? "Academic ID Card" : "Degree Certificate"}</span>
                 </span>
                 <span className="font-semibold text-foreground truncate max-w-[150px] text-right">
-                  {s.profile["qual"] || s.docs["DEGREE"] || s.docs["STUDENT_ID"] || "MBBS"}
+                  {s.profile["qual"] || s.docs["DEGREE"] || s.docs["STUDENT_ID"] || ""}
                 </span>
               </div>
 

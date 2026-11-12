@@ -1,3 +1,6 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useMemo } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
@@ -168,6 +171,8 @@ function CoinIcon({ className = "h-4 w-4" }: { className?: string }) {
 }
 
 function FindCandidates() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const store = useApp();
 
   const navigate = useNavigate();
@@ -190,20 +195,19 @@ function FindCandidates() {
   const [viewResumeApplicant, setViewResumeApplicant] = useState<any | null>(null);
 
   const fetchCandidates = () => {
-    if (!isApiEnabled) return;
     setLoading(true);
     const specialtyParam = selectedRole !== "All" ? selectedRole : undefined;
     const cityParam = selectedCity !== "All" ? selectedCity : undefined;
     Promise.all([
-      searchTalentCandidates(search.trim() || undefined, specialtyParam, cityParam).catch(() => []),
-      getFacilityWallet().catch(() => null),
-      getHospitalBankAccount().catch(() => null),
+      searchTalentCandidates(search.trim() || undefined, specialtyParam, cityParam),
+      getFacilityWallet(),
+      getHospitalBankAccount(),
     ])
       .then(([candidates, wallet, bank]) => {
         setApiCandidates(candidates);
         setApiWallet(wallet);
         setApiBank(bank);
-      })
+      }).catch(pageLoad.fail)
       .finally(() => {
         setLoading(false);
       });
@@ -211,71 +215,55 @@ function FindCandidates() {
 
   useEffect(() => {
     fetchCandidates();
-  }, [selectedRole, selectedCity, search]);
+  }, [selectedRole, selectedCity, search, pageLoad.retryKey]);
 
-  const credits = isApiEnabled
-    ? apiWallet?.candidateCredits ?? 0
-    : store.candidateCredits ?? 0;
+  const credits = apiWallet?.candidateCredits ?? 0;
 
-  const hasLinkedBank = isApiEnabled
-    ? Boolean(apiBank && (apiBank.accountNumber || (apiBank as any).accountNumberMasked || (apiBank as any).accountNumberLast4))
-    : Boolean(store.hospitalBankAccount && store.hospitalBankAccount.accountNumber && store.hospitalBankAccount.accountNumber.length > 3);
+  const hasLinkedBank = Boolean(apiBank && (apiBank.accountNumber || (apiBank as any).accountNumberMasked || (apiBank as any).accountNumberLast4));
 
-  const unlockedIds = isApiEnabled
-    ? apiCandidates.filter((c) => Boolean(c.isUnlocked || (c as any).isContactUnlocked)).map((c) => (c as any).candidateId || c.id)
-    : store.unlockedCandidates ?? [];
+  const unlockedIds = apiCandidates.filter((c) => Boolean(c.isUnlocked || (c as any).isContactUnlocked)).map((c) => (c as any).candidateId || c.id);
 
   // Available unique roles and cities for custom select
   const roles = useMemo(() => {
-    const source = isApiEnabled
-      ? apiCandidates.filter((c) => c.openToWork !== false).map((c) => c.specialty || c.profession)
-      : applicants.map((a) => a.role);
+    const source = apiCandidates.filter((c) => c.openToWork !== false).map((c) => c.specialty || c.profession);
     const set = new Set(source.filter(Boolean));
     return ["All", ...Array.from(set)];
   }, [isApiEnabled, apiCandidates]);
 
   const cities = useMemo(() => {
-    const source = isApiEnabled
-      ? apiCandidates.filter((c) => c.openToWork !== false).map((c) => c.city)
-      : applicants.map((a) => a.city);
+    const source = apiCandidates.filter((c) => c.openToWork !== false).map((c) => c.city);
     const set = new Set(source.filter(Boolean));
     return ["All", ...Array.from(set)];
   }, [isApiEnabled, apiCandidates]);
 
   // Filtered candidate list
   const filteredCandidates = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return apiCandidates
         .filter((c) => c.openToWork !== false)
         .map((c) => {
         const candidateId = (c as any).candidateId || c.id;
         const isUnlocked = Boolean(c.isUnlocked || (c as any).isContactUnlocked || unlockedIds.includes(candidateId));
-        const derivedSkills = (() => {
-          const r = (c.profession || c.specialty || "").toLowerCase();
-          if (r.includes("dialysis")) return ["Dialysis Protocols", "Hemodialysis Machine Ops", "Patient Monitoring"];
-          if (r.includes("nurse") || r.includes("scrub") || r.includes("ot")) return ["Surgical Scrubbing", "Sterilization Protocols", "Patient Safety"];
-          if (r.includes("pharmacist")) return ["Clinical Dispensing", "Pharmacovigilance", "Inventory Management"];
-          return ["Clinical Protocols", "Patient Safety", "Emergency Care"];
-        })();
+        const derivedSkills: string[] = Array.isArray((c as any).skills) ? (c as any).skills : [];
 
         return {
           id: candidateId,
           name: c.name,
           role: c.specialty || c.profession || "Medical Practitioner",
-          exp: c.experienceYears || "Council Registered",
-          city: c.city || "Chennai",
-          currentOrg: isUnlocked ? "Accredited Healthcare Partner" : "•••••••••••• Hospital",
-          verified: c.verified !== false,
-          match: c.matchScore || 94,
-          matchScore: c.matchScore || 94,
+          exp: c.experienceYears || "Not provided",
+          city: c.city || "",
+          currentOrg: "Not provided",
+          verified: c.verified === true,
+          match: c.matchScore ?? 0,
+          matchScore: c.matchScore ?? 0,
           for: "Direct Hiring",
           status: "Active",
-          qualification: c.qualification || "Medical Degree",
-          regNumber: c.regNumber || c.regNumberMasked || "Council Verified",
+          qualification: c.qualification || "Not provided",
+          regNumber: c.regNumber || c.regNumberMasked || "Not provided",
           skills: derivedSkills,
           phone: c.phone || (isUnlocked && c.unlockedPhone ? c.unlockedPhone : c.phoneMasked || "+91 ••••• •••••"),
           email: c.email || (isUnlocked && c.unlockedEmail ? c.unlockedEmail : c.emailMasked || "•••••@fale.care"),
-          bio: `${c.profession || "Clinician"} registered with ${c.council || "State Medical Council"}. Proven track record in patient care and clinical protocols adherence.`,
+          bio: (c as any).bio || "Not provided",
           isUnlocked: isUnlocked,
           resumeUrl: c.resumeUrl || undefined,
           resumeFileName: c.resumeFileName || undefined,
@@ -283,27 +271,7 @@ function FindCandidates() {
       });
     }
 
-    return applicants.filter((a) => {
-      if ((a as any).openToWork === false) return false;
-      if (store.profile?.openToWork === false && (a.name.toLowerCase() === (store.profile.fullName || store.candidate?.name || "").toLowerCase())) {
-        return false;
-      }
-      if (selectedRole !== "All" && a.role !== selectedRole) return false;
-      if (selectedCity !== "All" && a.city !== selectedCity) return false;
-      if (verifiedOnly && !a.verified) return false;
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        const matchName = a.name.toLowerCase().includes(q);
-        const matchRole = a.role.toLowerCase().includes(q);
-        const matchCity = a.city.toLowerCase().includes(q);
-        const matchOrg = a.currentOrg?.toLowerCase().includes(q);
-        const matchSkills = a.skills?.some((s) => s.toLowerCase().includes(q));
-        if (!matchName && !matchRole && !matchCity && !matchOrg && !matchSkills) {
-          return false;
-        }
-      }
-      return true;
-    });
+
   }, [isApiEnabled, apiCandidates, selectedRole, selectedCity, verifiedOnly, search]);
 
   const handleOpenBuyCredits = () => {
@@ -335,7 +303,7 @@ function FindCandidates() {
     setCandidateToUnlock(app);
   };
 
-  const handleConfirmUnlock = async () => {
+  const handleConfirmUnlock = async () => { await pageAction.run(async () => {
     if (!candidateToUnlock) return;
     if (credits < 1) {
       setCandidateToUnlock(null);
@@ -343,7 +311,7 @@ function FindCandidates() {
       return;
     }
 
-    if (isApiEnabled) {
+    {
       try {
         const unlocked = await unlockCandidateContact(candidateToUnlock.id); recordCandidateProfileView(candidateToUnlock.id, (store as any)?.facilityProfile?.hospitalName || "Partner Hospital").catch(() => {});
         setCandidateToUnlock(null);
@@ -353,6 +321,7 @@ function FindCandidates() {
         fetchCandidates();
         window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Unlock failed", {
           description: err?.message || "Could not unlock contact. Check credit balance.",
         });
@@ -361,20 +330,10 @@ function FindCandidates() {
     }
 
     // Deduct 1 credit and save unlocked candidate id
-    setState((s) => ({
-      candidateCredits: Math.max(0, (s.candidateCredits ?? 0) - 1),
-      unlockedCandidates: Array.from(new Set([...(s.unlockedCandidates ?? []), candidateToUnlock.id])),
-    }));
 
-    toast.success(`Contact details unlocked for ${candidateToUnlock.name}`, {
-      description: `Phone: ${candidateToUnlock.phone} · Email: ${candidateToUnlock.email}`,
-    });
+  }); };
 
-    window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
-    setCandidateToUnlock(null);
-  };
-
-  const handleBuyCredits = async () => {
+  const handleBuyCredits = async () => { await pageAction.run(async () => {
     if (!hasLinkedBank) {
       toast.error("Hospital Bank Account Required", {
         description: "Please link your hospital settlement bank account in Wallet & Escrow before purchasing candidate credits.",
@@ -386,7 +345,7 @@ function FindCandidates() {
     if (!selectedPackage) return;
     setIsProcessingPayment(true);
 
-    if (isApiEnabled) {
+    {
       try {
         const updatedWallet = await buyCandidateCredits(
           selectedPackage.id,
@@ -409,21 +368,12 @@ function FindCandidates() {
       return;
     }
 
-    setTimeout(() => {
-      setIsProcessingPayment(false);
-      setState((s) => ({
-        candidateCredits: (s.candidateCredits ?? 0) + selectedPackage.credits,
-      }));
-      setBuyCreditsOpen(false);
-      window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
-      toast.success(`${selectedPackage.credits} Credits added successfully`, {
-        description: `Your balance is now ${(credits ?? 0) + selectedPackage.credits} credits.`,
-      });
-    }, 600);
-  };
+
+  }); };
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="w-full min-w-0 space-y-6">
         {/* Clean Executive Header with Consistent Typography Hierarchy */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -452,7 +402,7 @@ function FindCandidates() {
             >
               <HiOutlineSparkles className="h-4 w-4" />
               <span>Buy credits</span>
-              
+
             </Button>
           </div>
         </div>
@@ -882,7 +832,7 @@ function FindCandidates() {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={handleConfirmUnlock}
+                  disabled={pageAction.isPending} onClick={handleConfirmUnlock}
                   className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover shadow-xs cursor-pointer px-4 w-full sm:w-auto h-9"
                 >
                   Confirm & unlock (1 Credit)
@@ -1019,7 +969,7 @@ function FindCandidates() {
               </Button>
               <Button
                 size="default"
-                disabled={isProcessingPayment}
+                disabled={pageAction.isPending || (isProcessingPayment)}
                 onClick={handleBuyCredits}
                 className="flex-2 sm:flex-none rounded-xl text-xs font-bold shadow-xs h-10 px-5 cursor-pointer whitespace-nowrap bg-primary hover:bg-primary-hover text-primary-foreground"
               >

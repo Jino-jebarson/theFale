@@ -1,3 +1,7 @@
+import { AllyReviewNote } from "@/components/fale/AllyReviewNote";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -24,7 +28,7 @@ import {
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AdminLayout } from "@/components/fale/AdminLayout";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -84,7 +88,7 @@ const ALLY_APPLICATION_CACHE_KEY = "fale_ally_application_screening_cache_v1";
 
 type AllyApplicationScreeningResult = {
   status: AllyAuditStatus;
-  suitabilityScore: number;
+  suitabilityScore: number | null;
   isRecommended: boolean;
   verdict: string;
   unitFitSentence: string;
@@ -132,6 +136,8 @@ function formatBytes(bytes?: number) {
 }
 
 function ApplicationsAdmin() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const s = useApp();
   const [filter, setFilter] = useState<"all" | "pending_admin" | "shortlisted" | "rejected" | "payouts" | "disputes">("pending_admin");
   const [apiPayouts, setApiPayouts] = useState<ShiftClaimDto[]>([]);
@@ -159,7 +165,7 @@ function ApplicationsAdmin() {
 
   // Ally Application Screening Desk State (session-cached + concurrency-limited live checks)
   const getAppCacheKey = useCallback((app: AdminApplication) => {
-    return `${app.id}:${app.candidateName}:${app.jobTitle}:${app.regNumber || ""}`;
+    return `${app.id}:${app.candidateName}:${app.jobTitle}:${app.regNumber || ""}:${app.candidateRole}:${app.exp}:${app.candidateCouncil}:${app.matchScore}`;
   }, []);
 
   const [aiScreeningResults, setAiScreeningResults] = useState<Record<string, AllyApplicationScreeningResult>>(() =>
@@ -177,11 +183,11 @@ function ApplicationsAdmin() {
 
       return {
         status: "PENDING",
-        suitabilityScore: 0,
+        suitabilityScore: null,
         isRecommended: false,
         verdict: "",
         unitFitSentence: `Ally clinical suitability screening queued for live role-fit verification.`,
-        councilSentence: `Council standing (${app.candidateCouncil || "State Council"} · ${app.regNumber || "Pending"}) and specialty alignment will be verified automatically by Ally.`,
+        councilSentence: `Council standing (${app.candidateCouncil || "State Council"} · ${app.regNumber || "Pending"}) and specialty alignment will be reviewed by Ally; a human must verify the source.`,
         recommendationSentence: `Shortlisting recommendation will appear once Ally completes its evaluation.`,
       };
     },
@@ -191,7 +197,7 @@ function ApplicationsAdmin() {
   const handleRunAiScreening = useCallback(
     async (app: AdminApplication, options?: { silent?: boolean }) => {
       const cacheKey = getAppCacheKey(app);
-      if (options?.silent && inFlightScreeningKeysRef.current.has(cacheKey)) return;
+      if (inFlightScreeningKeysRef.current.has(cacheKey)) return;
 
       inFlightScreeningKeysRef.current.add(cacheKey);
       setRunningScreeningIds((prev) => ({ ...prev, [app.id]: true }));
@@ -231,19 +237,10 @@ function ApplicationsAdmin() {
         );
         const lower = plainProse.toLowerCase();
 
-        const isRecommended =
-          typeof sData["isRecommended"] === "boolean"
-            ? sData["isRecommended"]
-            : rawStatus === "RECOMMENDED" || rawStatus === "VERIFIED" || rawStatus === "CLEAR"
-              ? true
-              : rawStatus.includes("REVIEW") || rawStatus.includes("FLAG") || rawStatus.includes("REJECT")
-                ? false
-                : !lower.includes("not recommended") &&
-                !lower.includes("reject") &&
-                !lower.includes("discrepancy") &&
-                !lower.includes("flagged");
+        if (!plainProse.trim()) throw new Error("Ally returned no application assessment.");
+        const isRecommended = sData["isRecommended"] === true && rawStatus === "RECOMMENDED";
 
-        const scoreRaw = sData["suitabilityScore"] ?? sData["confidence"] ?? app.matchScore;
+        const scoreRaw = sData["suitabilityScore"];
         const suitabilityScore = formatConfidencePercent(scoreRaw, !isRecommended);
 
         const sentences = plainProse
@@ -254,22 +251,22 @@ function ApplicationsAdmin() {
         const unitFitSentence =
           cleanMarkdownAndJsonNoise(typeof sData["unitFitAssessment"] === "string" ? sData["unitFitAssessment"] : "") ||
           sentences[0] ||
-          `${app.candidateName} qualifies for ${app.jobTitle} at ${app.hospitalName} with ${app.candidateRole} clinical alignment.`;
+          `Role suitability has not been established from the supplied details.`;
 
         const councilSentence =
           cleanMarkdownAndJsonNoise(typeof sData["councilAssessment"] === "string" ? sData["councilAssessment"] : "") ||
           sentences[1] ||
-          `Statutory credentials with ${app.candidateCouncil || "State Council"} (#${app.regNumber || "On Record"}) checked for deployment readiness.`;
+          `Council standing must be checked by a human against the source record.`;
 
         const recommendationSentence =
           cleanMarkdownAndJsonNoise(typeof sData["recommendation"] === "string" ? sData["recommendation"] : "") ||
           sentences[2] ||
           (isRecommended
-            ? `Recommended by Ally for immediate administrative shortlisting and dispatch to ${app.hospitalName}.`
+            ? `Ally suggests reviewing this candidate for ${app.hospitalName}; a human must decide.`
             : `Additional human credential review recommended by Ally before forwarding.`);
 
         const nextEntry: AllyApplicationScreeningResult = {
-          status: isRecommended ? "VERIFIED" : "FLAGGED",
+          status: isRecommended ? "REVIEW" : "FLAGGED",
           suitabilityScore,
           isRecommended,
           verdict: plainProse,
@@ -291,7 +288,7 @@ function ApplicationsAdmin() {
         console.warn("Ally screening failed:", err);
         const errorEntry: AllyApplicationScreeningResult = {
           status: "ERROR",
-          suitabilityScore: 0,
+          suitabilityScore: null,
           isRecommended: false,
           verdict: "",
           unitFitSentence: `Ally could not reach the clinical screening service right now.`,
@@ -317,7 +314,7 @@ function ApplicationsAdmin() {
   const renderAllyScreeningBadge = (app: AdminApplication) => {
     const scr = getApplicationScreening(app);
     const isScreening = Boolean(runningScreeningIds[app.id]);
-    const isVerified = scr.status === "VERIFIED";
+    const isVerified = scr.status === "REVIEW";
     const isFlagged = scr.status === "FLAGGED" || scr.status === "ERROR";
 
     return (
@@ -332,14 +329,14 @@ function ApplicationsAdmin() {
         )}
       >
         {isScreening ? (
-          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+          <ButtonSpinner className="h-2.5 w-2.5 animate-spin shrink-0" />
         ) : (
           <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
         )}
         {isScreening
           ? "Ally Screening..."
           : isVerified
-            ? "Ally Shortlist Vetted"
+            ? "Ally Shortlist Suggestion"
             : scr.status === "ERROR"
               ? "Ally Retry"
               : isFlagged
@@ -350,15 +347,14 @@ function ApplicationsAdmin() {
   };
 
   const fetchApps = async () => {
-    if (!isApiEnabled) return;
     try {
       setLoading(true);
       const [appsRes, shiftClaimsRes, payoutsRes, disputesRes, jobsRes] = await Promise.all([
-        getAdminApplications("all").catch(() => []),
-        getPendingShiftClaims().catch(() => []),
-        getPendingPayouts().catch(() => []),
-        getDisputedShiftClaims().catch(() => []),
-        getJobs().catch(() => []),
+        getAdminApplications("all"),
+        getPendingShiftClaims(),
+        getPendingPayouts(),
+        getDisputedShiftClaims(),
+        getJobs(),
       ]);
 
       const allKnownJobs: Job[] = [...((jobsRes as Job[]) || []), ...jobs];
@@ -393,9 +389,9 @@ function ApplicationsAdmin() {
           (roleCandidate.toLowerCase().includes("doctor") ? "General medicine" : roleCandidate);
         const titleJob = dto.jobTitle || "Healthcare Opening";
         const deptJob = dto.department || "Clinical Department";
-        const cityCandidate = dto.candidateCity || dto.city || "Chennai";
+        const cityCandidate = dto.candidateCity || dto.city || "";
         const cityJob = dto.city || "Bengaluru";
-        const qualCandidate = dto.candidateQualification || "MBBS";
+        const qualCandidate = dto.candidateQualification || "";
         const expCandidate = dto.candidateExperience || "2–4 yrs clinical experience";
         const isVerified = Boolean(dto.councilVerified);
 
@@ -410,7 +406,7 @@ function ApplicationsAdmin() {
             specialty: specCandidate,
             qualification: qualCandidate,
             city: cityCandidate,
-            state: dto.candidateState || "Tamil Nadu",
+            state: dto.candidateState || "",
             relocate: false,
             kycStatus: isVerified ? "VERIFIED" : "PENDING",
             experienceYears: expCandidate,
@@ -431,7 +427,7 @@ function ApplicationsAdmin() {
           candidateName: dto.candidateName || "Candidate",
           candidateRole: roleCandidate,
           candidateCity: cityCandidate,
-          candidateState: dto.candidateState || "Tamil Nadu",
+          candidateState: dto.candidateState || "",
           candidateQualification: qualCandidate,
           candidateCouncil: dto.candidateCouncil || "State Medical / Nursing Council",
           candidateBio: dto.candidateBio || "Healthcare professional screened through FALE clinical qualification pipeline.",
@@ -441,7 +437,7 @@ function ApplicationsAdmin() {
           hospitalName: dto.facilityName || "Partner Hospital",
           department: deptJob,
           matchScore:
-            isApiEnabled && typeof dto.matchScore === "number" && dto.matchScore > 0
+            typeof dto.matchScore === "number" && dto.matchScore > 0
               ? dto.matchScore
               : clinicalMatch.score,
           councilVerified: isVerified,
@@ -493,7 +489,7 @@ function ApplicationsAdmin() {
           candidateId: sc.candidateId,
           candidateName: sc.candidateName || "Healthcare Professional",
           candidateRole: sc.candidateRole || "Clinical Practitioner",
-          candidateCity: sc.candidateCity || "Chennai",
+          candidateCity: sc.candidateCity || "",
           candidateState: "Tamil Nadu",
           candidateQualification: sc.candidateQualification || "State Council Registered Practitioner",
           candidateCouncil: "State Medical / Nursing Council",
@@ -504,19 +500,19 @@ function ApplicationsAdmin() {
           hospitalName: sc.facilityName || "Partner Hospital",
           department: sc.department || "Emergency & Trauma",
           matchScore:
-            isApiEnabled && typeof sc.matchScore === "number" && sc.matchScore > 0
+            typeof sc.matchScore === "number" && sc.matchScore > 0
               ? sc.matchScore
               : clinicalMatch.score,
           councilVerified: Boolean(sc.councilVerified),
-          regNumber: "Council Verified Practitioner",
+          regNumber: "Not provided",
           exp: `${sc.hours || 8} hrs duty`,
           status,
           appliedDate: sc.claimedAt
             ? new Date(sc.claimedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
             : "Recent",
           summary: `Locum duty claim. Net escrow payout guarantee: ₹${netRupees.toLocaleString("en-IN")} (Gross: ₹${grossRupees.toLocaleString("en-IN")}).`,
-          phone: "+91 6380102651",
-          email: "candidate@fale.in",
+          phone: "",
+          email: "",
           expectedSalary: `₹${netRupees.toLocaleString("en-IN")} Net Pay`,
           noticePeriod: "Immediate Duty Ready",
           documents: [],
@@ -528,6 +524,7 @@ function ApplicationsAdmin() {
       setApiPayouts(payoutsRes);
       setApiDisputes(disputesRes);
     } catch (err: any) {
+      pageLoad.fail(err);
       toast.error("Failed to load applications & shift claims", { description: err?.message });
     } finally {
       setLoading(false);
@@ -536,7 +533,7 @@ function ApplicationsAdmin() {
 
   useEffect(() => {
     fetchApps();
-  }, []);
+  }, [pageLoad.retryKey]);
 
   // Keep selected app updated when fresh data arrives
   useEffect(() => {
@@ -546,7 +543,7 @@ function ApplicationsAdmin() {
     }
   }, [apiApps]);
 
-  const apps = isApiEnabled ? apiApps : s.adminApplications;
+  const apps = apiApps;
 
   // Performance-safe background Ally screening for pending_admin applications (MAX_CONCURRENT = 2)
   useEffect(() => {
@@ -577,7 +574,7 @@ function ApplicationsAdmin() {
     return () => {
       cancelled = true;
     };
-  }, [apps, aiScreeningResults, getAppCacheKey, handleRunAiScreening]);
+  }, [apps, aiScreeningResults, getAppCacheKey, handleRunAiScreening, pageLoad.retryKey]);
 
   // Prioritize Ally screening immediately when Dossier Inspect drawer opens
   useEffect(() => {
@@ -586,7 +583,7 @@ function ApplicationsAdmin() {
     if (!aiScreeningResults[key] && !inFlightScreeningKeysRef.current.has(key)) {
       void handleRunAiScreening(selectedApp, { silent: true });
     }
-  }, [sheetOpen, selectedApp, aiScreeningResults, getAppCacheKey, handleRunAiScreening]);
+  }, [sheetOpen, selectedApp, aiScreeningResults, getAppCacheKey, handleRunAiScreening, pageLoad.retryKey]);
 
   const filtered = apps.filter((a) => {
     const matchesFilter = filter === "all" ? true : a.status === filter;
@@ -600,8 +597,8 @@ function ApplicationsAdmin() {
     return matchesFilter && matchesSearch;
   });
 
-  const handleShortlist = async (id: string, candidateName: string, hospitalName: string) => {
-    if (isApiEnabled) {
+  const handleShortlist = async (id: string, candidateName: string, hospitalName: string) => { await pageAction.run(async () => {
+    {
       try {
         const item = apiApps.find((a) => a.id === id);
         if ((selectedApp as any)?.isShiftClaim || (item as any)?.isShiftClaim) {
@@ -621,23 +618,13 @@ function ApplicationsAdmin() {
           window.dispatchEvent(new CustomEvent("fale:applications-updated"));
         }
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Shortlist failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      adminApplications: state.adminApplications.map((a) =>
-        a.id === id ? { ...a, status: "shortlisted" as const } : a
-      ),
-    }));
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("fale:applications-updated"));
-    }
-    toast.success("Candidate Shortlisted & Dispatched!", {
-      description: `${candidateName} has been vetted by Admin and forwarded to ${hospitalName}'s hiring board.`,
-    });
-    setSheetOpen(false);
-  };
+
+  }); };
 
   const handleConfirmDisburse = async () => {
     if (!selectedPayout) return;
@@ -653,13 +640,14 @@ function ApplicationsAdmin() {
       setUtrInput("");
       fetchApps();
     } catch (err: any) {
+      pageLoad.fail(err);
       toast.error("Payout disbursement failed", { description: err?.message });
     } finally {
       setDisbursing(false);
     }
   };
 
-  const handleResolveDispute = async () => {
+  const handleResolveDispute = async () => { await pageAction.run(async () => {
     if (!selectedDispute) return;
     setResolvingDispute(true);
     try {
@@ -675,15 +663,16 @@ function ApplicationsAdmin() {
       setDisputeNotes("");
       fetchApps();
     } catch (err: any) {
+      pageLoad.fail(err);
       toast.error("Failed to resolve dispute", { description: err?.message });
     } finally {
       setResolvingDispute(false);
     }
-  };
+  }); };
 
-  const handleRejectConfirm = async () => {
+  const handleRejectConfirm = async () => { await pageAction.run(async () => {
     if (!selectedApp) return;
-    if (isApiEnabled) {
+    {
       try {
         if ((selectedApp as any)?.isShiftClaim) {
           await screenShiftClaim(selectedApp.id, "REJECT", rejectReason || "Ineligible for this shift slot.");
@@ -701,22 +690,13 @@ function ApplicationsAdmin() {
         setRejectReason("");
         fetchApps();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Rejection failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      adminApplications: state.adminApplications.map((a) =>
-        a.id === selectedApp.id ? { ...a, status: "rejected" as const } : a
-      ),
-    }));
-    toast.error("Application Rejected", {
-      description: `Candidate marked ineligible for ${selectedApp.jobTitle}: ${rejectReason || "Criteria mismatch."}`,
-    });
-    setRejectModalOpen(false);
-    setSheetOpen(false);
-    setRejectReason("");
-  };
+
+  }); };
 
   const openDocumentPreview = async (doc: any) => {
     try {
@@ -757,13 +737,7 @@ function ApplicationsAdmin() {
         return;
       }
 
-      // 4. Fallback: generate clinical credential verification PDF if no binary stream is present
-      const blob = await generateClinicalDocumentBlob(
-        { originalFileName: doc.originalFileName || "Candidate_Document.pdf" },
-        { name: selectedApp?.candidateName, role: selectedApp?.candidateRole }
-      );
-      const url = URL.createObjectURL(blob);
-      setPreviewDoc({ name: doc.originalFileName, url, isImage: false });
+      throw new Error("No uploaded document is available. Request a new upload.");
     } catch {
       toast.error("Unable to generate document preview");
     } finally {
@@ -797,6 +771,8 @@ function ApplicationsAdmin() {
         </Button>
       }
     >
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
+      <AllyReviewNote />
       {/* Metric Strip (4 Cards matching Candidate KYC & Facility Verification) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
@@ -1184,7 +1160,7 @@ function ApplicationsAdmin() {
                             <>
                               <Button
                                 size="sm"
-                                onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
+                                disabled={pageAction.isPending} onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
                                 className="text-xs font-bold gap-1.5 h-8 px-3 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-2xs cursor-pointer"
                               >
                                 <HiOutlinePaperAirplane className="h-3.5 w-3.5" />
@@ -1361,7 +1337,7 @@ function ApplicationsAdmin() {
 
                         <Button
                           size="sm"
-                          onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
+                          disabled={pageAction.isPending} onClick={() => handleShortlist(item.id, item.candidateName, item.hospitalName)}
                           className="h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground gap-1 min-w-0 shadow-2xs cursor-pointer"
                         >
                           <HiOutlinePaperAirplane className="h-3.5 w-3.5 shrink-0" />
@@ -1487,7 +1463,7 @@ function ApplicationsAdmin() {
               {(() => {
                 const screening = getApplicationScreening(selectedApp);
                 const isScreening = Boolean(runningScreeningIds[selectedApp.id]);
-                const isVerified = screening.status === "VERIFIED";
+                const isVerified = screening.status === "REVIEW";
                 const isFlagged = screening.status === "FLAGGED";
                 const isError = screening.status === "ERROR";
 
@@ -1497,7 +1473,7 @@ function ApplicationsAdmin() {
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
                           {isScreening ? (
-                            <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                            <ButtonSpinner className="h-4 w-4 animate-spin" />
                           ) : (
                             <BotMessageSquare className="h-4 w-4" />
                           )}
@@ -1537,9 +1513,9 @@ function ApplicationsAdmin() {
                           {isScreening
                             ? "Ally Screening..."
                             : isVerified
-                              ? `Suitability: ${screening.suitabilityScore.toFixed(1)}%`
+                              ? "AI suggestion - human decision required"
                               : isFlagged
-                                ? `Review · ${screening.suitabilityScore.toFixed(1)}%`
+                                ? "Human review required"
                                 : isError
                                   ? "Ally Retry"
                                   : "Ally Queued"}
@@ -1552,7 +1528,7 @@ function ApplicationsAdmin() {
                           className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
                         >
                           {isScreening ? (
-                            <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                            <ButtonSpinner className="h-3 w-3 animate-spin shrink-0" />
                           ) : (
                             <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
                           )}
@@ -1823,7 +1799,7 @@ function ApplicationsAdmin() {
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => handleShortlist(selectedApp.id, selectedApp.candidateName, selectedApp.hospitalName)}
+                    disabled={pageAction.isPending} onClick={() => handleShortlist(selectedApp.id, selectedApp.candidateName, selectedApp.hospitalName)}
                     className="flex-1 sm:flex-initial h-9 px-4 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold gap-1.5 shadow-2xs cursor-pointer whitespace-nowrap"
                   >
                     <HiOutlinePaperAirplane className="h-4 w-4 shrink-0" />
@@ -1947,7 +1923,7 @@ function ApplicationsAdmin() {
             <Button
               variant="destructive"
               size="sm"
-              onClick={handleRejectConfirm}
+              disabled={pageAction.isPending} onClick={handleRejectConfirm}
               className="h-9 rounded-xl font-bold text-xs gap-1.5"
             >
               <HiOutlineXMark className="h-4 w-4" />
@@ -2047,7 +2023,7 @@ function ApplicationsAdmin() {
             </Button>
             <Button
               size="sm"
-              disabled={resolvingDispute}
+              disabled={pageAction.isPending || (resolvingDispute)}
               onClick={handleResolveDispute}
               className="h-9 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-white"
             >

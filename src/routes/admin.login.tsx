@@ -20,7 +20,7 @@ import { toast } from "sonner";
 import { Logo } from "@/components/fale/Logo";
 import { ThemeToggle } from "@/components/fale/ThemeToggle";
 import { Button } from "@/components/ui/button";
-import { adminLogin, adminSignup, adminForgotPassword, ADMIN_STATIC_PASSCODE } from "@/lib/adapters/authAdapter";
+import { adminLogin, adminSignup, adminForgotPassword } from "@/lib/adapters/authAdapter";
 import { setState } from "@/lib/store";
 
 export const Route = createFileRoute("/admin/login")({
@@ -243,14 +243,6 @@ function AdminLoginPage() {
     }
   };
 
-  const handleQuickFill = () => {
-    setEmail("admin@thefale.com");
-    setPassword("admin123");
-    setErrorMsg(null);
-    toast.info("Demo administrator credentials applied", {
-      description: "admin@thefale.com / admin123",
-    });
-  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col justify-between selection:bg-primary/20 selection:text-primary relative overflow-hidden">
@@ -575,19 +567,7 @@ function AdminLoginPage() {
               </form>
             )}
 
-            {/* Quick Demo Pill */}
-            {tab === "signin" && (
-              <div className="pt-2 border-t border-border/60 text-center space-y-2">
-                <button
-                  type="button"
-                  onClick={handleQuickFill}
-                  className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-primary transition-colors cursor-pointer"
-                >
-                  <HiOutlineBolt className="h-3.5 w-3.5 text-primary" />
-                  <span>Fill Demo Admin Credentials</span>
-                </button>
-              </div>
-            )}
+
           </div>
 
           {/* Security Banner */}

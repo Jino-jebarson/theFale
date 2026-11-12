@@ -1,3 +1,6 @@
+import { usePageLoad } from "@/hooks/use-page-load";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { RequestError } from "@/components/fale/RequestError";
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -27,7 +30,7 @@ import { jobs, type Job } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
-import { getJobs } from "@/lib/adapters/jobAdapter";
+import { getJobs, applyForJob } from "@/lib/adapters/jobAdapter";
 import { getMyApplications, withdrawApplication, type UiApplicationItem } from "@/lib/adapters/applicationAdapter";
 
 export const Route = createFileRoute("/applications")({
@@ -130,6 +133,8 @@ function getStatusDetails(status: string, date: string, org: string, isStudent =
 }
 
 function Applications() {
+  const pageLoad = usePageLoad();
+  const jobAction = useConfirmedAction();
   const s = useApp();
   const { tab: initialTab } = Route.useSearch();
   const [tab, setTab] = useState<"Active" | "Saved" | "Closed">(initialTab ?? "Active");
@@ -146,11 +151,10 @@ function Applications() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     setLoading(true);
     Promise.all([
-      getMyApplications().catch(() => []),
-      getJobs().catch(() => []),
+      getMyApplications(),
+      getJobs(),
     ])
       .then(([apps, jobsList]) => {
         setApiApps(apps);
@@ -158,12 +162,13 @@ function Applications() {
         setLoadError(null);
       })
       .catch((err) => {
+        pageLoad.fail(err);
         console.error("Failed to load applications & jobs:", err);
         setLoadError("Unable to load applications.");
         setApiApps([]);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [pageLoad.retryKey]);
 
   const candidateLevel =
     s.candidateLevel ||
@@ -173,7 +178,7 @@ function Applications() {
   const isStudent = candidateLevel === "student";
 
   const allJobs = useMemo(() => {
-    if (isApiEnabled && apiJobs.length > 0) {
+    if (apiJobs.length > 0) {
       return apiJobs;
     }
     return jobs;
@@ -192,10 +197,10 @@ function Applications() {
   }, [s.applied, allJobs]);
 
   const effectiveApplied = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return apiApps || [];
     }
-    return isStudent ? studentInternshipApps : s.applied;
+
   }, [isApiEnabled, apiApps, isStudent, studentInternshipApps, s.applied]);
 
   const activeApps = useMemo(
@@ -242,45 +247,30 @@ function Applications() {
     });
   }, [tab, activeApps, closedApps, q, allJobs]);
 
-  const handleWithdrawConfirm = (reason: string, notes: string) => {
-    if (!withdrawingApp) return;
-    const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    if (isApiEnabled) {
-      withdrawApplication(withdrawingApp.jobId, reason).catch((err) => {
-        console.error("Failed to withdraw application:", err);
-      });
-      setApiApps((prev) =>
-        prev
-          ? prev.map((item) =>
-              item.jobId === withdrawingApp.jobId ? { ...item, status: "Withdrawn", date: now } : item
-            )
-          : null
-      );
-    }
-    setState((x) => ({
-      applied: x.applied.map((item) =>
-        item.jobId === withdrawingApp.jobId ? { ...item, status: "Withdrawn", date: now } : item
-      ),
-    }));
-    toast.info("Application withdrawn", {
-      description: `Your application for ${withdrawingApp.title} at ${withdrawingApp.org} has been withdrawn (${reason}).`,
+  const handleWithdrawConfirm = async (reason: string, _notes: string) => {
+    if (!withdrawingApp) return false;
+    const id = withdrawingApp.jobId;
+    return jobAction.run(async () => {
+      await withdrawApplication(id, reason);
+      setApiApps((previous) => previous ? previous.map((item) => item.jobId === id ? { ...item, status: "Withdrawn" } : item) : previous);
+      setState((previous) => ({ applied: previous.applied.map((item) => item.jobId === id ? { ...item, status: "Withdrawn" } : item) }));
+      setWithdrawingApp(null);
+      toast.success("Application withdrawn");
     });
   };
 
-  const handleReapply = (jobId: string, title: string, org: string) => {
-    const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    setState((x) => ({
-      applied: x.applied.map((item) =>
-        item.jobId === jobId ? { ...item, status: "Applied", date: now } : item
-      ),
-    }));
-    toast.success("Application re-submitted!", {
-      description: `Your application for ${title} at ${org} is active again.`,
-    });
-  };
+  const handleReapply = async (jobId: string, _title: string, _org: string) => jobAction.run(async () => {
+    await applyForJob(jobId);
+    const date = new Date().toLocaleDateString("en-IN");
+    setApiApps((previous) => previous ? previous.map((item) => item.jobId === jobId ? { ...item, status: "Applied", date } : item) : previous);
+    setState((previous) => ({ applied: [{ jobId, status: "Applied", date }, ...previous.applied.filter((item) => item.jobId !== jobId)] }));
+    toast.success("Application submitted");
+  });
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
+      <RequestError message={jobAction.error} />
       {/* ================= HERO HEADER ================= */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>

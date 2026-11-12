@@ -1,3 +1,6 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { RequestError } from "@/components/fale/RequestError";
+import { errorMessage } from "@/lib/errorMessage";
 import { useState, useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -98,181 +101,18 @@ interface NotificationItem {
   statusText?: string;
 }
 
-const initialNotifications: NotificationItem[] = [
-  {
-    id: "notif_1",
-    category: "shifts",
-    title: "Urgent ICU Night Shift Request",
-    hospital: "Apollo Speciality Hospitals",
-    hospitalCode: "AP",
-    hospitalGradient: "from-blue-600 to-indigo-700",
-    message: "Critical care unit requires an immediate on-call Cardiology physician for telemetry monitoring and emergency bed coverage.",
-    time: "10m ago",
-    unread: true,
-    urgent: true,
-    matchScore: 98,
-    payout: "₹7,500 Instant Payout",
-    shiftTiming: "Today, 08:00 PM – 08:00 AM (12h)",
-    actionType: "accept_shift",
-    actionLabel: "Accept Shift",
-  },
-  {
-    id: "notif_2",
-    category: "jobs",
-    title: "Hospital Interview Scheduled — Medical Board Round",
-    hospital: "Manipal Hospital, Whitefield",
-    hospitalCode: "MH",
-    hospitalGradient: "from-teal-600 to-emerald-700",
-    message: "Medical Superintendent Dr. S. Rao scheduled your interview for the Senior Resident — Cardiology appointment.",
-    time: "42m ago",
-    unread: true,
-    urgent: false,
-    matchScore: 94,
-    shiftTiming: "Tomorrow, 11:30 AM via FALE Tele-Room",
-    actionType: "confirm_interview",
-    actionLabel: "Confirm Attendance",
-  },
-  {
-    id: "notif_3",
-    category: "cme",
-    title: "CME Digital Certificate Issued & Verified",
-    hospital: "FALE Clinical Academy",
-    hospitalCode: "FA",
-    hospitalGradient: "from-amber-500 to-orange-600",
-    message: "You completed '1.1 The High-Risk Shift Handover Vulnerability'. +1.5 CME Points accredited to your clinical profile.",
-    time: "2h ago",
-    unread: true,
-    actionType: "view_cert",
-    actionLabel: "View Certificate",
-    actionLink: "/learning/c4",
-  },
-  {
-    id: "notif_4",
-    category: "credentials",
-    title: "DigiLocker Medical Registration Authenticated",
-    hospital: "Tamil Nadu Medical Council",
-    hospitalCode: "TN",
-    hospitalGradient: "from-purple-600 to-indigo-700",
-    message: "License TNMC-2023-8829 has passed cryptographic cross-verification with National Medical Commission records. Tier-1 badge activated.",
-    time: "5h ago",
-    unread: false,
-    actionType: "view_doc",
-    actionLabel: "View in Vault",
-    actionLink: "/profile",
-  },
-  {
-    id: "notif_5",
-    category: "jobs",
-    title: "Fortis Recruiter Shortlisted Your Profile",
-    hospital: "Fortis Healthcare Network",
-    hospitalCode: "FH",
-    hospitalGradient: "from-rose-600 to-red-700",
-    message: "Head of Critical Care reviewed your clinical dossier and shortlisted your application for Interventional Cardiology Fellow openings.",
-    time: "1d ago",
-    unread: false,
-    matchScore: 91,
-    actionType: "view_hospital",
-    actionLabel: "Track Application",
-    actionLink: "/applications",
-  },
-  {
-    id: "notif_6",
-    category: "shifts",
-    title: "Shift Payout Dispatched & Deposited",
-    hospital: "Kauvery Hospital, Chennai",
-    hospitalCode: "KH",
-    hospitalGradient: "from-cyan-600 to-blue-700",
-    message: "Compensation of ₹6,200 for your 8-hour ER coverage on 17 Oct has been processed directly to your registered bank account.",
-    time: "2d ago",
-    unread: false,
-    statusText: "UTR: FALE-998240-IN • ₹6,200 Deposited",
-  },
-];
-
-const studentNotifications: NotificationItem[] = [
-  {
-    id: "stu_notif_1",
-    category: "jobs",
-    title: "Clinical Internship Interview Scheduled — Academic Viva",
-    hospital: "Apollo Speciality Hospitals",
-    hospitalCode: "AP",
-    hospitalGradient: "from-blue-600 to-indigo-700",
-    message: "HOD of Clinical Training Dr. Preetha Rao scheduled your interview for the 6-Month Rotational Internship (Physiotherapy / Clinical Sciences).",
-    time: "15m ago",
-    unread: true,
-    urgent: true,
-    matchScore: 96,
-    shiftTiming: "Tomorrow, 10:30 AM via FALE Clinical Viva Desk",
-    actionType: "confirm_interview",
-    actionLabel: "Confirm Viva Attendance",
-  },
-  {
-    id: "stu_notif_2",
-    category: "shifts",
-    title: "Monthly Student Stipend Credited (Sec 10(16) Tax-Free)",
-    hospital: "Apollo Hospitals Teaching Network",
-    hospitalCode: "AP",
-    hospitalGradient: "from-emerald-600 to-teal-700",
-    message: "Monthly educational stipend of ₹18,000 for October Rotation has been disbursed to your student savings account. Zero TDS under IT Act Section 10(16).",
-    time: "1h ago",
-    unread: true,
-    payout: "₹18,000 Disbursed",
-    statusText: "UTR: FALE-STU-88219 • ₹18,000 Credited",
-  },
-  {
-    id: "stu_notif_3",
-    category: "credentials",
-    title: "College Bona Fide & Student ID Authenticated",
-    hospital: "FALE Academic Registry",
-    hospitalCode: "FA",
-    hospitalGradient: "from-purple-600 to-indigo-700",
-    message: "Bona Fide certificate STU-2024-9182 authenticated with college registrar. Verified Student Intern Tier-1 badge active in your profile vault.",
-    time: "4h ago",
-    unread: true,
-    actionType: "view_doc",
-    actionLabel: "View in Vault",
-    actionLink: "/profile",
-  },
-  {
-    id: "stu_notif_4",
-    category: "cme",
-    title: "Student CME Logbook Module Accredited",
-    hospital: "FALE Clinical Academy",
-    hospitalCode: "FC",
-    hospitalGradient: "from-amber-500 to-orange-600",
-    message: "Completed 'Clinical Handover & Patient Safety Fundamentals'. +2.0 Student CME credit hours countersigned in your digital logbook.",
-    time: "1d ago",
-    unread: false,
-    actionType: "view_cert",
-    actionLabel: "View Certificate",
-    actionLink: "/learning/c4",
-  },
-  {
-    id: "stu_notif_5",
-    category: "jobs",
-    title: "Clinical Observership Shortlist Confirmed",
-    hospital: "Manipal Hospital, Whitefield",
-    hospitalCode: "MH",
-    hospitalGradient: "from-teal-600 to-emerald-700",
-    message: "Academic Medical Directorate accepted your credential dossier for the upcoming semester clinical observership and ward rotations.",
-    time: "2d ago",
-    unread: false,
-    matchScore: 93,
-    actionType: "view_hospital",
-    actionLabel: "Track Application",
-    actionLink: "/applications",
-  },
-];
 
 function NotificationsPage() {
+  const notificationAction = useConfirmedAction();
   const s = useApp();
   const candidateLevel = s.candidateLevel || (s.profile["level"] as any) || (s.profile["cadreLevel"] as any) || (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
 
   const [items, setItems] = useState<NotificationItem[]>(() =>
-    isApiEnabled ? [] : isStudent ? studentNotifications : initialNotifications
+    []
   );
   const [loading, setLoading] = useState(isApiEnabled);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<NotificationCategory>("all");
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
@@ -287,7 +127,7 @@ function NotificationsPage() {
   });
 
   useEffect(() => {
-    if (!isApiEnabled || s.portal !== "candidate") return;
+    if (s.portal !== "candidate") return;
     getCandidateViewStats()
       .then((data) => {
         if (data && data.totalViews != null) {
@@ -298,7 +138,6 @@ function NotificationsPage() {
   }, [s.portal]);
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     setLoading(true);
     getNotifications()
       .then((apiNotifs) => {
@@ -427,7 +266,7 @@ function NotificationsPage() {
         setUnreadNotificationCount(0);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [reloadVersion]);
 
   // Dispatch preferences
   const [whatsappAlerts, setWhatsappAlerts] = useState(true);
@@ -443,80 +282,47 @@ function NotificationsPage() {
     return true;
   });
 
-  const markAllAsRead = () => {
-    if (isApiEnabled) {
-      markAllNotificationsRead().catch(console.error);
-    }
-    setItems((prev) => prev.map((item) => ({ ...item, unread: false })));
-    setUnreadNotificationCount(0);
-    toast.success("All notifications marked as read!");
+  const markAllAsRead = async () => {
+    await notificationAction.run(async () => {
+      await markAllNotificationsRead();
+      setItems((previous) => previous.map((item) => ({ ...item, unread: false })));
+      setUnreadNotificationCount(0);
+      toast.success("Notifications marked as read");
+    });
   };
 
-  const clearAllNotifications = () => {
-    if (isApiEnabled) {
-      clearAllNotificationsApi().catch(console.error);
-    }
-    try {
-      localStorage.setItem("fale_admin_cleared_at", Date.now().toString());
-    } catch {}
-    setItems([]);
-    setUnreadNotificationCount(0);
-    toast.info("All notifications cleared!");
+  const clearAllNotifications = async () => {
+    await notificationAction.run(async () => {
+      await clearAllNotificationsApi();
+      setItems([]); setUnreadNotificationCount(0);
+      toast.success("Notifications cleared");
+    });
   };
 
-  const toggleItemRead = (id: string) => {
+  const toggleItemRead = async (id: string) => {
     const target = items.find((item) => item.id === id);
     if (!target) return;
-    const willBeUnread = !target.unread;
-    if (isApiEnabled && !willBeUnread) {
-      markNotificationRead(id).catch(console.error);
-    }
-    setItems((prev) => {
-      const next = prev.map((item) => (item.id === id ? { ...item, unread: willBeUnread } : item));
-      setUnreadNotificationCount(next.filter((x) => x.unread).length);
-      return next;
+    if (!target.unread) { toast.info("Marking notifications unread is not available."); return; }
+    await notificationAction.run(async () => {
+      await markNotificationRead(id);
+      const updated = items.map((item) => item.id === id ? { ...item, unread: false } : item);
+      setItems(updated); setUnreadNotificationCount(updated.filter((item) => item.unread).length);
     });
   };
 
-  const deleteItem = (id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (isApiEnabled) {
-      deleteNotification(id).catch(console.error);
-    }
-    try {
-      const dismissed = JSON.parse(localStorage.getItem("fale_dismissed_notifs") || "[]");
-      dismissed.push(id);
-      localStorage.setItem("fale_dismissed_notifs", JSON.stringify(dismissed));
-    } catch {}
-    setItems((prev) => {
-      const next = prev.filter((item) => item.id !== id);
-      setUnreadNotificationCount(next.filter((x) => x.unread).length);
-      return next;
-    });
-    toast.info("Notification removed");
-  };
-
-  const handleAcceptShift = (id: string, hospital: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setAcceptedShifts((prev) => [...prev, id]);
-    setItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, unread: false } : item))
-    );
-    toast.success("Clinical Shift Confirmed!", {
-      description: `Your QR digital pass for ${hospital} has been dispatched to WhatsApp.`,
+  const deleteItem = async (id: string, event?: React.MouseEvent) => {
+    event?.stopPropagation();
+    await notificationAction.run(async () => {
+      await deleteNotification(id);
+      const updated = items.filter((item) => item.id !== id);
+      setItems(updated); setUnreadNotificationCount(updated.filter((item) => item.unread).length);
+      toast.success("Notification removed");
     });
   };
 
-  const handleConfirmInterview = (id: string, hospital: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setConfirmedInterviews((prev) => [...prev, id]);
-    setItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, unread: false } : item))
-    );
-    toast.success("Interview Attendance Confirmed!", {
-      description: `Calendar invite & FALE Tele-Room link generated for ${hospital}.`,
-    });
-  };
+  const handleAcceptShift = (_id: string, _hospital: string, event: React.MouseEvent) => { event.stopPropagation(); window.location.assign("/shifts"); };
+
+  const handleConfirmInterview = (_id: string, _hospital: string, event: React.MouseEvent) => { event.stopPropagation(); window.location.assign("/applications"); };
 
   const getSubBadgeIcon = (category: NotificationItem["category"]) => {
     switch (category) {
@@ -567,6 +373,9 @@ function NotificationsPage() {
 
   return (
     <AppShell>
+      <fieldset disabled={notificationAction.isPending} className="contents">
+      <RequestError message={loadError} onRetry={() => setReloadVersion((version) => version + 1)} retrying={loading} />
+      <RequestError message={notificationAction.error} />
       <div className="w-full max-w-6xl mx-auto space-y-5 pb-8 min-w-0">
         {/* ========================================================= */}
         {/* TOP BAR: LINKEDIN / APPLE HEADER                          */}
@@ -744,10 +553,10 @@ function NotificationsPage() {
                     {viewStats.hospitalsViewedToday > 0
                       ? `${viewStats.hospitalsViewedToday} hospital recruiter${viewStats.hospitalsViewedToday === 1 ? "" : "s"} viewed your clinical dossier today.`
                       : viewStats.totalViews > 0
-                        ? `Apollo, Fortis, and accredited hospital recruiters viewed your clinical dossier ${viewStats.totalViews} times.`
+                        ? `Hospital recruiters viewed your profile ${viewStats.totalViews} times.`
                         : isStudent
-                          ? "Apollo, Manipal, and college clinical directors review active student logbooks weekly."
-                          : "Apollo, Fortis, and Kauvery hospital recruiters review verified clinical dossiers weekly."}
+                          ? "Profile views will appear here when a facility visits your profile."
+                          : "Profile views will appear here when a facility visits your profile."}
                   </p>
                 </div>
                 <Button
@@ -836,11 +645,11 @@ function NotificationsPage() {
                     </Badge>
                   </div>
                   <p className="text-xs sm:text-sm font-semibold text-foreground leading-snug break-words">
-                    Apollo Hospitals and Manipal Health have opened 24 newly approved clinical training rotation slots with ₹18,000/mo educational stipend.
+                    Explore internships and check each posting for its current availability and stipend.
                   </p>
                   <div className="pt-1 flex flex-wrap items-center gap-3 text-xs">
-                    <span className="font-extrabold text-emerald-600 dark:text-emerald-400">₹18,000/mo Stipend</span>
-                    <span className="text-muted-foreground">• Section 10(16) IT Act Tax-Free</span>
+                    <span className="font-extrabold text-emerald-600 dark:text-emerald-400">View internship details</span>
+                    <span className="text-muted-foreground"></span>
                   </div>
                 </div>
               </div>
@@ -1047,7 +856,7 @@ function NotificationsPage() {
                                   </>
                                 )}
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => toast.info(`Muted alerts from ${n.hospital}`)}>
+                              <DropdownMenuItem onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}>
                                 <HiOutlineBellSlash className="mr-2 h-4 w-4" /> Mute this hospital
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
@@ -1274,8 +1083,8 @@ function NotificationsPage() {
                       {viewStats.hospitalsViewedToday > 0
                         ? `${viewStats.hospitalsViewedToday} hospital recruiter${viewStats.hospitalsViewedToday === 1 ? "" : "s"} viewed your clinical dossier today.`
                         : isStudent
-                          ? "Apollo, Manipal, and college clinical directors review active student logbooks weekly."
-                          : "Apollo, Fortis, and Kauvery hospital recruiters review verified clinical dossiers weekly."}
+                          ? "Profile views will appear here when a facility visits your profile."
+                          : "Profile views will appear here when a facility visits your profile."}
                     </p>
                   </div>
                   <Button
@@ -1325,6 +1134,7 @@ function NotificationsPage() {
           </main>
         </div>
       </div>
+    </fieldset>
     </AppShell>
   );
 }

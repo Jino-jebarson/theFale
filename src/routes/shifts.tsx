@@ -1,3 +1,6 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -109,7 +112,7 @@ function buildFallbackShiftFromClaim(claim: ShiftClaimDto): UiShiftItem {
     title: claim.shiftTitle || "Locum Shift",
     org: claim.facilityName || "Hospital Partner",
     dept: claim.shiftDepartment || "Clinical Duty",
-    city: claim.candidateCity || "Chennai",
+    city: claim.candidateCity || "",
     time: `${startStr} – ${endStr}`,
     date: dateFormatted,
     startAt: startIso,
@@ -131,6 +134,8 @@ function buildFallbackShiftFromClaim(claim: ShiftClaimDto): UiShiftItem {
 }
 
 function Shifts() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const s = useApp();
   const candidateLevel =
     s.candidateLevel ||
@@ -152,14 +157,13 @@ function Shifts() {
   const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     let mounted = true;
     const fetchShiftPortal = (silent = false) => {
       if (!silent) setLoading(true);
       Promise.all([
-        getOpenShifts().catch(() => []),
-        getMyClaims().catch(() => []),
-        getCandidateProfile().catch(() => null),
+        getOpenShifts(),
+        getMyClaims(),
+        getCandidateProfile(),
       ])
         .then(([fetchedShifts, fetchedClaims, profile]) => {
           if (!mounted) return;
@@ -177,7 +181,7 @@ function Shifts() {
               },
             }));
           }
-        })
+        }).catch(pageLoad.fail)
         .finally(() => {
           if (mounted && !silent) setLoading(false);
         });
@@ -189,10 +193,10 @@ function Shifts() {
       mounted = false;
       detachRefresh();
     };
-  }, []);
+  }, [pageLoad.retryKey]);
 
   const allShifts = useMemo(() => {
-    if (isApiEnabled) {
+    {
       const seenIds = new Set(apiShifts.map((sh) => sh.id));
       const missingClaimedShifts: UiShiftItem[] = [];
       for (const claim of myClaims) {
@@ -205,12 +209,7 @@ function Shifts() {
       }
       return [...apiShifts, ...missingClaimedShifts];
     }
-    const userPosted = (s.postedShifts ?? []).map((ps) => ({
-      ...ps,
-      perks: ps.perks ?? [],
-      urgent: ps.urgent ?? false,
-    }));
-    return [...userPosted, ...shifts];
+
   }, [s.postedShifts, apiShifts, myClaims]);
 
   // Dynamic Unique City Options
@@ -225,10 +224,10 @@ function Shifts() {
       .filter((c) => !["CANCELLED", "REJECTED", "WITHDRAWN", "SLOT_FILLED", "NO_SHOW"].includes((c.status || "").toUpperCase()))
       .map((c) => c.shiftId);
     const fromApiShifts = apiShifts.filter((sh) => sh.hasClaimed).map((sh) => sh.id);
-    if (isApiEnabled) {
+    {
       return Array.from(new Set([...fromClaims, ...fromApiShifts]));
     }
-    return Array.from(new Set([...fromClaims, ...fromApiShifts, ...(s.shiftApps || [])]));
+
   }, [myClaims, apiShifts, s.shiftApps]);
 
   const completedShiftIds = useMemo(() => {
@@ -284,7 +283,7 @@ function Shifts() {
     const roleCandidate = String(s.profile["role"] || s.profile["cadre"] || "Staff Nurse");
     const specCandidate = String(s.profile["specialty"] || "Critical care");
     const cityCandidate = String(s.profile["city"] || s.profile["area"] || "");
-    const qualCandidate = String(s.profile["qualification"] || "B.Sc Nursing");
+    const qualCandidate = String(s.profile["qualification"] || "");
     const skillsCandidate = Array.isArray(s.profile["skills"]) && s.profile["skills"].length > 0
       ? s.profile["skills"]
       : ["ICU", "Critical care", "BLS", "Ventilator", "Patient Care"];
@@ -387,24 +386,24 @@ function Shifts() {
     return allShifts.filter((sh) => claimedShiftIds.includes(sh.id));
   }, [allShifts, claimedShiftIds]);
 
-  const appliedCount = isApiEnabled ? claimedShiftIds.length : s.shiftApps.length;
+  const appliedCount = claimedShiftIds.length;
 
   const confirmedCount = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return myClaims.filter((c) => c.status === "CONFIRMED" || c.status === "CHECKED_IN").length;
     }
-    return 0;
+
   }, [isApiEnabled, myClaims]);
 
   const pendingReviewCount = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return myClaims.filter((c) => !["CONFIRMED", "CHECKED_IN", "COMPLETED", "REJECTED", "CANCELLED"].includes(c.status)).length;
     }
-    return s.shiftApps.length;
+
   }, [isApiEnabled, myClaims, s.shiftApps]);
 
   const totalPotentialEarnings = useMemo(() => {
-    if (isApiEnabled && myClaims.length > 0) {
+    if (myClaims.length > 0) {
       return myClaims
         .filter((c) => !["CANCELLED", "REJECTED", "WITHDRAWN", "SLOT_FILLED", "NO_SHOW"].includes((c.status || "").toUpperCase()))
         .reduce((acc, c) => {
@@ -422,12 +421,12 @@ function Shifts() {
     }, 0);
   }, [isApiEnabled, myClaims, appliedShiftObjects]);
 
-  const handleApply = async (id: string, title: string, org: string) => {
+  const handleApply = async (id: string, title: string, org: string) => { await pageAction.run(async () => {
     if (applyingId === id) return;
 
     setApplyingId(id);
     try {
-      if (isApiEnabled) {
+      {
         const claim = await claimShift(id);
         setMyClaims((prev) => [...prev.filter((c) => c.shiftId !== id), claim]);
       }
@@ -443,7 +442,7 @@ function Shifts() {
         matchScore: 96,
         appliedDate: "Today",
         regNumber: s.profile?.regNo || (isStudent ? "College Verified" : "Council Verified"),
-        phone: s.profile?.phone || "+91 98401 23456",
+        phone: s.profile?.phone || "",
         email: s.profile?.email || "candidate@fale.care",
         summary: `Applied for ${title} locum shift duty coverage.`,
       };
@@ -488,12 +487,12 @@ function Shifts() {
     } finally {
       setApplyingId(null);
     }
-  };
+  }); };
 
-  const handleWithdraw = async (id: string, title: string) => {
+  const handleWithdraw = async (id: string, title: string) => { await pageAction.run(async () => {
     setWithdrawingId(id);
     try {
-      if (isApiEnabled) {
+      {
         const claim = myClaims.find((c) => c.shiftId === id && !["CANCELLED", "REJECTED"].includes((c.status || "").toUpperCase()));
         if (claim) {
           try {
@@ -520,7 +519,7 @@ function Shifts() {
     } finally {
       setWithdrawingId(null);
     }
-  };
+  }); };
 
   const [pinModalData, setPinModalData] = useState<{
     claimId: string;
@@ -551,7 +550,7 @@ function Shifts() {
     setCheckInPinInput("");
   };
 
-  const handleConfirmPinCheckIn = async () => {
+  const handleConfirmPinCheckIn = async () => { await pageAction.run(async () => {
     if (!pinModalData) return;
     const pin = checkInPinInput.trim();
     if (!/^\d{4}$/.test(pin)) {
@@ -572,7 +571,7 @@ function Shifts() {
     } finally {
       setSubmittingPin(false);
     }
-  };
+  }); };
 
   const handleSubmitDispute = async () => {
     if (!disputeModalData) return;
@@ -608,7 +607,7 @@ function Shifts() {
 
   const openSignOffModal = (claimId: string, sh: UiShiftItem) => {
     const hours = Number(sh.hours) || 8;
-    const rate = typeof sh.rate === "number" ? sh.rate : (sh.rateNumber || 500);
+    const rate = typeof sh.rate === "number" ? sh.rate : (sh.rateNumber || 0);
     setSignOffModalData({
       claimId,
       shiftTitle: sh.title,
@@ -619,7 +618,7 @@ function Shifts() {
     setActualHoursWorked(hours);
   };
 
-  const handleConfirmDutySignOff = async () => {
+  const handleConfirmDutySignOff = async () => { await pageAction.run(async () => {
     if (!signOffModalData) return;
     setSubmittingSignOff(true);
     try {
@@ -636,9 +635,9 @@ function Shifts() {
     } finally {
       setSubmittingSignOff(false);
     }
-  };
+  }); };
 
-  const handleCompleteShift = async (claimId: string, shiftTitle: string) => {
+  const handleCompleteShift = async (claimId: string, shiftTitle: string) => { await pageAction.run(async () => {
     try {
       const updated = await completeShift(claimId);
       setMyClaims((prev) => prev.map((c) => (c.id === claimId ? updated : c)));
@@ -648,10 +647,11 @@ function Shifts() {
     } catch (err: any) {
       toast.error("Completion failed", { description: err?.message });
     }
-  };
+  }); };
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       {/* ================= PAGE HEADER (MATCHING LEARNING STYLE) ================= */}
       <PageHead
         title="Clinical Shifts"
@@ -1052,9 +1052,9 @@ function Shifts() {
                                     <span>{p}</span>
                                   </span>
                                 ))}
-                                {sh.surge && (
+                                {sh.surgeLabel && (
                                   <span className="rounded-lg bg-primary-soft px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
-                                    {sh.surge}
+                                    {sh.surgeLabel}
                                   </span>
                                 )}
                               </div>
@@ -1160,7 +1160,7 @@ function Shifts() {
                               ) : (
                                 <Button
                                   size="sm"
-                                  disabled={applyingId === sh.id}
+                                  disabled={pageAction.isPending || (applyingId === sh.id)}
                                   onClick={() => handleApply(sh.id, sh.title, sh.org)}
                                   className="w-full sm:w-auto rounded-xl px-5 font-bold shadow-md h-10 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed shrink-0"
                                 >
@@ -1281,7 +1281,7 @@ function Shifts() {
                                       <Button
                                         size="sm"
                                         variant="ghost"
-                                        disabled={withdrawingId === sh.id}
+                                        disabled={pageAction.isPending || (withdrawingId === sh.id)}
                                         onClick={() => handleWithdraw(sh.id, sh.title)}
                                         className="rounded-xl px-2.5 h-8 text-xs font-bold text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer transition-colors ml-auto"
                                       >
@@ -1503,7 +1503,7 @@ function Shifts() {
                         Cancel
                       </Button>
                       <Button
-                        disabled={submittingSignOff}
+                        disabled={pageAction.isPending || (submittingSignOff)}
                         onClick={handleConfirmDutySignOff}
                         className="h-9 px-4 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer w-full sm:w-auto"
                       >
@@ -1565,7 +1565,7 @@ function Shifts() {
                         Cancel
                       </Button>
                       <Button
-                        disabled={submittingPin || checkInPinInput.trim().length !== 4}
+                        disabled={pageAction.isPending || (submittingPin || checkInPinInput.trim().length !== 4)}
                         onClick={handleConfirmPinCheckIn}
                         className="h-9 px-4 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer w-full sm:w-auto"
                       >

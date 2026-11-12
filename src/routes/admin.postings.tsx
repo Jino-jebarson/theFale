@@ -1,3 +1,7 @@
+import { AllyReviewNote } from "@/components/fale/AllyReviewNote";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -23,7 +27,7 @@ import {
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AdminLayout } from "@/components/fale/AdminLayout";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -83,6 +87,8 @@ export const Route = createFileRoute("/admin/postings")({
 });
 
 function JobApprovalsAdmin() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const s = useApp();
   const [filter, setFilter] = useState<"all" | "pending" | "approved" | "rejected">("pending");
   const [search, setSearch] = useState("");
@@ -95,7 +101,7 @@ function JobApprovalsAdmin() {
 
   // Ally Posting Compliance Pre-Check State (session-cached + concurrency-limited live checks)
   const getPostingCacheKey = useCallback((job: AdminJobApproval) => {
-    return `${job.id}:${job.title}:${job.compensation}:${job.hours || 0}`;
+    return `${job.id}:${job.title}:${job.compensation}:${job.hours ?? ""}:${job.city}:${job.description}:${job.qualificationRequired}`;
   }, []);
 
   const [aiComplianceResults, setAiComplianceResults] = useState<Record<string, AllyPostingComplianceResult>>(() =>
@@ -126,7 +132,7 @@ function JobApprovalsAdmin() {
   const handleRunAiCompliance = useCallback(
     async (job: AdminJobApproval, options?: { silent?: boolean }) => {
       const cacheKey = getPostingCacheKey(job);
-      if (options?.silent && inFlightComplianceKeysRef.current.has(cacheKey)) return;
+      if (inFlightComplianceKeysRef.current.has(cacheKey)) return;
 
       inFlightComplianceKeysRef.current.add(cacheKey);
       setRunningComplianceIds((prev) => ({ ...prev, [job.id]: true }));
@@ -168,17 +174,9 @@ function JobApprovalsAdmin() {
         );
         const lower = plainProse.toLowerCase();
 
-        const isCompliant =
-          typeof sData["isCompliant"] === "boolean"
-            ? sData["isCompliant"]
-            : rawStatus === "COMPLIANT" || rawStatus === "VERIFIED" || rawStatus === "CLEAR"
-              ? true
-              : rawStatus.includes("FLAG") || rawStatus.includes("VIOLATION") || rawStatus.includes("INVALID")
-                ? false
-                : !lower.includes("violation") &&
-                  !lower.includes("flagged") &&
-                  !lower.includes("exceed") &&
-                  !lower.includes("discrepancy");
+        if (!plainProse.trim()) throw new Error("Ally returned no posting assessment.");
+        const isFlagged = /FLAG|VIOLATION|INVALID/.test(rawStatus);
+        const isCompliant = false;
 
         const sentences = plainProse
           .split(/(?<=[.?!])\s+/)
@@ -188,24 +186,24 @@ function JobApprovalsAdmin() {
         const wageSentence =
           cleanMarkdownAndJsonNoise(typeof sData["wageAssessment"] === "string" ? sData["wageAssessment"] : "") ||
           sentences[0] ||
-          `Remuneration package of ${job.compensation} at ${job.org} aligns with prevailing state clinical wage floors.`;
+          `Pay compliance requires a human review using applicable local sources.`;
 
         const hoursSentence =
           cleanMarkdownAndJsonNoise(typeof sData["hoursAssessment"] === "string" ? sData["hoursAssessment"] : "") ||
           sentences[1] ||
           (isCompliant
-            ? `Continuous duty duration (${job.hours ? `${job.hours} hrs` : "standard roster"}) satisfies clinical rest and occupational safety caps.`
+            ? `Roster compliance has not been independently checked.`
             : `Duty duration (${job.hours ? `${job.hours} hrs` : "specified roster"}) requires compliance verification against continuous shift limits.`);
 
         const recSentence =
           cleanMarkdownAndJsonNoise(typeof sData["recommendation"] === "string" ? sData["recommendation"] : "") ||
           sentences[2] ||
           (isCompliant
-            ? `Posting cleared by Ally under statutory staffing criteria and ready for candidate broadcast.`
+            ? `A human must review the posting before publishing.`
             : `Compliance discrepancy flagged by Ally; review remuneration and roster hours before publishing.`);
 
         const nextEntry: AllyPostingComplianceResult = {
-          status: isCompliant ? "VERIFIED" : "FLAGGED",
+          status: isFlagged ? "FLAGGED" : "REVIEW",
           isCompliant,
           wageSentence,
           hoursSentence,
@@ -251,7 +249,7 @@ function JobApprovalsAdmin() {
   const renderAllyComplianceBadge = (job: AdminJobApproval) => {
     const comp = getPostingCompliance(job);
     const isAuditing = Boolean(runningComplianceIds[job.id]);
-    const isVerified = comp.status === "VERIFIED";
+    const isVerified = comp.status === "REVIEW";
     const isFlagged = comp.status === "FLAGGED" || comp.status === "ERROR";
 
     return (
@@ -266,14 +264,14 @@ function JobApprovalsAdmin() {
         )}
       >
         {isAuditing ? (
-          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+          <ButtonSpinner className="h-2.5 w-2.5 animate-spin shrink-0" />
         ) : (
           <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
         )}
         {isAuditing
           ? "Ally Auditing..."
           : isVerified
-            ? "Ally Pre-Check OK"
+            ? "Ally Review Ready"
             : comp.status === "ERROR"
               ? "Ally Audit Retry"
               : isFlagged
@@ -284,12 +282,11 @@ function JobApprovalsAdmin() {
   };
 
   const fetchPostings = async () => {
-    if (!isApiEnabled) return;
     try {
       setLoading(true);
       const [jobsRes, shiftsRes] = await Promise.all([
-        getPendingJobPostings("all").catch(() => []),
-        getPendingShifts("all").catch(() => []),
+        getPendingJobPostings("all"),
+        getPendingShifts("all"),
       ]);
 
       const mappedJobs: AdminJobApproval[] = jobsRes.map((dto: any) => {
@@ -314,7 +311,7 @@ function JobApprovalsAdmin() {
           title: dto.title,
           dept: dto.department || "Clinical Medicine",
           org: dto.facilityName || "Partner Hospital",
-          city: dto.city || dto.facilityCity || "Chennai",
+          city: dto.city || dto.facilityCity || "",
           compensation: comp,
           openings: dto.openings || 1,
           type: "job",
@@ -323,7 +320,7 @@ function JobApprovalsAdmin() {
           qualificationRequired: dto.qualificationRequired || "MBBS / B.Sc Nursing / Allied Health Degree",
           description: dto.description || "Healthcare professional requirement screening for hospital inpatient clinical duty.",
           employmentType: dto.employmentType || "Full-Time Clinical",
-          internship: dto.internship || false,
+          internship: dto.internship,
           postedBy: dto.facilityName || "Facility Admin",
           status,
           submittedDate: dto.postedAt || dto.createdAt ? new Date(dto.postedAt || dto.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Recent",
@@ -348,7 +345,7 @@ function JobApprovalsAdmin() {
           title: s.title,
           dept: s.department || "Clinical Medicine",
           org: s.facilityName || "Partner Hospital",
-          city: s.city || "Chennai",
+          city: s.city || "",
           compensation: comp,
           openings: s.openings || 1,
           type: "shift" as const,
@@ -380,6 +377,7 @@ function JobApprovalsAdmin() {
 
       setApiPostings([...mappedJobs, ...mappedShifts]);
     } catch (err: any) {
+      pageLoad.fail(err);
       toast.error("Failed to load postings & shifts", { description: err?.message });
     } finally {
       setLoading(false);
@@ -388,7 +386,7 @@ function JobApprovalsAdmin() {
 
   useEffect(() => {
     fetchPostings();
-  }, []);
+  }, [pageLoad.retryKey]);
 
   // Keep selected posting updated with fresh API data
   useEffect(() => {
@@ -398,7 +396,7 @@ function JobApprovalsAdmin() {
     }
   }, [apiPostings]);
 
-  const approvals = isApiEnabled ? apiPostings : s.jobApprovals;
+  const approvals = apiPostings;
 
   // Performance-safe background Ally compliance verification (MAX_CONCURRENT = 2)
   useEffect(() => {
@@ -429,7 +427,7 @@ function JobApprovalsAdmin() {
     return () => {
       cancelled = true;
     };
-  }, [approvals, aiComplianceResults, getPostingCacheKey, handleRunAiCompliance]);
+  }, [approvals, aiComplianceResults, getPostingCacheKey, handleRunAiCompliance, pageLoad.retryKey]);
 
   // Prioritize Ally compliance verification immediately when Inspect opens
   useEffect(() => {
@@ -438,7 +436,7 @@ function JobApprovalsAdmin() {
     if (!aiComplianceResults[key] && !inFlightComplianceKeysRef.current.has(key)) {
       void handleRunAiCompliance(selectedJob, { silent: true });
     }
-  }, [sheetOpen, selectedJob, aiComplianceResults, getPostingCacheKey, handleRunAiCompliance]);
+  }, [sheetOpen, selectedJob, aiComplianceResults, getPostingCacheKey, handleRunAiCompliance, pageLoad.retryKey]);
 
   const filtered = approvals.filter((j) => {
     const matchesFilter = filter === "all" ? true : j.status === filter;
@@ -450,8 +448,8 @@ function JobApprovalsAdmin() {
     return matchesFilter && matchesSearch;
   });
 
-  const handleApprove = async (id: string, title: string) => {
-    if (isApiEnabled) {
+  const handleApprove = async (id: string, title: string) => { await pageAction.run(async () => {
+    {
       try {
         const item = apiPostings.find((p) => p.id === id);
         if (item?.type === "shift" || selectedJob?.type === "shift") {
@@ -468,24 +466,17 @@ function JobApprovalsAdmin() {
         setSheetOpen(false);
         fetchPostings();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Approval failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      jobApprovals: state.jobApprovals.map((j) =>
-        j.id === id ? { ...j, status: "approved" as const } : j
-      ),
-    }));
-    toast.success("Requirement Approved & Live!", {
-      description: `"${title}" is now published and active on the Candidate Portal.`,
-    });
-    setSheetOpen(false);
-  };
 
-  const handleRejectConfirm = async () => {
+  }); };
+
+  const handleRejectConfirm = async () => { await pageAction.run(async () => {
     if (!selectedJob) return;
-    if (isApiEnabled) {
+    {
       try {
         if (selectedJob.type === "shift") {
           await rejectShift(selectedJob.id, rejectReason || "Shift rejected by compliance admin.");
@@ -503,22 +494,13 @@ function JobApprovalsAdmin() {
         setRejectReason("");
         fetchPostings();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Rejection failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      jobApprovals: state.jobApprovals.map((j) =>
-        j.id === selectedJob.id ? { ...j, status: "rejected" as const, notes: rejectReason } : j
-      ),
-    }));
-    toast.error("Requirement Rejected", {
-      description: `Posting returned to ${selectedJob.org}: ${rejectReason || "Criteria mismatch."}`,
-    });
-    setRejectModalOpen(false);
-    setSheetOpen(false);
-    setRejectReason("");
-  };
+
+  }); };
 
   const pendingCount = approvals.filter((j) => j.status === "pending").length;
   const approvedCount = approvals.filter((j) => j.status === "approved").length;
@@ -546,6 +528,8 @@ function JobApprovalsAdmin() {
         </Button>
       }
     >
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
+      <AllyReviewNote />
       {/* Metric Strip (4 Cards) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
@@ -792,7 +776,7 @@ function JobApprovalsAdmin() {
                         <>
                           <Button
                             size="sm"
-                            onClick={() => handleApprove(item.id, item.title)}
+                            disabled={pageAction.isPending} onClick={() => handleApprove(item.id, item.title)}
                             className="text-xs font-bold gap-1.5 h-8 px-3 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             <HiCheck className="h-3.5 w-3.5 stroke-[2.5]" />
@@ -947,7 +931,7 @@ function JobApprovalsAdmin() {
                     </Button>
                     <Button
                       size="sm"
-                      onClick={() => handleApprove(item.id, item.title)}
+                      disabled={pageAction.isPending} onClick={() => handleApprove(item.id, item.title)}
                       className="h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1 transition-all active:scale-[0.98] cursor-pointer min-w-0"
                     >
                       <HiCheck className="h-3.5 w-3.5 shrink-0" />
@@ -1182,7 +1166,7 @@ function JobApprovalsAdmin() {
               {(() => {
                 const comp = getPostingCompliance(selectedJob);
                 const isAuditing = Boolean(runningComplianceIds[selectedJob.id]);
-                const isVerified = comp.status === "VERIFIED";
+                const isVerified = comp.status === "REVIEW";
                 const isFlagged = comp.status === "FLAGGED";
                 const isError = comp.status === "ERROR";
 
@@ -1192,14 +1176,14 @@ function JobApprovalsAdmin() {
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
                           {isAuditing ? (
-                            <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                            <ButtonSpinner className="h-4 w-4 animate-spin" />
                           ) : (
                             <BotMessageSquare className="h-4 w-4" />
                           )}
                         </div>
                         <div className="min-w-0">
                           <h5 className="font-extrabold text-xs uppercase tracking-wider text-primary leading-snug">
-                            Ally Statutory Posting Pre-Check
+                            Ally Posting Review
                           </h5>
                           <p className="text-[11px] text-muted-foreground truncate">
                             {isAuditing
@@ -1247,7 +1231,7 @@ function JobApprovalsAdmin() {
                           className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
                         >
                           {isAuditing ? (
-                            <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                            <ButtonSpinner className="h-3 w-3 animate-spin shrink-0" />
                           ) : (
                             <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
                           )}
@@ -1398,7 +1382,7 @@ function JobApprovalsAdmin() {
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => handleApprove(selectedJob.id, selectedJob.title)}
+                    disabled={pageAction.isPending} onClick={() => handleApprove(selectedJob.id, selectedJob.title)}
                     className="flex-1 sm:flex-initial bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1 rounded-xl shadow-none whitespace-nowrap"
                   >
                     <HiCheck className="h-3.5 w-3.5 shrink-0" /> Approve & Publish Live
@@ -1435,7 +1419,7 @@ function JobApprovalsAdmin() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejectModalOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleRejectConfirm} className="font-bold text-xs">
+            <Button variant="destructive" disabled={pageAction.isPending} onClick={handleRejectConfirm} className="font-bold text-xs">
               Reject Posting
             </Button>
           </DialogFooter>

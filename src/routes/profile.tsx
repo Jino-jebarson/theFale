@@ -1,3 +1,6 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { RequestError } from "@/components/fale/RequestError";
+import { errorMessage } from "@/lib/errorMessage";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -94,11 +97,13 @@ interface PreviewModalState {
 }
 
 function Profile() {
+  const availabilityAction = useConfirmedAction();
   const s = useApp();
   const p = (s.profile || {}) as Record<string, unknown>;
   const [isUploading, setIsUploading] = useState(false);
   const [candidateData, setCandidateData] = useState<CandidateProfile | null>(null);
-  const [, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [previewDoc, setPreviewDoc] = useState<PreviewModalState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -143,9 +148,9 @@ function Profile() {
     salaryText: "",
   });
 
-  useEffect(() => {
-    if (!isApiEnabled) return;
+  const loadProfile = () => {
     setLoading(true);
+    setProfileError(null);
     getCandidateProfile()
       .then((data) => {
         setCandidateData(data);
@@ -160,9 +165,9 @@ function Profile() {
             state: data.state,
             addressLine: data.addressLine,
             pincode: data.pincode,
-            role: data.profession || (data.isStudent ? data.course : "Doctor"),
-            specialty: data.specialty || "General medicine",
-            qual: data.qualification || "MBBS",
+            role: data.profession || (data.isStudent ? data.course : ""),
+            specialty: data.specialty || "",
+            qual: data.qualification || "",
             college: data.college,
             institution: data.college,
             council: data.council,
@@ -186,7 +191,7 @@ function Profile() {
         }));
       })
       .catch((err) => {
-        console.error("Profile fetch error:", err);
+        setProfileError(errorMessage(err, "Could not load your profile."));
       })
       .finally(() => {
         setLoading(false);
@@ -201,12 +206,13 @@ function Profile() {
       .catch((err) => {
         console.warn("View stats note:", err?.message || err);
       });
-  }, []);
+  };
+  useEffect(() => { loadProfile(); }, []);
 
   // 100% Dynamic Onboarding & Profile Data Extraction
   const name = candidateData?.name || String(p["name"] || s.contact || "Clinician");
   const role = candidateData?.profession || String(p["role"] || p["profession"] || "Clinician");
-  const specialty = candidateData?.specialty || String(p["specialty"] || "General Practice");
+  const specialty = candidateData?.specialty || String(p["specialty"] || "Not provided");
   const qual = candidateData?.qualification || String(p["qual"] || p["qualification"] || "");
   const city = candidateData?.city || String(p["city"] || "");
   const stateName = candidateData?.state || String(p["state"] || "");
@@ -355,25 +361,13 @@ function Profile() {
     copyToClipboard(window.location.href, "Profile link");
   };
 
-  const handleToggleOpenToWork = (checked: boolean) => {
-    if (candidateData) {
-      setCandidateData({ ...candidateData, openToWork: checked });
-    }
-    setState((prev) => ({ profile: { ...prev.profile, openToWork: checked } }));
-    if (isApiEnabled) {
-      updateOpenToWork(checked).catch(() => {
-        updateCandidateProfile({ openToWork: checked }).catch(console.error);
-      });
-    }
-    if (checked) {
-      toast.success("Open to Work activated!", {
-        description: "Hospitals and clinical recruiters can send you direct shift and job offers.",
-      });
-    } else {
-      toast.info("Open to Work paused", {
-        description: "Your profile is temporarily hidden from active hospital searches.",
-      });
-    }
+  const handleToggleOpenToWork = async (checked: boolean) => {
+    await availabilityAction.run(async () => {
+      await updateOpenToWork(checked);
+      setCandidateData((previous) => previous ? { ...previous, openToWork: checked } : previous);
+      setState((previous) => ({ profile: { ...previous.profile, openToWork: checked } }));
+      toast.success(checked ? "Open to Work activated" : "Open to Work paused");
+    });
   };
 
   const effectiveKycStatus = String(
@@ -414,7 +408,7 @@ function Profile() {
 
     setIsUploading(true);
     try {
-      if (isApiEnabled) {
+      {
         const docType = file.name.toLowerCase().includes("degree")
           ? "DEGREE_CERTIFICATE"
           : file.name.toLowerCase().includes("council") || file.name.toLowerCase().includes("license")
@@ -435,14 +429,6 @@ function Profile() {
           toast.error("Failed to read file");
         };
         reader.readAsDataURL(file);
-      } else {
-        setState((prev) => ({
-          docs: {
-            ...prev.docs,
-            [file.name.replace(/\.[^/.]+$/, "")]: file.name,
-          },
-        }));
-        toast.success(`${file.name} attached!`);
       }
     } catch (err: any) {
       toast.error("Failed to upload: " + (err?.message || "Error"));
@@ -474,7 +460,7 @@ function Profile() {
           },
         }));
 
-        if (isApiEnabled) {
+        {
           try {
             await uploadCandidateDocument("PHOTO", file.name, dataUrl);
             const fresh = await getCandidateProfile();
@@ -590,7 +576,7 @@ function Profile() {
       }));
 
       // 2. If API enabled, persist to PostgreSQL backend
-      if (isApiEnabled) {
+      {
         await updateCandidateProfile({
           fullName: editForm.name,
           name: editForm.name,
@@ -727,6 +713,8 @@ function Profile() {
 
   return (
     <AppShell>
+      <RequestError message={profileError} onRetry={loadProfile} retrying={loading} />
+      <RequestError message={availabilityAction.error} />
       <div className="w-full max-w-5xl mx-auto space-y-5 pb-16 min-w-0">
         {/* ========================================================= */}
         {/* EXECUTIVE CLINICIAN COVER & IDENTITY CARD                 */}
@@ -1014,6 +1002,7 @@ function Profile() {
                 </button>
                 <Switch
                   checked={openToWork}
+                  disabled={availabilityAction.isPending || loading || Boolean(profileError)}
                   onCheckedChange={handleToggleOpenToWork}
                   className="data-[state=checked]:bg-primary"
                 />

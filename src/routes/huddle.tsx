@@ -1,3 +1,6 @@
+import { RequestError } from "@/components/fale/RequestError";
+import { errorMessage } from "@/lib/errorMessage";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -386,23 +389,24 @@ function HuddlePage() {
   const [apiSessions, setApiSessions] = useState<HuddleSessionDto[]>([]);
   const [postComments, setPostComments] = useState<Record<string, HuddleCommentDto[]>>({});
   const [loading, setLoading] = useState(isApiEnabled);
+  const [huddleError, setHuddleError] = useState<string | null>(null);
+  const communityAction = useConfirmedAction();
 
-  const fetchHuddleData = () => {
-    if (!isApiEnabled) return;
+  const huddleRequest = useRef(0);
+  const fetchHuddleData = async () => {
+    const requestId = ++huddleRequest.current;
     setLoading(true);
-    Promise.all([
-      getHuddlePosts(selectedField).catch(() => []),
-      getHuddleQuestions().catch(() => []),
-      getHuddleSessions().catch(() => []),
-    ])
-      .then(([posts, questions, sessions]) => {
-        setApiPosts(posts);
-        setApiQuestions(questions);
-        setApiSessions(sessions);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+    setHuddleError(null);
+    try {
+      const results = await Promise.allSettled([getHuddlePosts(selectedField), getHuddleQuestions(), getHuddleSessions()]);
+      if (requestId !== huddleRequest.current) return;
+      const [posts, questions, sessions] = results;
+      if (posts.status === "fulfilled") setApiPosts(posts.value);
+      if (questions.status === "fulfilled") setApiQuestions(questions.value);
+      if (sessions.status === "fulfilled") setApiSessions(sessions.value);
+      const failed = results.filter((result) => result.status === "rejected");
+      if (failed.length) setHuddleError("Some community content could not be loaded. Please retry.");
+    } finally { if (requestId === huddleRequest.current) setLoading(false); }
   };
 
   useEffect(() => {
@@ -414,7 +418,7 @@ function HuddlePage() {
   const [facilityProfile, setFacilityProfile] = useState<FacilityProfileDto | null>(null);
 
   useEffect(() => {
-    if (isApiEnabled && isHospital) {
+    if (isHospital) {
       getFacilityProfile()
         .then((profile) => {
           if (profile) setFacilityProfile(profile);
@@ -449,15 +453,15 @@ function HuddlePage() {
 
   // Verification status based on FALE credential check
   const isVerified = isHospital
-    ? (facilityProfile ? facilityProfile.status === "VERIFIED" || s.profile["verified"] !== false : true)
-    : (s.profile["verified"] !== false && s.profile["kycStatus"] !== "pending" && s.profile["kycStatus"] !== "rejected");
+    ? (facilityProfile ? facilityProfile.status === "VERIFIED" : false)
+    : String(candidateProfile?.kycStatus || s.profile["kycStatus"] || "PENDING").toUpperCase() === "VERIFIED";
 
   // Clinical Mentor verification & application state
   const [mentorData, setMentorData] = useState<MentorApplicationDto | null>(null);
   const [applyingMentor, setApplyingMentor] = useState(false);
 
   useEffect(() => {
-    if (isApiEnabled && !isHospital) {
+    if (!isHospital) {
       getCandidateProfile()
         .then((profile) => {
           if (profile) setCandidateProfile(profile);
@@ -510,15 +514,9 @@ function HuddlePage() {
     }
     setApplyingMentor(true);
     try {
-      if (isApiEnabled) {
+      {
         const res = await applyForMentorSeal();
         setMentorData(res);
-      } else {
-        setMentorData({
-          status: "PENDING",
-          name: userName,
-          yearsExperience: candidateExpYears,
-        });
       }
       toast.success("Mentor Application Submitted!", {
         description: "Your clinical profile has been forwarded to the Admin Moderation Desk for credential audit & mentor seal verification.",
@@ -558,7 +556,7 @@ function HuddlePage() {
   const availableTypes = isHospital ? hospitalPostTypes : candidatePostTypes;
 
   const visibleQuestions = useMemo(() => {
-    if (isApiEnabled && apiQuestions.length > 0) {
+    if (apiQuestions.length > 0) {
       return apiQuestions.map((q) => ({
         id: q.id,
         topic: (q.topic || q.category || q.field || "Career") as HuddleQuestion["topic"],
@@ -627,7 +625,7 @@ function HuddlePage() {
   // Filtered posts - 100% Dynamic from live backend API or real session
   const visiblePosts = useMemo(() => {
     let rawList: HuddlePost[] = [];
-    if (isApiEnabled) {
+    {
       const apiIds = new Set(apiPosts.map((p) => p.id));
       const localOnly = (s.huddlePosts || [])
         .filter((p) => !apiIds.has(p.id))
@@ -696,13 +694,6 @@ function HuddlePage() {
         };
       });
       rawList = [...localOnly, ...mappedApi];
-    } else {
-      rawList = (s.huddlePosts || []).map((p) => ({
-        ...p,
-        at: formatRelativeTime(p.at || p.time),
-        time: formatRelativeTime(p.at || p.time),
-        isMentor: Boolean(p.isMentor || (isMentorCertified && p.authorName === userName)),
-      }));
     }
 
     return rawList
@@ -719,7 +710,7 @@ function HuddlePage() {
   }, [isApiEnabled, apiPosts, postComments, s.huddlePosts, selectedField, selectedType, searchQuery, isMentorCertified, userName, mentorData, visibleMentors, candidateExpYears]);
 
   const visibleSessions = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return apiSessions.map((sess) => ({
         id: sess.id,
         title: sess.title,
@@ -741,166 +732,37 @@ function HuddlePage() {
             : ["Nursing", "Doctors", "Interns"],
       }));
     }
-    return s.huddleSessions || [];
+
   }, [isApiEnabled, apiSessions, s.huddleSessions]);
 
-  const handleCreatePost = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isVerified) {
-      toast.error("Posting is locked for unverified accounts", {
-        description: "Complete your KYC or College ID verification to unlock posting in FALE Huddle.",
-      });
-      return;
-    }
-    if ((!postText.trim() && !postAudio) || safety.st === "block" || safety.st === "hire") {
-      toast.error(safety.why || "Please enter text or record a voice note.");
-      return;
-    }
-
-    const isAnon = Boolean(postAnon && !isHospital);
-    const hasImage = Boolean(postImage);
-    const isUnderReview = postType === "Case" || hasImage;
-    const effectiveText = postText.trim() || (postAudio ? "Clinical voice discussion" : "");
-
-    // Optimistically update store
-    const created = addHuddlePost({
-      type: postType,
-      field: postField,
-      authorName: isAnon ? "Anonymous Clinician" : userName,
-      authorRole: isAnon ? "Verified Clinician" : userRole,
-      authorLevel: isHospital ? "hospital" : userLevel,
-      anon: isAnon,
-      text: effectiveText,
-      image: postImage || undefined,
-      audioUrl: postAudio?.audioUrl,
-      audioDuration: postAudio?.duration,
-      isHospital,
+  const handleCreatePost = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!isVerified) { toast.error("Complete verification before posting."); return; }
+    if ((!postText.trim() && !postAudio) || safety.st === "block" || safety.st === "hire") { toast.error(safety.why || "Enter text or record a voice note."); return; }
+    await communityAction.run(async () => {
+      const saved = await createHuddlePost({ title: (postText.trim() || "Voice Note").slice(0, 80), body: postText.trim() || "Clinical voice discussion", type: postType, field: postField, anon: Boolean(postAnon && !isHospital), image: postImage || undefined, audioUrl: postAudio?.audioUrl, audioDuration: postAudio?.duration });
+      if (saved?.id) setApiPosts((previous) => [saved, ...previous]);
+      setPostText(""); setPostImage(null); setPostAudio(null); setIsRecordingAudio(false); setPostAnon(false);
+      toast.success(String(saved.status).toUpperCase() === "REVIEW" ? "Post submitted for review" : "Post published");
+      await fetchHuddleData();
     });
-
-    if (isApiEnabled) {
-      createHuddlePost({
-        title: (postText.trim() || (postAudio ? "Voice Note" : "")).slice(0, 80),
-        body: effectiveText,
-        type: postType,
-        field: postField,
-        anon: isAnon,
-        image: postImage || undefined,
-        audioUrl: postAudio?.audioUrl,
-        audioDuration: postAudio?.duration,
-      })
-        .then((newPost) => {
-          if (newPost && newPost.id) {
-            const augmented: HuddlePostDto = {
-              ...newPost,
-              authorName: isAnon ? "Anonymous Clinician" : newPost.authorName,
-              authorRole: isAnon ? "Verified Clinician" : newPost.authorRole,
-              anon: isAnon,
-              isAnonymous: isAnon,
-              image: postImage || undefined,
-              imageUrl: postImage || undefined,
-              audioUrl: postAudio?.audioUrl || (newPost as any).audioUrl,
-              audioDuration: postAudio?.duration || (newPost as any).audioDuration,
-              status: isUnderReview ? "review" : "live",
-            };
-            if (!isUnderReview) {
-              setApiPosts((prev) => [augmented, ...prev]);
-            }
-          }
-        })
-        .catch((err) => {
-          console.warn("Backend huddle post sync:", err);
-        });
-    }
-
-    setPostText("");
-    setPostImage(null);
-    setPostAudio(null);
-    setIsRecordingAudio(false);
-    setPostAnon(false);
-
-    if (created.status === "review") {
-      toast.success("Post submitted for FALE clinical safety review!", {
-        description:
-          "Because this includes a Clinical Case study or image attachment, a FALE clinician will verify patient de-identification within 1 hour before going live.",
-      });
-    } else {
-      toast.success("Published live in Huddle!", {
-        description: "Your post is now visible to verified healthcare colleagues across the network.",
-      });
-    }
   };
 
-  const handleSendReply = (postId: string) => {
-    if (!isVerified) {
-      toast.error("Verification required to reply", {
-        description: "Only verified members can participate in discussions to keep the network spam-free.",
-      });
-      return;
-    }
-    const targetPost = posts.find((p) => p.id === postId);
-    if (targetPost && (targetPost.type === "Question" || targetPost.type === "question") && !isMentorCertified) {
-      toast.error("Accredited Mentors Only", {
-        description: "Only certified clinical mentors with 3+ years experience can answer questions.",
-      });
-      return;
-    }
+  const handleSendReply = async (postId: string) => {
+    if (!isVerified) { toast.error("Verification is required to reply."); return; }
+    const target = apiPosts.find((post) => post.id === postId);
+    if (String(target?.type).toLowerCase() === "question" && !isMentorCertified) { toast.error("Only accredited mentors can answer questions."); return; }
     const text = (replyDrafts[postId] || "").trim();
     if (!text) return;
-
     const validation = validateClinicalContent(text);
-    if (!validation.valid) {
-      toast.error("Content Policy Violation", {
-        description: validation.error,
-      });
-      return;
-    }
-
-    const optimisticComment: HuddleCommentDto = {
-      id: "temp-" + Date.now(),
-      postId,
-      authorName: userName,
-      authorRole: userRole,
-      content: text,
-      body: text,
-      createdAt: new Date().toISOString(),
-      timeAgo: "Just now",
-    };
-
-    setPostComments((prev) => ({
-      ...prev,
-      [postId]: [...(prev[postId] || []), optimisticComment],
-    }));
-
-    setApiPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId ? { ...p, commentCount: ((p as any).commentsCount || p.commentCount || 0) + 1 } : p
-      )
-    );
-
-    // Optimistically update store
-    addHuddleReply(postId, {
-      authorName: userName,
-      authorRole: userRole,
-      text,
-      authorLevel: userLevel === "hospital" ? "professional" : userLevel,
+    if (!validation.valid) { toast.error(validation.error || "Content policy violation"); return; }
+    await communityAction.run(async () => {
+      const saved = await addHuddleComment(postId, text);
+      setPostComments((previous) => ({ ...previous, [postId]: [...(previous[postId] || []), saved] }));
+      setReplyDrafts((previous) => ({ ...previous, [postId]: "" }));
+      setExpandedReplies((previous) => ({ ...previous, [postId]: true }));
+      toast.success("Reply published");
     });
-
-    if (isApiEnabled) {
-      addHuddleComment(postId, text)
-        .then((savedComment) => {
-          setPostComments((prev) => ({
-            ...prev,
-            [postId]: (prev[postId] || []).map((c) => (c.id === optimisticComment.id ? savedComment : c)),
-          }));
-        })
-        .catch((err) => {
-          console.warn("Backend comment sync:", err);
-        });
-    }
-
-    setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
-    setExpandedReplies((prev) => ({ ...prev, [postId]: true }));
-    toast.success("Reply added to discussion!");
   };
 
   const handleOpenReportModal = (postId: string) => {
@@ -909,27 +771,17 @@ function HuddlePage() {
     setReportDetails("");
   };
 
-  const handleConfirmReport = () => {
+  const handleConfirmReport = async () => {
     if (!reportingPostId) return;
-    const selectedObj = REPORT_REASONS.find((r) => r.id === reportReason);
-    const reasonText = selectedObj
-      ? `${selectedObj.label}${reportDetails.trim() ? ` — ${reportDetails.trim()}` : ""}`
-      : "Community Rule Violation";
-
-    reportHuddlePost(reportingPostId, reasonText);
-
-    if (isApiEnabled) {
-      flagHuddlePost(reportingPostId, reasonText)
-        .then(() => {
-          fetchHuddleData();
-        })
-        .catch(console.error);
-    }
-
-    toast.success("Flagged for Clinical Review", {
-      description: "Thank you. The post has been hidden from your feed and routed to the FALE Moderation Desk.",
+    const id = reportingPostId;
+    const reason = REPORT_REASONS.find((item) => item.id === reportReason)?.label || "Community rule violation";
+    await communityAction.run(async () => {
+      await flagHuddlePost(id, reason + (reportDetails.trim() ? ": " + reportDetails.trim() : ""));
+      reportHuddlePost(id, reason);
+      setReportingPostId(null);
+      toast.success("Report submitted for review");
+      await fetchHuddleData();
     });
-    setReportingPostId(null);
   };
 
   const isPostAuthor = useMemo(() => {
@@ -996,7 +848,7 @@ function HuddlePage() {
 
     setIsSubmittingEdit(true);
     try {
-      if (isApiEnabled) {
+      {
         await updateHuddlePostApi(editingPost.id, {
           title: trimmed.slice(0, 100),
           body: trimmed,
@@ -1046,7 +898,7 @@ function HuddlePage() {
     if (!deletingPostId) return;
     setIsDeletingPost(true);
     try {
-      if (isApiEnabled) {
+      {
         await deleteHuddlePostApi(deletingPostId);
         setApiPosts((prev) => prev.filter((p) => p.id !== deletingPostId));
       }
@@ -1068,7 +920,7 @@ function HuddlePage() {
     if (!deletingQuestionId) return;
     setIsDeletingQuestion(true);
     try {
-      if (isApiEnabled) {
+      {
         await deleteHuddleQuestionApi(deletingQuestionId);
         setApiQuestions((prev) => prev.filter((q) => q.id !== deletingQuestionId));
       }
@@ -1082,84 +934,32 @@ function HuddlePage() {
     }
   };
 
-  const handleAskMentor = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isVerified) {
-      toast.error("Verification required to ask questions to mentors");
-      return;
-    }
+  const handleAskMentor = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!isVerified) { toast.error("Verification is required to ask mentors."); return; }
     if (!askText.trim()) return;
-
     const validation = validateClinicalContent(askText);
-    if (!validation.valid) {
-      toast.error("Content Policy Violation", {
-        description: validation.error,
-      });
-      return;
-    }
-
-    askMentorQuestion({
-      topic: askTopic,
-      askerName: userName,
-      askerLevel: userLevel === "hospital" ? "professional" : userLevel,
-      askerProfession: userRole,
-      text: askText.trim(),
-    });
-
-    if (isApiEnabled) {
-      createHuddleQuestion({
-        title: askText.slice(0, 80),
-        body: askText.trim(),
-        category: askTopic,
-      })
-        .then(() => fetchHuddleData())
-        .catch(console.warn);
-    }
-
-    setAskText("");
-    setAskModalOpen(false);
-    toast.success("Question submitted to Clinical Mentors!", {
-      description: "Senior practitioners receive notification and will provide an in-depth public answer.",
+    if (!validation.valid) { toast.error(validation.error || "Content policy violation"); return; }
+    await communityAction.run(async () => {
+      await createHuddleQuestion({ title: askText.slice(0, 80), body: askText.trim(), category: askTopic });
+      setAskText(""); setAskModalOpen(false);
+      toast.success("Question submitted");
+      await fetchHuddleData();
     });
   };
 
-  const handleAnswerMentor = (questionId: string) => {
-    if (!isMentorCertified) {
-      toast.error("Mentor Accreditation Required", {
-        description: "Only accredited clinical mentors with 3+ years experience can answer questions.",
-      });
-      return;
-    }
+  const handleAnswerMentor = async (questionId: string) => {
+    if (!isMentorCertified) { toast.error("Mentor accreditation is required."); return; }
     const text = (mentorAnswerDrafts[questionId] || "").trim();
     if (!text) return;
-
     const validation = validateClinicalContent(text);
-    if (!validation.valid) {
-      toast.error("Content Policy Violation", {
-        description: validation.error,
-      });
-      return;
-    }
-
-    const resolvedMentorYrs = candidateExpYears >= 3 ? candidateExpYears : 3;
-    const resolvedMentorSpecialty = String(s.profile["specialty"] || s.profile["profession"] || "Clinical Specialist");
-
-    answerMentorQuestion(questionId, {
-      mentorName: userName,
-      mentorRole: userRole,
-      mentorYrs: resolvedMentorYrs,
-      mentorSpecialty: resolvedMentorSpecialty,
-      text,
+    if (!validation.valid) { toast.error(validation.error || "Content policy violation"); return; }
+    await communityAction.run(async () => {
+      await answerHuddleQuestion(questionId, text);
+      setMentorAnswerDrafts((previous) => ({ ...previous, [questionId]: "" }));
+      toast.success("Answer published");
+      await fetchHuddleData();
     });
-
-    if (isApiEnabled) {
-      answerHuddleQuestion(questionId, text)
-        .then(() => fetchHuddleData())
-        .catch(console.warn);
-    }
-
-    setMentorAnswerDrafts((prev) => ({ ...prev, [questionId]: "" }));
-    toast.success("Mentor answer published!");
   };
 
   const handleToggleBookSession = async (session: any) => {
@@ -1171,7 +971,7 @@ function HuddlePage() {
     }
 
     try {
-      if (isApiEnabled) {
+      {
         let updated: HuddleSessionDto;
         if (session.isBooked) {
           updated = await cancelHuddleSessionBooking(session.id);
@@ -1185,15 +985,6 @@ function HuddlePage() {
         setApiSessions((prev) =>
           prev.map((s) => (s.id === session.id ? updated : s))
         );
-      } else {
-        toggleBookSession(session.id);
-        if (!session.isBooked) {
-          toast.success("Seat reserved!", {
-            description: `You are booked for "${session.title}". Invitation confirmed.`,
-          });
-        } else {
-          toast.info("Booking cancelled.");
-        }
       }
     } catch (err: any) {
       toast.error(err?.message || "Failed to update session booking");
@@ -1203,7 +994,7 @@ function HuddlePage() {
   const handleDeleteSession = async (sessionId: string) => {
     if (!confirm("Are you sure you want to cancel and remove this session?")) return;
     try {
-      if (isApiEnabled) {
+      {
         await deleteHuddleSession(sessionId);
         setApiSessions((prev) => prev.filter((s) => s.id !== sessionId));
         toast.success("Session cancelled and removed.");
@@ -1251,7 +1042,7 @@ function HuddlePage() {
 
     setIsConductingSession(true);
     try {
-      if (isApiEnabled) {
+      {
         const payload: CreateHuddleSessionPayload = {
           title: sessionTitle.trim(),
           category: sessionCategory,
@@ -1266,28 +1057,6 @@ function HuddlePage() {
         setApiSessions((prev) => [newSession, ...prev]);
         toast.success("Mentorship session scheduled!", {
           description: `"${newSession.title}" is now open for clinical registrations.`,
-        });
-      } else {
-        const newMockSession = {
-          id: "sess_" + Date.now(),
-          title: sessionTitle.trim(),
-          category: sessionCategory,
-          hostType: "mentor" as const,
-          hostName: userName,
-          hostSub: `Accredited Clinical Mentor · ${userRole}`,
-          when: whenIso,
-          where: sessionWhere.trim() || "Live Interactive (Google Meet)",
-          seats: Number(sessionSeats) || 30,
-          bookedCount: 0,
-          isBooked: false,
-          description: sessionDescription.trim(),
-          forRoles: sessionRoles,
-        };
-        setState((st) => ({
-          huddleSessions: [newMockSession, ...(st.huddleSessions || [])],
-        }));
-        toast.success("Mentorship session scheduled!", {
-          description: `"${newMockSession.title}" is now live.`,
         });
       }
 
@@ -1309,6 +1078,9 @@ function HuddlePage() {
 
   return (
     <AppShell>
+      <fieldset disabled={communityAction.isPending} className="contents">
+      <RequestError message={huddleError} onRetry={() => { void fetchHuddleData(); }} retrying={loading} />
+      <RequestError message={communityAction.error} />
       {/* ================= PAGE HEADER (MATCHING LEARNING & APPLICATIONS) ================= */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="min-w-0">
@@ -1994,7 +1766,7 @@ function HuddlePage() {
                             </div>
                             <p className="text-[11px] font-medium text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
                               <span className="truncate max-w-[200px] sm:max-w-none">
-                                {post.anon ? "Verified Practitioner · Bengaluru" : post.authorRole}
+                                {post.anon ? "Anonymous member" : post.authorRole}
                               </span>
                               <span className="shrink-0 text-muted-foreground/60">·</span>
                               <span className="shrink-0 text-muted-foreground whitespace-nowrap">
@@ -2069,23 +1841,7 @@ function HuddlePage() {
                           {/* Helpful Button */}
                           <button
                             type="button"
-                            onClick={() => {
-                              toggleHelpfulPost(post.id);
-                              if (isApiEnabled) {
-                                setApiPosts((prev) =>
-                                  prev.map((p) =>
-                                    p.id === post.id
-                                      ? {
-                                        ...p,
-                                        upvotes: (p.upvotes || 0) + (p.hasUpvoted ? -1 : 1),
-                                        hasUpvoted: !p.hasUpvoted,
-                                      }
-                                      : p
-                                  )
-                                );
-                                upvoteHuddlePost(post.id).catch(console.warn);
-                              }
-                            }}
+                            onClick={() => { void communityAction.run(async () => { await upvoteHuddlePost(post.id); await fetchHuddleData(); }); }}
                             className={cn(
                               "px-3 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 font-bold cursor-pointer",
                               post.userHelpful
@@ -2110,12 +1866,12 @@ function HuddlePage() {
                                 ...prev,
                                 [post.id]: willExpand,
                               }));
-                              if (willExpand && isApiEnabled && !postComments[post.id]) {
+                              if (willExpand && !postComments[post.id]) {
                                 getHuddleComments(post.id)
                                   .then((comments) => {
                                     setPostComments((prev) => ({ ...prev, [post.id]: comments }));
                                   })
-                                  .catch(console.warn);
+                                  .catch((error) => { toast.error(errorMessage(error)); });
                               }
                             }}
                             className="px-3 py-1.5 rounded-xl border border-border bg-muted/40 text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all flex items-center gap-1.5 font-bold cursor-pointer"
@@ -3739,6 +3495,7 @@ function HuddlePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </fieldset>
     </AppShell>
   );
 }

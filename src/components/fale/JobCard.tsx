@@ -1,3 +1,4 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
@@ -53,6 +54,7 @@ export function OrgMark({ name, className }: { name: string; className?: string 
 
 export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
   const s = useApp();
+  const jobAction = useConfirmedAction();
   const saved = s.saved.includes(job.id);
   const app = s.applied.find((a) => a.jobId === job.id);
   const isApplied = Boolean(app && app.status !== "Withdrawn");
@@ -85,15 +87,15 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
 
     setLoadingRationale(true);
     try {
-      const candidateRole = String(p["role"] || p["profession"] || p["designation"] || "Doctor");
-      const candidateQual = String(p["qualification"] || p["primaryDegree"] || "MBBS");
+      const candidateRole = String(p["role"] || p["profession"] || p["designation"] || "");
+      const candidateQual = String(p["qualification"] || p["primaryDegree"] || "");
       const candidateCity = String(p["city"] || p["area"] || "");
 
       const res = await explainJobMatchWithAi(
         job.title,
         job.org,
         distanceKm,
-        job.match ?? 85,
+        job.match,
         {
           role: candidateRole,
           qualification: candidateQual,
@@ -112,44 +114,22 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
     }
   };
 
-  const toggleSave = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isApiEnabled) {
-      if (saved) {
-        unsaveJob(job.id).catch(console.error);
-      } else {
-        saveJob(job.id).catch(console.error);
-      }
-    }
-    setState((x) => ({
-      saved: saved ? x.saved.filter((i) => i !== job.id) : [...x.saved, job.id],
-    }));
-    if (!saved) {
-      toast.success("Role saved to your wishlist");
-    }
+  const toggleSave = async (event: React.MouseEvent) => {
+    event.preventDefault(); event.stopPropagation();
+    await jobAction.run(async () => {
+      if (saved) await unsaveJob(job.id); else await saveJob(job.id);
+      setState((previous) => ({ saved: saved ? previous.saved.filter((id) => id !== job.id) : [...previous.saved, job.id] }));
+      toast.success(saved ? "Role removed from saved jobs" : "Role saved");
+    });
   };
 
-  const quickApply = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isRestrictedForStudent) {
-      toast.info("Internships only for students", {
-        description: "Full-time hospital jobs unlock once you graduate with council registration.",
-      });
-      return;
-    }
-    const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    if (isApiEnabled) {
-      applyForJob(job.id).catch((err) => {
-        console.error("Apply error:", err);
-      });
-    }
-    setState((x) => ({
-      applied: [{ jobId: job.id, status: "Applied", date: now }, ...x.applied.filter((a) => a.jobId !== job.id)],
-    }));
-    toast.success("Application sent via Easy Apply!", {
-      description: `Your verified profile was shared directly with ${job.org}.`,
+  const quickApply = async (event: React.MouseEvent) => {
+    event.preventDefault(); event.stopPropagation();
+    if (isRestrictedForStudent) { toast.info("Students can apply for internships only."); return; }
+    await jobAction.run(async () => {
+      await applyForJob(job.id);
+      setState((previous) => ({ applied: [{ jobId: job.id, status: "Applied", date: new Date().toLocaleDateString("en-IN") }, ...previous.applied.filter((item) => item.jobId !== job.id)] }));
+      toast.success("Application submitted");
     });
   };
 
@@ -210,7 +190,7 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
           <button
             type="button"
             aria-label={saved ? "Unsave job" : "Save job"}
-            onClick={toggleSave}
+            disabled={jobAction.isPending} onClick={toggleSave}
             className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
           >
             {saved ? <HiBookmark className="h-4.5 w-4.5 text-primary" /> : <HiOutlineBookmark className="h-4.5 w-4.5" />}
@@ -347,7 +327,7 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
           ) : (
             <button
               type="button"
-              onClick={quickApply}
+              disabled={jobAction.isPending} onClick={quickApply}
               className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-1.5 text-xs font-bold text-white hover:bg-primary-hover transition-colors shadow-2xs active:scale-[0.98] cursor-pointer"
             >
               <span>Easy Apply</span>

@@ -160,7 +160,7 @@ function normalizeCandidateProfile(profile: CandidateProfile): CandidateProfile 
  * Fetch candidate profile from Spring Boot backend.
  */
 export async function getCandidateProfile(): Promise<CandidateProfile> {
-  const profile = await apiFetch<CandidateProfile>("/candidates/me/profile");
+  const profile = await apiFetch<CandidateProfile>("/candidates/me/profile", { cacheMs: 60000 });
   return normalizeCandidateProfile(profile);
 }
 

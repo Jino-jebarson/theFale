@@ -1,3 +1,5 @@
+import { ButtonSpinner } from "@/components/ui/button";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { BotMessageSquare, X, Send, ArrowRight, RotateCcw, Ticket } from "lucide-react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
@@ -160,7 +162,7 @@ const ROLE_CONFIGS: Record<FaleRole, RoleConfig> = {
       "Verify My Student ID",
     ],
     placeholder: "Ask Ally anything (e.g. Find nursing internship shifts)...",
-    footer: "Accredited Curriculums · Verified Mentors · Live AI",
+    footer: "AI suggestions ? Review before acting",
     aiRoleKey: "student",
   },
   professional: {
@@ -174,7 +176,7 @@ const ROLE_CONFIGS: Record<FaleRole, RoleConfig> = {
       "Handover to Support Desk",
     ],
     placeholder: "Ask Ally anything (e.g. Set me open to work)...",
-    footer: "Escrow-Guaranteed · KMC/MCI/INC Verified · Live AI",
+    footer: "AI suggestions ? Review before acting",
     aiRoleKey: "clinician",
   },
   facility: {
@@ -188,7 +190,7 @@ const ROLE_CONFIGS: Record<FaleRole, RoleConfig> = {
       "Review Shortlisted Applicants",
     ],
     placeholder: "Ask Ally anything (e.g. Post night duty doctor shift)...",
-    footer: "24h Escrow Settlement · Council-Verified Clinicians · Live AI",
+    footer: "AI suggestions ? Review before acting",
     aiRoleKey: "hospital",
   },
   admin: {
@@ -202,12 +204,13 @@ const ROLE_CONFIGS: Record<FaleRole, RoleConfig> = {
       "Open Support Tickets",
     ],
     placeholder: "Ask Ally anything (e.g. Check pending hospital KYC)...",
-    footer: "Platform Operations · Full Audit Trail · Live AI",
+    footer: "AI suggestions ? Review before acting",
     aiRoleKey: "admin",
   },
 };
 
 export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
+  const action = useConfirmedAction();
   const [isOpen, setIsOpen] = useState(false);
   const [language, setLanguage] = useState<"en" | "kn" | "ml" | "hi" | "ta">("en");
   const [input, setInput] = useState("");
@@ -233,7 +236,14 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
     readStoredChatMessages(sessionScopeKey, activeRole, roleConfig.welcome, roleConfig.suggestions)
   );
 
-  const resetChatToWelcome = () => {
+  const historyEpoch = useRef(0);
+  const resetChatToWelcome = async () => {
+    if (loading || action.isPending) return;
+    historyEpoch.current++;
+    const saved = await action.run(async () => {
+      if (s.signedIn) await clearAllyChatHistory(roleConfig.aiRoleKey);
+    });
+    if (!saved) return;
     const fresh = [
       {
         ...buildWelcomeMessage(activeRole, roleConfig.welcome, roleConfig.suggestions),
@@ -245,9 +255,6 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
       try {
         window.localStorage.removeItem(`${CHAT_STORAGE_PREFIX}${sessionScopeKey}`);
       } catch { }
-    }
-    if (isApiEnabled && s.signedIn) {
-      clearAllyChatHistory(roleConfig.aiRoleKey).catch(() => { });
     }
   };
 
@@ -270,11 +277,12 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
 
   // Hydrate cross-device chat history from backend DB on sign-in / scope change
   useEffect(() => {
-    if (!isApiEnabled || !s.signedIn) return;
+    if (!s.signedIn) return;
     let active = true;
+    const epoch = historyEpoch.current;
     getAllyChatHistory(roleConfig.aiRoleKey)
       .then((remote) => {
-        if (!active || !Array.isArray(remote) || remote.length === 0) return;
+        if (!active || epoch !== historyEpoch.current || !Array.isArray(remote) || remote.length === 0) return;
         const mapped: ChatMessage[] = remote.map((item) => {
           const parsedTs = item.createdAt ? new Date(item.createdAt).getTime() : Date.now();
           return {
@@ -345,11 +353,6 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
 
   const handleCreateTicketFromChat = async (messageId: string) => {
     if (creatingTicketMsgId) return;
-    if (!isApiEnabled) {
-      navigate({ to: "/support" });
-      setIsOpen(false);
-      return;
-    }
 
     setCreatingTicketMsgId(messageId);
     try {
@@ -452,34 +455,6 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
         }
       );
 
-      // Handle safe, role-scoped automatic action if triggered by Ally
-      if (res.action === "open_to_work" && activeRole === "professional") {
-        let persisted = !isApiEnabled;
-        if (isApiEnabled) {
-          try {
-            await updateOpenToWork(true);
-            persisted = true;
-          } catch {
-            toast.error("Could not update Open to Work status on server.");
-          }
-        }
-        if (persisted) {
-          setState({
-            profile: {
-              ...s.profile,
-              openToWork: true,
-            },
-          });
-          toast.success("Status Updated: You are now Open to Work!", {
-            description: "Hospitals in your city can now dispatch immediate locum shifts to you.",
-          });
-        }
-      } else if (res.action === "handover_human") {
-        toast.info("Ready to connect you to FALE Support Desk", {
-          description: "You can submit a priority ticket directly from the message below.",
-        });
-      }
-
       const cleanedReply = cleanMarkdownAndJsonNoise(res.response || streamedText) || res.response || streamedText;
       const actionLabel =
         typeof res.actionData?.["label"] === "string" ? res.actionData["label"] : undefined;
@@ -522,9 +497,18 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
     }
   };
 
-  const executeAction = (actionName: string) => {
+  const executeAction = async (actionName: string) => {
+    if (actionName === "open_to_work") {
+      if (activeRole !== "professional") return;
+      await action.run(async () => {
+        await updateOpenToWork(true);
+        setState(prev => ({ profile: { ...prev.profile, openToWork: true } }));
+        toast.success("Open to Work updated");
+      });
+      return;
+    }
     // Professional Clinician Actions
-    if (actionName === "browse_shifts" || actionName === "open_to_work") {
+    if (actionName === "browse_shifts") {
       navigate({ to: "/shifts" });
       setIsOpen(false);
     } else if (actionName === "browse_jobs") {
@@ -671,7 +655,7 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
 
                 <button
                   type="button"
-                  onClick={resetChatToWelcome}
+                  disabled={loading || action.isPending} onClick={resetChatToWelcome}
                   title="New conversation"
                   className="grid h-7 w-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
                   aria-label="Reset Ally chat"
@@ -744,7 +728,7 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
                           ) : (
                             <button
                               type="button"
-                              onClick={() => executeAction(m.action!)}
+                              disabled={action.isPending} onClick={() => executeAction(m.action!)}
                               className="inline-flex items-center gap-1.5 rounded-xl bg-white/95 dark:bg-card px-2.5 py-1.5 text-[11px] font-bold text-[#FF5A1F] border border-[#FF5A1F]/30 shadow-2xs hover:bg-white transition-all cursor-pointer"
                             >
                               <BotMessageSquare className="h-3.5 w-3.5 text-[#FF5A1F]" />
@@ -782,11 +766,7 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
 
               {loading && messages.every((m) => !(m.isStreaming && m.text.length > 0)) && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground mr-auto bg-muted/40 px-3 py-2 rounded-2xl border border-border/50">
-                  <span className="flex gap-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce" />
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce [animation-delay:0.2s]" />
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce [animation-delay:0.4s]" />
-                  </span>
+                  <ButtonSpinner className="h-3.5 w-3.5 text-primary" />
                   <span>Ally is thinking...</span>
                 </div>
               )}
@@ -830,7 +810,7 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
               </form>
               <div className="mt-1.5 flex items-center justify-between text-[9px] text-muted-foreground px-1">
                 <span>{roleConfig.footer}</span>
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">● Live AI</span>
+                <span className="font-semibold">AI assistant</span>
               </div>
             </div>
           </div>

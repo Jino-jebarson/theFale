@@ -1,3 +1,7 @@
+import { errorMessage } from "@/lib/errorMessage";
+import { ApiError } from "@/lib/api";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect } from "react";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import {
@@ -22,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { jobs } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { isApiEnabled } from "@/lib/api";
-import { applyForJob, getJobById, saveJob, unsaveJob } from "@/lib/adapters/jobAdapter";
+import { applyForJob, getJobById, getJobs, saveJob, unsaveJob } from "@/lib/adapters/jobAdapter";
 import { withdrawApplication } from "@/lib/adapters/applicationAdapter";
 import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
 import { calculateClinicalMatch } from "@/lib/clinicalMatchingEngine";
@@ -42,17 +46,13 @@ function formatApplicationStatus(status?: string) {
 
 export const Route = createFileRoute("/jobs/$id")({
   loader: async ({ params }) => {
-    if (isApiEnabled) {
-      try {
-        const job = await getJobById(params.id);
-        return { job };
-      } catch (e) {
-        throw notFound();
-      }
-    }
-    const job = jobs.find((j) => j.id === params.id);
+    const job = await getJobById(params.id).catch((error: unknown) => {
+      if (error instanceof ApiError && error.status === 404) throw notFound();
+      throw error;
+    });
     if (!job) throw notFound();
-    return { job };
+    const relatedJobs = await getJobs().catch(() => []);
+    return { job, relatedJobs };
   },
   head: ({ loaderData }) => ({
     meta: loaderData
@@ -70,12 +70,13 @@ export const Route = createFileRoute("/jobs/$id")({
 });
 
 function JobDetail() {
-  const { job } = Route.useLoaderData();
+  const jobAction = useConfirmedAction();
+  const { job, relatedJobs } = Route.useLoaderData();
   const s = useApp();
   const [withdrawing, setWithdrawing] = useState(false);
 
   useEffect(() => {
-    if (!isApiEnabled || s.profile["role"]) return;
+    if (s.profile["role"]) return;
     getCandidateProfile()
       .then((profileData) => {
         if (!profileData) return;
@@ -92,7 +93,7 @@ function JobDetail() {
             state: profileData.state || prev.profile["state"],
             role: profileData.profession || (profileData.isStudent ? profileData.course : "Doctor"),
             specialty: profileData.specialty || "General medicine",
-            qual: profileData.qualification || "MBBS",
+            qual: profileData.qualification || "",
             college: profileData.college || prev.profile["college"],
             institution: profileData.college || prev.profile["institution"],
             council: profileData.council || prev.profile["council"],
@@ -108,7 +109,7 @@ function JobDetail() {
           },
         }));
       })
-      .catch(console.error);
+      .catch((error) => toast.error(errorMessage(error)));
   }, [s.profile]);
 
   const candidateLevel = s.candidateLevel || (s.profile["level"] as any) || (s.profile["cadreLevel"] as any) || (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
@@ -149,66 +150,31 @@ function JobDetail() {
   const isWithdrawn = Boolean(app && app.status === "Withdrawn");
   const saved = s.saved.includes(job.id);
 
-  const apply = () => {
-    const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    if (isApiEnabled) {
-      applyForJob(job.id).catch((err) => {
-        console.error("Apply error:", err);
-      });
-    }
-    const candidateName = String(s.profile["name"] || "Candidate Professional");
-    const candidateRole = String(s.profile["role"] || "Healthcare Professional");
-    const candidateCity = String(s.profile["city"] || s.profile["area"] || "");
-    const regNumber = String(s.profile["regNo"] || "KMC/DOC/89421");
-
-    setState((x) => ({
-      applied: [{ jobId: job.id, status: "Applied", date: now }, ...x.applied.filter((a) => a.jobId !== job.id)],
-      adminApplications: [
-        {
-          id: crypto.randomUUID(),
-          candidateName,
-          candidateRole,
-          candidateCity,
-          jobId: job.id,
-          jobTitle: job.title,
-          hospitalName: job.org,
-          matchScore: job.match || 92,
-          councilVerified: true,
-          regNumber,
-          exp: "2–4 yrs clinical experience",
-          status: "pending_admin" as const,
-          appliedDate: "Just now",
-          summary: `Applicant submitted credential profile for ${job.title} at ${job.org}. Awaiting Admin shortlisting.`,
-          phone: s.contact || "+91 98401 23456",
-          email: "candidate@fale.in",
-        },
-        ...x.adminApplications,
-      ],
-    }));
-    toast.success("Application Submitted Successfully!", {
-      description: `Your profile and verified credentials have been submitted for ${job.title} at ${job.org}.`,
+  const toggleSaveRole = async () => jobAction.run(async () => {
+    if (saved) await unsaveJob(job.id); else await saveJob(job.id);
+    setState((previous) => ({ saved: saved ? previous.saved.filter((id) => id !== job.id) : [...previous.saved, job.id] }));
+    toast.success(saved ? "Role removed from saved jobs" : "Role saved");
+  });
+  const apply = async () => {
+    if (isApplied) return;
+    return jobAction.run(async () => {
+      await applyForJob(job.id);
+      const date = new Date().toLocaleDateString("en-IN");
+      setState((previous) => ({ applied: [{ jobId: job.id, status: "Applied", date }, ...previous.applied.filter((item) => item.jobId !== job.id)] }));
+      toast.success("Application submitted");
     });
   };
 
-  const handleWithdrawConfirm = (reason: string, notes: string) => {
-    const now = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-    if (isApiEnabled) {
-      withdrawApplication(job.id, reason).catch((err) => {
-        console.error("Withdraw error:", err);
-      });
-    }
-    setState((x) => ({
-      applied: x.applied.map((item) =>
-        item.jobId === job.id ? { ...item, status: "Withdrawn", date: now } : item
-      ),
-    }));
-    toast.info("Application withdrawn", {
-      description: `Your application for ${job.title} at ${job.org} has been withdrawn (${reason}).`,
-    });
-  };
+  const handleWithdrawConfirm = async (reason: string, _notes: string) => jobAction.run(async () => {
+    await withdrawApplication(job.id, reason);
+    setState((previous) => ({ applied: previous.applied.map((item) => item.jobId === job.id ? { ...item, status: "Withdrawn" } : item) }));
+    setWithdrawing(false);
+    toast.success("Application withdrawn");
+  });
 
   return (
     <AppShell>
+      <RequestError message={jobAction.error} />
       <Link to="/jobs" search={{ q: undefined }} className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-primary">
         <HiArrowLeft className="h-4 w-4" /> {isStudent ? "Back to internships" : "Back to jobs"}
       </Link>
@@ -290,7 +256,7 @@ function JobDetail() {
                     <HiOutlineArrowUturnLeft className="h-4 w-4" />
                     <span>Withdrawn on {app.date}</span>
                   </div>
-                  <Button size="lg" onClick={apply} className="gap-2">
+                  <Button size="lg" disabled={jobAction.isPending} onClick={apply} className="gap-2">
                     <HiOutlineArrowPath className="h-4 w-4" /> Re-apply
                   </Button>
                 </>
@@ -301,23 +267,7 @@ function JobDetail() {
                 variant="outline"
                 size="lg"
                 className="flex-1 sm:flex-initial"
-                onClick={() => {
-                  if (isApiEnabled) {
-                    if (saved) {
-                      unsaveJob(job.id).catch(console.error);
-                    } else {
-                      saveJob(job.id).catch(console.error);
-                    }
-                  }
-                  setState((x) => ({
-                    saved: saved ? x.saved.filter((i) => i !== job.id) : [...x.saved, job.id],
-                  }));
-                  if (!saved) {
-                    toast.success("Role saved to your wishlist");
-                  } else {
-                    toast.info("Role removed from your wishlist");
-                  }
-                }}
+                disabled={jobAction.isPending} onClick={toggleSaveRole}
               >
                 {saved ? <HiBookmark className="text-primary" /> : <HiOutlineBookmark />} {saved ? "Saved" : "Save"}
               </Button>
@@ -326,7 +276,7 @@ function JobDetail() {
           <div className="surface space-y-5 p-4 sm:p-6 rounded-3xl border border-border/80 text-sm leading-relaxed">
             <section>
               <h2 className="mb-2 text-base font-bold">About the role</h2>
-              <p className="text-muted-foreground">Join a collaborative healthcare team committed to thoughtful, high-quality care. Bring your expertise to a setting that supports professional growth.</p>
+              <p className="text-muted-foreground">{job.description || "No description provided."}</p>
             </section>
             <section>
               <h2 className="mb-2 text-base font-bold">What you'll do</h2>
@@ -342,19 +292,19 @@ function JobDetail() {
             </section>
             <section>
               <h2 className="mb-2 text-base font-bold">Benefits</h2>
-              <p className="text-muted-foreground">{isStudent ? "Teaching hospital rotation credit · Logbook sign-off · Mentorship by Senior Consultants · Monthly Educational Stipend" : "PF & ESI · Health insurance · Accommodation support · Paid learning days"}</p>
+              <p className="text-muted-foreground">{job.perks?.length ? job.perks.join(" · ") : "No benefits provided."}</p>
             </section>
           </div>
         </div>
         <aside className="space-y-4">
           <div className="surface p-5">
             <h3 className="font-bold">About {job.org}</h3>
-            <p className="mt-2 text-sm text-muted-foreground">A leading multi-speciality healthcare provider with a strong focus on patient safety and staff development.</p>
+            <p className="mt-2 text-sm text-muted-foreground">Facility details have not been provided for this posting.</p>
           </div>
           <div>
             <h3 className="mb-3 font-bold">{isStudent ? "Similar internships" : "Similar jobs"}</h3>
             <div className="space-y-3">
-              {(isApiEnabled ? [] : jobs)
+              {relatedJobs
                 .filter((j) => j.id !== job.id && (!isStudent || j.title.toLowerCase().includes("intern") || j.title.toLowerCase().includes("observership") || j.tags.some((t) => t.toLowerCase().includes("intern"))))
                 .slice(0, 2)
                 .map((j) => <JobCard key={j.id} job={j} compact />)}

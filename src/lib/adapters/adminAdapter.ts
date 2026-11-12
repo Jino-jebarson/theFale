@@ -81,7 +81,7 @@ export async function getAdminDashboardMetrics(): Promise<AdminDashboardMetricsD
 
 export async function getPendingJobPostings(status?: string): Promise<JobPostingDto[]> {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  return apiFetch<JobPostingDto[]>(`/admin/postings${query}`);
+  return apiFetch<JobPostingDto[]>(`/admin/postings${query}`, { validate: Array.isArray });
 }
 
 export async function approveJobPosting(postingId: string): Promise<void> {
@@ -100,7 +100,7 @@ export async function rejectJobPosting(postingId: string, reason: string): Promi
 
 export async function getAdminApplications(status?: string): Promise<JobApplicationDto[]> {
   const query = status && status !== "all" ? `?status=${encodeURIComponent(status)}` : "";
-  return apiFetch<JobApplicationDto[]>(`/admin/applications${query}`);
+  return apiFetch<JobApplicationDto[]>(`/admin/applications${query}`, { validate: Array.isArray });
 }
 
 export async function screenApplication(
@@ -116,7 +116,7 @@ export async function screenApplication(
 
 export async function getPendingFacilityKyc(status?: string): Promise<FacilityProfileDto[]> {
   const query = status && status !== "all" ? `?status=${encodeURIComponent(status)}` : "";
-  return apiFetch<FacilityProfileDto[]>(`/admin/kyc/facilities${query}`);
+  return apiFetch<FacilityProfileDto[]>(`/admin/kyc/facilities${query}`, { validate: Array.isArray });
 }
 
 export async function reviewFacilityKyc(
@@ -133,7 +133,7 @@ export async function reviewFacilityKyc(
 
 export async function getPendingCandidateKyc(status?: string): Promise<CandidateProfileDto[]> {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  return apiFetch<CandidateProfileDto[]>(`/admin/kyc/candidates${query}`);
+  return apiFetch<CandidateProfileDto[]>(`/admin/kyc/candidates${query}`, { validate: Array.isArray });
 }
 
 export async function reviewCandidateKyc(
@@ -149,7 +149,7 @@ export async function reviewCandidateKyc(
 }
 
 export async function getPendingStudentUpgrades(): Promise<StudentUpgradeRequestDto[]> {
-  return apiFetch<StudentUpgradeRequestDto[]>("/admin/candidates/upgrade-requests");
+  return apiFetch<StudentUpgradeRequestDto[]>("/admin/candidates/upgrade-requests", { validate: Array.isArray });
 }
 
 export async function reviewStudentUpgrade(
@@ -165,11 +165,11 @@ export async function reviewStudentUpgrade(
 }
 
 export async function getFlaggedHuddlePosts(): Promise<FlaggedHuddlePostDto[]> {
-  return apiFetch<FlaggedHuddlePostDto[]>("/admin/huddle/flagged");
+  return apiFetch<FlaggedHuddlePostDto[]>("/admin/huddle/flagged", { validate: Array.isArray });
 }
 
 export async function getReviewCases(): Promise<FlaggedHuddlePostDto[]> {
-  return apiFetch<FlaggedHuddlePostDto[]>("/admin/huddle/cases");
+  return apiFetch<FlaggedHuddlePostDto[]>("/admin/huddle/cases", { validate: Array.isArray });
 }
 
 export async function approveReviewCase(postId: string): Promise<FlaggedHuddlePostDto> {
@@ -197,12 +197,12 @@ export async function togglePinHuddlePost(postId: string): Promise<FlaggedHuddle
 }
 
 export async function getAuditLogs(): Promise<AuditEventDto[]> {
-  return apiFetch<AuditEventDto[]>("/admin/audit-logs");
+  return apiFetch<AuditEventDto[]>("/admin/audit-logs", { validate: Array.isArray });
 }
 
 export async function getPendingShifts(status?: string): Promise<LocumShiftDto[]> {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  return apiFetch<LocumShiftDto[]>(`/admin/shifts${query}`);
+  return apiFetch<LocumShiftDto[]>(`/admin/shifts${query}`, { validate: Array.isArray });
 }
 
 export async function approveShift(shiftId: string): Promise<void> {
@@ -220,7 +220,7 @@ export async function rejectShift(shiftId: string, notes?: string): Promise<void
 }
 
 export async function getPendingShiftClaims(): Promise<ShiftClaimDto[]> {
-  return apiFetch<ShiftClaimDto[]>("/admin/shifts/claims/pending");
+  return apiFetch<ShiftClaimDto[]>("/admin/shifts/claims/pending", { validate: Array.isArray });
 }
 
 export async function screenShiftClaim(
@@ -235,7 +235,7 @@ export async function screenShiftClaim(
 }
 
 export async function getPendingPayouts(): Promise<ShiftClaimDto[]> {
-  return apiFetch<ShiftClaimDto[]>("/admin/payouts/pending");
+  return apiFetch<ShiftClaimDto[]>("/admin/payouts/pending", { validate: Array.isArray });
 }
 
 export async function disbursePayout(
@@ -250,7 +250,7 @@ export async function disbursePayout(
 }
 
 export async function getAdminMentorApplications(): Promise<MentorApplicationDto[]> {
-  return apiFetch<MentorApplicationDto[]>("/admin/huddle/mentors");
+  return apiFetch<MentorApplicationDto[]>("/admin/huddle/mentors", { validate: Array.isArray });
 }
 
 export async function reviewAdminMentorApplication(
@@ -309,7 +309,7 @@ export interface AdminSupportTicketDto {
 
 export async function getAdminSupportTickets(status?: string): Promise<AdminSupportTicketDto[]> {
   const query = status && status !== "ALL" ? `?status=${encodeURIComponent(status)}` : "";
-  return apiFetch<AdminSupportTicketDto[]>(`/admin/support/tickets${query}`);
+  return apiFetch<AdminSupportTicketDto[]>(`/admin/support/tickets${query}`, { validate: Array.isArray });
 }
 
 export async function updateAdminSupportTicketStatus(

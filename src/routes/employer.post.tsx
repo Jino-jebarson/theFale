@@ -1,3 +1,6 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { RequestError } from "@/components/fale/RequestError";
+import { errorMessage } from "@/lib/errorMessage";
 import { useState, useMemo } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -158,25 +161,28 @@ const expOptions = ["Fresher", "0–2 yrs", "2–5 yrs", "5+ yrs"];
 const shiftOptions = ["Day", "Night", "Rotational"];
 
 function Post() {
+  const posting = useConfirmedAction();
   const store = useApp();
   const navigate = useNavigate();
-  const hospitalName = String(store.profile["org"] || (isApiEnabled ? (store.profile["hospitalName"] || "Healthcare Facility") : "Apollo Hospitals"));
-  const hospitalCity = String(store.profile["city"] || "Bengaluru");
+  const hospitalName = String(store.profile["org"] || ((store.profile["hospitalName"] || "Healthcare Facility")));
+  const hospitalCity = String(store.profile["city"] || "");
+  const draftKey = `fale-job-draft:${store.contact || hospitalName}`;
+  const [draft] = useState(() => { try { return JSON.parse(sessionStorage.getItem(draftKey) || "null") as Record<string, any> | null; } catch { return null; } });
 
   // Form State
-  const [title, setTitle] = useState("");
-  const [profession, setProfession] = useState("");
-  const [dept, setDept] = useState("");
-  const [workLocation, setWorkLocation] = useState("");
-  const [empType, setEmpType] = useState("Full-time");
-  const [minSalary, setMinSalary] = useState("");
-  const [maxSalary, setMaxSalary] = useState("");
-  const [openings, setOpenings] = useState("1");
-  const [experience, setExperience] = useState("");
-  const [shifts, setShifts] = useState<string[]>([]);
-  const [description, setDescription] = useState("");
-  const [requireCouncilReg, setRequireCouncilReg] = useState(true);
-  const [isUrgent, setIsUrgent] = useState(false);
+  const [title, setTitle] = useState(String(draft?.["title"] || ""));
+  const [profession, setProfession] = useState(String(draft?.["profession"] || ""));
+  const [dept, setDept] = useState(String(draft?.["dept"] || ""));
+  const [workLocation, setWorkLocation] = useState(String(draft?.["workLocation"] || ""));
+  const [empType, setEmpType] = useState(String(draft?.["empType"] || "Full-time"));
+  const [minSalary, setMinSalary] = useState(String(draft?.["minSalary"] || ""));
+  const [maxSalary, setMaxSalary] = useState(String(draft?.["maxSalary"] || ""));
+  const [openings, setOpenings] = useState(String(draft?.["openings"] || "1"));
+  const [experience, setExperience] = useState(String(draft?.["experience"] || ""));
+  const [shifts, setShifts] = useState<string[]>(Array.isArray(draft?.["shifts"]) ? draft["shifts"] : []);
+  const [description, setDescription] = useState(String(draft?.["description"] || ""));
+  const [requireCouncilReg, setRequireCouncilReg] = useState(draft?.["requireCouncilReg"] !== false);
+  const [isUrgent, setIsUrgent] = useState(Boolean(draft?.["isUrgent"]));
   const [generatingJd, setGeneratingJd] = useState(false);
 
   const cityOptions = useMemo(() => {
@@ -192,83 +198,29 @@ function Post() {
   };
 
   // Submit Handler
-  const submit = (status: "Open" | "Draft") => (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!title.trim()) {
-      toast.error("Please add a job title");
+  const submit = (status: "Open" | "Draft") => async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (!title.trim()) { toast.error("Please add a job title"); return; }
+    const draft = { title, profession, dept, workLocation, empType, minSalary, maxSalary, openings, experience, shifts, description, requireCouncilReg, isUrgent };
+    if (status === "Draft") {
+      try {
+        sessionStorage.setItem(draftKey, JSON.stringify(draft));
+        toast.success("Local draft saved", { description: "Saved in this browser tab only. It has not been submitted." });
+      } catch { toast.error("Cannot save a draft in this browser. Keep this page open to retain your input."); }
       return;
     }
-
-    const newId = crypto.randomUUID();
-    const isPublishing = status === "Open";
-    const postingStatus = isPublishing ? "Pending Admin Approval" : "Draft";
-    const minN = Number(minSalary) || 0;
-    const maxN = Number(maxSalary) || 0;
-    const compensation = minN && maxN
-      ? `₹${minN.toLocaleString("en-IN")} – ₹${maxN.toLocaleString("en-IN")} / mo`
-      : "₹40,000 – ₹55,000 / mo";
-    const selectedCity = workLocation || hospitalCity;
-
-    setState((s) => ({
-      postedJobs: [
-        {
-          id: newId,
-          title,
-          dept: dept || "General Inpatient",
-          city: selectedCity,
-          openings: Number(openings) || 1,
-          status: postingStatus,
-        },
-        ...s.postedJobs,
-      ],
-      jobApprovals: isPublishing
-        ? [
-          {
-            id: newId,
-            title,
-            org: hospitalName,
-            type: "job" as const,
-            dept: dept || "General",
-            city: selectedCity,
-            compensation,
-            expOrHours: experience,
-            status: "pending" as const,
-            submittedDate: "Just now",
-            openings: Number(openings) || 1,
-            postedBy: String(s.profile["recruiter"] || "Facility HR"),
-            urgent: isUrgent,
-          },
-          ...s.jobApprovals,
-        ]
-        : s.jobApprovals,
-    }));
-
-    if (isPublishing) {
-      if (isApiEnabled) {
-        postFacilityJob({
-          title: title.trim(),
-          department: dept || "General",
-          employmentType: empType || "Full-time",
-          isInternship: empType === "Internship",
-          city: selectedCity || "Bengaluru",
-          workLocation: selectedCity || "Bengaluru",
-          openings: Number(openings) || 1,
-          salaryMinPaise: (Number(minSalary) || 0) * 100,
-          salaryMaxPaise: (Number(maxSalary) || 0) * 100,
-          experienceRequired: experience || "0–2 yrs",
-          qualificationRequired: requireCouncilReg ? "State Council Registration Required" : "Medical Degree / Diploma",
-          description: description || title,
-        }).catch((err) => {
-          console.error("Failed to post job to API:", err);
-        });
-      }
-      toast.success("Submitted for Admin Verification!", {
-        description: "Your requirement has been sent to FALE Admin. Once verified, it will reflect on the candidate portal.",
-      });
-    } else {
-      toast.success("Draft saved");
-    }
-    navigate({ to: "/employer" });
+    const city = workLocation || hospitalCity;
+    if (!city) { toast.error("Please select a work location"); return; }
+    await posting.run(async () => {
+      await postFacilityJob({ title: title.trim(), department: dept || "General", employmentType: empType,
+        isInternship: empType === "Internship", city, workLocation: city, openings: Number(openings) || 1,
+        salaryMinPaise: (Number(minSalary) || 0) * 100, salaryMaxPaise: (Number(maxSalary) || 0) * 100,
+        experienceRequired: experience, qualificationRequired: requireCouncilReg ? "State Council Registration Required" : "",
+        description: description || title });
+      try { sessionStorage.removeItem(draftKey); } catch { /* A confirmed save still succeeded. */ }
+      toast.success("Submitted for admin review");
+      navigate({ to: "/employer" });
+    });
   };
 
   // Live salary preview
@@ -287,6 +239,8 @@ function Post() {
   return (
     <AppShell>
       <form onSubmit={submit("Open")} className="w-full min-w-0 space-y-6 pb-16">
+        <fieldset disabled={posting.isPending} className="contents">
+        <RequestError message={posting.error} />
         {/* Header & Mode Switcher */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <PageHead
@@ -659,7 +613,7 @@ function Post() {
                 onClick={submit("Draft")}
                 className="rounded-xl h-10 px-5 text-xs font-semibold cursor-pointer"
               >
-                Save draft
+                Save local draft
               </Button>
               <Button
                 type="submit"
@@ -760,11 +714,12 @@ function Post() {
                 onClick={submit("Draft")}
                 className="w-full rounded-xl h-9 text-xs font-semibold border-border/80 hover:bg-muted cursor-pointer"
               >
-                Save draft
+                Save local draft
               </Button>
             </div>
           </div>
         </div>
+      </fieldset>
       </form>
     </AppShell>
   );

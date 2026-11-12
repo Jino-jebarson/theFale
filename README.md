@@ -76,7 +76,7 @@ FALE-healthcare-ui/
     ├── hooks/               # Custom React hooks (useMobile, useTheme)
     │
     ├── lib/                 # Core utilities and data
-    │   ├── data.ts          # Mock healthcare jobs, shifts, courses and employers
+    │   ├── data.ts          # Shared types and healthcare reference lists
     │   ├── store.ts         # Global client-side application state store
     │   ├── theme.ts         # Theme manager (light, dark, system)
     │   └── utils.ts         # Tailwind class merging utility (`cn`)
@@ -141,3 +141,17 @@ npm run test
 ## 📄 License
 
 Private & Proprietary — FALE Healthcare Platform.
+
+## Backend connection
+
+The frontend is API-only. Set `VITE_API_URL=http://localhost:8080/api/v1` for local development. `VITE_USE_API` is retired: setting it to false no longer enables demo mode. Restart Vite after changing the API URL; rebuild deployed assets.
+
+Records and authentication come from the backend. The retired `fale-pro-v2` browser demo store is discarded without touching database records or browser preferences. API failures show errors or empty states. DigiLocker is unavailable until a real integration is connected; upload documents for review instead. Course curriculum remains bundled reference content, but catalog availability and enrollment must come from the backend.
+
+## Request failures and saves
+
+API requests time out after 15 seconds by default. Transient reads may retry once; writes are not automatically retried. Token refresh is shared across simultaneous requests, and a temporary refresh outage does not revoke the session. API errors retain validation messages and rate-limit retry timing. Malformed responses and unexpected list shapes are rejected.
+
+Posting, applications, saved jobs, profile availability, community submissions, notification changes, and moderation wait for server confirmation before changing their displayed saved state. Failed submissions preserve entered values. Profile, Huddle, and notification loading errors have retry controls. Job drafts are explicitly saved in the current browser tab, separately from published jobs.
+
+AI outages no longer produce local success responses. Missing credentials, skills, benefits, instructors, or accreditation are not inferred. Missing uploaded documents are not replaced with generated credential PDFs. Certificate downloads, external messaging, author warnings, and other actions without a connected service report unavailable rather than claiming completion. Authored learning simulations and healthcare reference lists remain content.

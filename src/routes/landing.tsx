@@ -1,3 +1,5 @@
+import { copyText } from "@/lib/copyText";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { setState, useApp } from "@/lib/store";
@@ -200,10 +202,10 @@ function LandingPage() {
 
   const [liveJobs, setLiveJobs] = useState<any[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  const [jobsRetry, setJobsRetry] = useState(0);
   const [jobError, setJobError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     setLoadingJobs(true);
     getJobs()
       .then((data) => {
@@ -212,10 +214,9 @@ function LandingPage() {
       })
       .catch(() => {
         setJobError("Unable to load latest job postings.");
-        setLiveJobs([]);
       })
       .finally(() => setLoadingJobs(false));
-  }, []);
+  }, [jobsRetry]);
 
   // Search handler
   const handleSearch = (e: React.FormEvent) => {
@@ -226,10 +227,10 @@ function LandingPage() {
     }, 100);
   };
 
-  // Filtered jobs from mock dataset
+  // Filter jobs returned by the backend
   const searchResults = useMemo(() => {
     if (!hasSearched) return [];
-    const source = isApiEnabled ? liveJobs : allJobs;
+    const source = liveJobs;
     return source.filter((j) => {
       const matchRole =
         role === "any" ||
@@ -242,9 +243,9 @@ function LandingPage() {
     });
   }, [hasSearched, role, location, liveJobs]);
 
-  const copyToClipboard = (text: string, key: string) => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string, key: string) => {
+    {
+      if (!await copyText(text)) return;
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 1800);
     }
@@ -547,6 +548,7 @@ function LandingPage() {
           </div>
 
       <main>
+        <RequestError message={jobError} onRetry={() => { setJobError(null); setJobsRetry(n => n + 1); }} />
         {/* ═══ HERO ═══ */}
         <section className="hero" id="top">
           <div className="hero-media" aria-hidden="true">

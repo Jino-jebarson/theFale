@@ -1,3 +1,7 @@
+import { copyText } from "@/lib/copyText";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -82,14 +86,10 @@ const creditPackages = [
   { id: "pkg-3", name: "Enterprise", credits: 100, price: "₹12,999", perCredit: "₹129 / unlock" },
 ];
 
-const mockTaxInvoices = [
-  { id: "INV-2026-1049", month: "Oct 2026", desc: "Shift Escrow & Locum Staffing Services", subtotal: 44237, gst: 7963, total: 52200, date: "30 Oct 2026", status: "Paid" },
-  { id: "INV-2026-1038", month: "Oct 2026", desc: "Candidate Sourcing Credits (Growth Pack)", subtotal: 4236, gst: 763, total: 4999, date: "28 Oct 2026", status: "Paid" },
-  { id: "INV-2026-0994", month: "Sep 2026", desc: "Per-Diem Emergency Coverage Settlement", subtotal: 38136, gst: 6864, total: 45000, date: "30 Sep 2026", status: "Paid" },
-  { id: "INV-2026-0881", month: "Aug 2026", desc: "ICU Specialist Coverage Settlement", subtotal: 31356, gst: 5644, total: 37000, date: "31 Aug 2026", status: "Paid" },
-];
 
 function EmployerWalletPage() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const store = useApp();
   const [activeTab, setActiveTab] = useState<"all" | "shifts" | "credits" | "invoices" | "bank">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -110,13 +110,12 @@ function EmployerWalletPage() {
   const [loading, setLoading] = useState(isApiEnabled);
 
   const fetchWalletData = () => {
-    if (!isApiEnabled) return;
     setLoading(true);
     Promise.all([
-      getFacilityWallet().catch(() => null),
-      getWalletTransactions().catch(() => []),
-      getHospitalBankAccount().catch(() => null),
-      getFacilityProfile().catch(() => null),
+      getFacilityWallet(),
+      getWalletTransactions(),
+      getHospitalBankAccount(),
+      getFacilityProfile(),
     ])
       .then(([wallet, txs, bank, prof]) => {
         setApiWallet(wallet);
@@ -136,7 +135,7 @@ function EmployerWalletPage() {
             }));
           }
         }
-      })
+      }).catch(pageLoad.fail)
       .finally(() => {
         setLoading(false);
       });
@@ -149,7 +148,7 @@ function EmployerWalletPage() {
     return () => {
       window.removeEventListener("fale:wallet-updated", handleWalletUpdated);
     };
-  }, []);
+  }, [pageLoad.retryKey]);
 
   // Top Up State
   const [selectedTopUpAmount, setSelectedTopUpAmount] = useState<number>(25000);
@@ -160,24 +159,22 @@ function EmployerWalletPage() {
 
   // Bank Form State
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const orgName = isApiEnabled
-    ? apiProfile?.hospitalName || String(store.profile["org"] || store.profile["hospitalName"] || (store as any)?.facilityProfile?.hospitalName || "Healthcare Facility")
-    : String(store.profile["org"] || "Apollo Hospitals — Main Campus");
+  const orgName = apiProfile?.hospitalName || String(store.profile["org"] || store.profile["hospitalName"] || (store as any)?.facilityProfile?.hospitalName || "Healthcare Facility");
   const defaultHolder = store.hospitalBankAccount?.accountHolderName && !store.hospitalBankAccount.accountHolderName.includes("Apollo")
     ? store.hospitalBankAccount.accountHolderName
     : `${orgName} Private Limited`;
 
-  const currentBank: HospitalBankAccount | null = isApiEnabled && apiBank && (apiBank.accountNumber || apiBank.accountNumberMasked || apiBank.accountNumberLast4) ? {
+  const currentBank: HospitalBankAccount | null = apiBank && (apiBank.accountNumber || apiBank.accountNumberMasked || apiBank.accountNumberLast4) ? {
     bankName: apiBank.bankName || "Current Bank",
     accountNumber: apiBank.accountNumber || apiBank.accountNumberMasked || (apiBank.accountNumberLast4 ? `•••• •••• ${apiBank.accountNumberLast4}` : ""),
     ifsc: apiBank.ifsc || apiBank.ifscCode || "",
     accountType: (apiBank.accountType as any) || "Current",
     accountHolderName: apiBank.accountHolderName || defaultHolder,
     branch: apiBank.branch || "Central Corporate Branch",
-    status: apiBank.status || apiBank.verificationStatus || "Verified",
-    documentName: "Hospital_Bank_Mandate.pdf",
+    status: (apiBank.status || apiBank.verificationStatus || "Under Review") as HospitalBankAccount["status"],
+    documentName: "",
     documentDate: apiBank.verifiedAt ? new Date(apiBank.verifiedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Active",
-    verifiedAt: "Cashfree Penny Drop Verified",
+    verifiedAt: apiBank.verifiedAt || "",
   } : store.hospitalBankAccount || null;
 
   const hasLinkedBank = Boolean(currentBank && currentBank.accountNumber && currentBank.accountNumber.length > 3);
@@ -192,22 +189,12 @@ function EmployerWalletPage() {
   const [formChequeFile, setFormChequeFile] = useState<string>(currentBank?.documentName || "Cancelled_Cheque_Hospital.pdf");
   const [isVerifyingPenny, setIsVerifyingPenny] = useState(false);
 
-  const escrowBalance = isApiEnabled
-    ? (apiWallet ? paiseToRupees(apiWallet.availableBalancePaise) : 0)
-    : (store.escrowBalance ?? 0);
-  const lockedEscrow = isApiEnabled
-    ? (apiWallet ? paiseToRupees(apiWallet.lockedEscrowBalancePaise) : 0)
-    : (store.lockedEscrow ?? 0);
-  const candidateCredits = isApiEnabled
-    ? (apiWallet ? apiWallet.candidateCredits : 0)
-    : (store.candidateCredits ?? 0);
-  const totalDisbursed = isApiEnabled
-    ? (apiWallet ? paiseToRupees(apiWallet.totalDisbursedPaise || 0) : 0)
-    : (store.totalDisbursed ?? 0);
+  const escrowBalance = (apiWallet ? paiseToRupees(apiWallet.availableBalancePaise) : 0);
+  const lockedEscrow = (apiWallet ? paiseToRupees(apiWallet.lockedEscrowBalancePaise) : 0);
+  const candidateCredits = (apiWallet ? apiWallet.candidateCredits : 0);
+  const totalDisbursed = (apiWallet ? paiseToRupees(apiWallet.totalDisbursedPaise || 0) : 0);
 
-  const lockedShiftCount = isApiEnabled
-    ? (lockedEscrow > 0 ? Math.max(1, Math.round(lockedEscrow / 5000)) : 0)
-    : (lockedEscrow > 0 ? 2 : 0);
+  const lockedShiftCount = (lockedEscrow > 0 ? Math.max(1, Math.round(lockedEscrow / 5000)) : 0);
 
   const hospitalCode = (store.profile?.hospitalCode || store.profile?.id || "99418290")
     .replace(/[^a-zA-Z0-9]/g, "")
@@ -249,7 +236,7 @@ function EmployerWalletPage() {
 
   const dynamicInvoices = useMemo(() => {
     // 1. If backend API transactions exist, derive real tax invoices & credit notes
-    if (isApiEnabled && apiTransactions.length > 0) {
+    if (apiTransactions.length > 0) {
       const billable = apiTransactions.filter(
         (tx) => tx.invoiceId || tx.type?.toLowerCase().includes("credit") || tx.type?.toLowerCase().includes("topup") || tx.type?.toLowerCase().includes("refund") || tx.type?.toLowerCase().includes("disburs")
       );
@@ -313,7 +300,7 @@ function EmployerWalletPage() {
       }
     }
 
-    return mockTaxInvoices;
+    return [];
   }, [isApiEnabled, apiTransactions, store.walletTransactions]);
 
   const filteredInvoices = useMemo(() => {
@@ -329,7 +316,7 @@ function EmployerWalletPage() {
   }, [dynamicInvoices, searchQuery]);
 
   const transactions: WalletTransaction[] = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return apiTransactions.map((tx) => {
         const rawType = (tx.type || "").toLowerCase();
         let mappedType: WalletTransaction["type"] = "escrow_hold";
@@ -360,7 +347,7 @@ function EmployerWalletPage() {
         };
       });
     }
-    return store.walletTransactions ?? [];
+
   }, [isApiEnabled, apiTransactions, store.walletTransactions]);
 
   // Filtered transactions
@@ -385,8 +372,8 @@ function EmployerWalletPage() {
     );
   }, [transactions, activeTab, searchQuery]);
 
-  const handleCopy = (text: string, key: string, label: string) => {
-    navigator.clipboard.writeText(text);
+  const handleCopy = async (text: string, key: string, label: string) => {
+    if (!await copyText(text)) return;
     setCopiedKey(key);
     toast.success(`${label} copied`);
     setTimeout(() => setCopiedKey(null), 2000);
@@ -416,7 +403,7 @@ function EmployerWalletPage() {
       invoiceId: invId,
       date: invOrTx.date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
       period: invOrTx.month || invOrTx.period || new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" }),
-      hospitalName: String(store.profile["org"] || (isApiEnabled ? "Healthcare Facility" : "Apollo Hospitals")),
+      hospitalName: String(store.profile["org"] || ("Healthcare Facility")),
       facilityAddress: "Accredited Hospital Network & Clinical Campus, India",
       gstin: "29AABCT1332L1Z4",
       refNumber: invOrTx.refNumber || invOrTx.utr || "CRD-FALE-TXN",
@@ -478,7 +465,7 @@ function EmployerWalletPage() {
   };
 
   // Top Up Action
-  const handleConfirmTopUp = async () => {
+  const handleConfirmTopUp = async () => { await pageAction.run(async () => {
     if (!hasLinkedBank) {
       toast.error("Hospital Settlement Bank Account Required", {
         description: "Please link your hospital settlement bank account before depositing escrow funds.",
@@ -496,7 +483,7 @@ function EmployerWalletPage() {
 
     setIsProcessing(true);
 
-    if (isApiEnabled) {
+    {
       try {
         const utrGen = `UTR${Date.now().toString().slice(-10)}`;
         await topUpWallet(rupeesToPaise(finalAmount), utrGen, paymentMethod.toUpperCase());
@@ -506,6 +493,7 @@ function EmployerWalletPage() {
         toast.success(`₹${finalAmount.toLocaleString("en-IN")} deposited to Escrow Reserve`);
         fetchWalletData();
       } catch (err: any) {
+      pageLoad.fail(err);
         setIsProcessing(false);
         toast.error("Top-up deposit failed", {
           description: err?.message || "Could not process top-up.",
@@ -514,35 +502,11 @@ function EmployerWalletPage() {
       return;
     }
 
-    setTimeout(() => {
-      setIsProcessing(false);
-      const newTxId = "tx-" + Date.now().toString().slice(-4);
-      const newTx: WalletTransaction = {
-        id: newTxId,
-        type: "topup",
-        title: "Escrow Top-Up",
-        subtitle: `${paymentMethod === "upi" ? "Corporate UPI" : paymentMethod === "netbanking" ? "Corporate NetBanking" : "NEFT/RTGS Transfer"} • ${orgName}`,
-        amount: finalAmount,
-        date: "Just now",
-        status: "Completed",
-        refNumber: `TXN-FALE-${Math.floor(10000 + Math.random() * 90000)}`,
-        invoiceId: `INV-2026-${Math.floor(1050 + Math.random() * 100)}`,
-        utr: `UTR${Date.now().toString().slice(-10)}`,
-      };
 
-      setState((s) => ({
-        escrowBalance: (s.escrowBalance ?? 185000) + finalAmount,
-        walletTransactions: [newTx, ...(s.walletTransactions ?? [])],
-      }));
-
-      setTopUpModalOpen(false);
-      setCustomTopUpInput("");
-      toast.success(`₹${finalAmount.toLocaleString("en-IN")} deposited to Escrow Reserve`);
-    }, 600);
-  };
+  }); };
 
   // Buy Credits Action
-  const handleConfirmBuyCredits = async () => {
+  const handleConfirmBuyCredits = async () => { await pageAction.run(async () => {
     if (!hasLinkedBank) {
       toast.error("Hospital Settlement Bank Account Required", {
         description: "Please link your hospital settlement bank account before purchasing candidate credits.",
@@ -555,7 +519,7 @@ function EmployerWalletPage() {
     setIsProcessing(true);
     const priceNum = Number(selectedPkg.price.replace(/[^0-9]/g, ""));
 
-    if (isApiEnabled) {
+    {
       try {
         await buyCandidateCredits(selectedPkg.id, selectedPkg.credits, rupeesToPaise(priceNum));
         setIsProcessing(false);
@@ -563,6 +527,7 @@ function EmployerWalletPage() {
         toast.success(`${selectedPkg.credits} Sourcing Credits activated`);
         fetchWalletData();
       } catch (err: any) {
+      pageLoad.fail(err);
         setIsProcessing(false);
         toast.error("Credits purchase failed", {
           description: err?.message || "Ensure available balance is sufficient.",
@@ -571,30 +536,8 @@ function EmployerWalletPage() {
       return;
     }
 
-    setTimeout(() => {
-      setIsProcessing(false);
-      const newTxId = "tx-" + Date.now().toString().slice(-4);
-      const newTx: WalletTransaction = {
-        id: newTxId,
-        type: "credit_purchase",
-        title: `Sourcing Credits (${selectedPkg.name})`,
-        subtitle: `${selectedPkg.credits} candidate contact unlocks`,
-        amount: -priceNum,
-        date: "Just now",
-        status: "Completed",
-        refNumber: `CRD-FALE-${Math.floor(10000 + Math.random() * 90000)}`,
-        invoiceId: `INV-2026-${Math.floor(1050 + Math.random() * 100)}`,
-      };
 
-      setState((s) => ({
-        candidateCredits: (s.candidateCredits ?? 0) + selectedPkg.credits,
-        walletTransactions: [newTx, ...(s.walletTransactions ?? [])],
-      }));
-
-      setBuyCreditsModalOpen(false);
-      toast.success(`${selectedPkg.credits} Sourcing Credits activated`);
-    }, 500);
-  };
+  }); };
 
     // Cheque Upload Trigger
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -606,8 +549,7 @@ function EmployerWalletPage() {
   };
 
   // Penny Drop Verification
-  const handleSaveBankAccount = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveBankAccount = async (e: React.FormEvent) => { e.preventDefault(); await pageAction.run(async () => {
     if (!formAccNumber || formAccNumber.length < 8) {
       toast.error("Please enter a valid bank account number");
       return;
@@ -627,7 +569,7 @@ function EmployerWalletPage() {
 
     setIsVerifyingPenny(true);
 
-    if (isApiEnabled) {
+    {
       try {
         const savedDto = await updateHospitalBankAccount({
           accountHolderName: formHolderName,
@@ -640,12 +582,13 @@ function EmployerWalletPage() {
         setApiBank(savedDto);
         setIsVerifyingPenny(false);
         setBankModalOpen(false);
-        toast.success("Hospital Bank Account Verified via Cashfree Penny Drop!", {
-          description: `Name match confirmed: ${formHolderName} (${formBankName})`,
+        toast.success("Hospital bank account details saved", {
+          description: `Pending ownership verification: ${formHolderName} (${formBankName})`,
         });
         fetchWalletData();
         window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
       } catch (err: any) {
+      pageLoad.fail(err);
         setIsVerifyingPenny(false);
         toast.error("Bank account verification failed", {
           description: err?.message || "Please check details and IFSC code.",
@@ -654,37 +597,14 @@ function EmployerWalletPage() {
       return;
     }
 
-    setTimeout(() => {
-      setIsVerifyingPenny(false);
-      const updatedBank: HospitalBankAccount = {
-        bankName: formBankName,
-        accountNumber: formAccNumber,
-        ifsc: formIfsc.toUpperCase(),
-        accountType: formAccType,
-        accountHolderName: formHolderName,
-        branch: formBranch || "Central Branch",
-        status: "Verified",
-        documentName: formChequeFile,
-        documentDate: "Just now",
-        verifiedAt: "Cashfree ₹1 Penny Drop Verified",
-      };
 
-      setState(() => ({
-        hospitalBankAccount: updatedBank,
-      }));
-
-      setBankModalOpen(false);
-      toast.success("Bank Account Verified via Cashfree Penny Drop!", {
-        description: `Name match confirmed: ${formHolderName} (${formBankName})`,
-      });
-      window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
-    }, 1200);
-  };
+  }); };
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="max-w-7xl mx-auto space-y-6 pb-16 min-w-0">
-        
+
         {/* Clean Executive Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/60 pb-5">
           <div>
@@ -869,7 +789,7 @@ function EmployerWalletPage() {
                     </div>
                   </div>
                   <span className="text-[10px] text-primary bg-primary-soft border border-primary/25 px-2.5 py-0.5 rounded-full font-bold whitespace-nowrap">
-                    {currentBank.verifiedAt || "Penny Drop Verified"}
+                    {currentBank.status}
                   </span>
                 </div>
                 <p className="text-[11px] text-muted-foreground pt-1">
@@ -993,7 +913,7 @@ function EmployerWalletPage() {
                           "h-1.5 w-1.5 rounded-full",
                           hasLinkedBank ? "bg-emerald-500" : "bg-amber-500"
                         )}
-                        title={hasLinkedBank ? "Bank account verified" : "No bank account linked"}
+                        title={hasLinkedBank ? "Bank account linked" : "No bank account linked"}
                       />
                     )}
                   </button>
@@ -1119,7 +1039,7 @@ function EmployerWalletPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => toast.success("Consolidated annual statement sent to billing email.")}
+                  onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
                   className="h-7 text-xs text-primary font-semibold hover:bg-muted cursor-pointer"
                 >
                   Email Annual Statement
@@ -1248,11 +1168,11 @@ function EmployerWalletPage() {
                       </h3>
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-semibold">
                         <HiOutlineCheckBadge className="h-3.5 w-3.5" />
-                        <span>{currentBank.verifiedAt || "Cashfree Penny Drop Verified"}</span>
+                        <span>{currentBank.status}</span>
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5 max-w-2xl leading-relaxed">
-                      Primary verified current account for automated escrow refunds, standby reimbursements, and bank mandates.
+                      Linked current account for automated escrow refunds, standby reimbursements, and bank mandates.
                     </p>
                   </div>
                 </div>
@@ -1329,7 +1249,7 @@ function EmployerWalletPage() {
                   </div>
 
                   <div className="pt-2 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
-                    <span>Penny drop status: <strong className="text-emerald-600 dark:text-emerald-400">Match 100%</strong></span>
+                    <span>Verification status: <strong>{currentBank.status}</strong></span>
                     <span className="font-mono text-[10px]">Ref: CF_PD_9918241029</span>
                   </div>
                 </div>
@@ -1364,7 +1284,7 @@ function EmployerWalletPage() {
 
                       <button
                         type="button"
-                        onClick={() => toast.success(`Viewing ${currentBank.documentName || "cheque"}...`)}
+                        onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
                         className="text-xs font-bold text-primary hover:underline shrink-0 cursor-pointer"
                       >
                         View
@@ -1498,7 +1418,7 @@ function EmployerWalletPage() {
               </Button>
               <Button
                 size="sm"
-                disabled={isProcessing}
+                disabled={pageAction.isPending || (isProcessing)}
                 onClick={handleConfirmTopUp}
                 className="rounded-xl text-xs font-semibold h-9 px-4 cursor-pointer bg-primary hover:bg-primary-hover shadow-2xs"
               >
@@ -1574,7 +1494,7 @@ function EmployerWalletPage() {
               </Button>
               <Button
                 size="sm"
-                disabled={isProcessing}
+                disabled={pageAction.isPending || (isProcessing)}
                 onClick={handleConfirmBuyCredits}
                 className="rounded-xl text-xs font-semibold h-9 px-4 cursor-pointer bg-primary hover:bg-primary-hover shadow-2xs"
               >
@@ -1752,7 +1672,7 @@ function EmployerWalletPage() {
                           {formChequeFile}
                         </span>
                         <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium block">
-                          Ready for Penny Drop Verification
+                          Save bank account details
                         </span>
                       </div>
                     </div>
@@ -1836,7 +1756,7 @@ function EmployerWalletPage() {
           </form>
         </DialogContent>
       </Dialog>
-    
+
       {/* Printable Official Tax Invoice & Escrow Settlement Modal */}
       <Dialog open={!!selectedInvoice} onOpenChange={(open) => !open && setSelectedInvoice(null)}>
         <DialogContent className="sm:max-w-3xl p-0 overflow-hidden max-h-[92vh] flex flex-col rounded-2xl border-border/80 shadow-2xl bg-background">

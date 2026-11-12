@@ -1,7 +1,7 @@
 // src/lib/adapters/authAdapter.ts
 // Authentication adapter bridging UI views to Spring Boot /api/v1/auth endpoints
 
-import { apiFetch, getAccessToken, setAccessToken, isApiEnabled } from "@/lib/api";
+import { ApiError, apiFetch, getAccessToken, setAccessToken } from "@/lib/api";
 
 export interface UserSummary {
   id: string;
@@ -30,6 +30,15 @@ export interface OtpResponse {
   expiresInSeconds: number;
 }
 
+function acceptAuthResponse(response: AuthResponse): void {
+  const role = response?.role || response?.user?.role;
+  if (!response || typeof response.accessToken !== "string" || !response.accessToken.trim() ||
+      !response.user?.id || !["ROLE_CANDIDATE", "ROLE_FACILITY", "ROLE_ADMIN"].includes(role || "")) {
+    throw new ApiError("The server returned an invalid authentication response.", 502);
+  }
+  setAccessToken(response.accessToken);
+}
+
 /**
  * Request a 6-digit OTP for the given phone number.
  * @param phone Formatted phone with country code (e.g. +91 9876543210 or 9876543210)
@@ -55,9 +64,7 @@ export async function verifyOtp(phone: string, otp: string, role?: string): Prom
     body: JSON.stringify({ phone: cleanPhone, otp: otp.trim(), role }),
   });
 
-  if (response?.accessToken) {
-    setAccessToken(response.accessToken);
-  }
+  acceptAuthResponse(response);
   return response;
 }
 
@@ -78,9 +85,7 @@ export async function refreshSession(): Promise<AuthResponse | null> {
       skipAuth: true,
       skipRefresh: true,
     });
-    if (response?.accessToken) {
-      setAccessToken(response.accessToken);
-    }
+    acceptAuthResponse(response);
     return response;
   } catch {
     setAccessToken(null);
@@ -123,30 +128,9 @@ export async function adminLogin(email: string, password: string): Promise<AuthR
       body: JSON.stringify({ email: cleanEmail, password }),
     });
 
-    if (response?.accessToken) {
-      setAccessToken(response.accessToken);
-    }
+    acceptAuthResponse(response);
     return response;
-  } catch (err: any) {
-    if (!isApiEnabled || err?.message?.includes("Failed to fetch") || err?.status === 0) {
-      // Offline / dev fallback for local frontend testing
-      const mockAdmin: AuthResponse = {
-        accessToken: "mock-admin-token-" + Date.now(),
-        role: "ROLE_ADMIN",
-        onboarded: true,
-        user: {
-          id: "adm-001",
-          phone: "+919876543210",
-          role: "ROLE_ADMIN",
-          onboarded: true,
-          active: true,
-        },
-      };
-      setAccessToken(mockAdmin.accessToken);
-      return mockAdmin;
-    }
-    throw err;
-  }
+  } catch (err: any) { throw err; }
 }
 
 export interface AdminSignupData {
@@ -162,7 +146,6 @@ export interface AdminForgotPasswordData {
   newPassword: string;
 }
 
-export const ADMIN_STATIC_PASSCODE = "FALE907010";
 
 /**
  * Register a new administrator with secured passcode against backend /api/v1/auth/admin/signup.
@@ -184,34 +167,9 @@ export async function adminSignup(data: AdminSignupData): Promise<AuthResponse> 
       }),
     });
 
-    if (response?.accessToken) {
-      setAccessToken(response.accessToken);
-    }
+    acceptAuthResponse(response);
     return response;
-  } catch (err: any) {
-    if (!isApiEnabled || err?.message?.includes("Failed to fetch") || err?.status === 0) {
-      if (cleanPasscode !== ADMIN_STATIC_PASSCODE) {
-        throw new Error("Invalid administrator authorization passcode.");
-      }
-      const mockAdmin: AuthResponse = {
-        accessToken: "mock-admin-token-" + Date.now(),
-        role: "ROLE_ADMIN",
-        onboarded: true,
-        user: {
-          id: "adm-" + Date.now(),
-          phone: "+919876543210",
-          email: cleanEmail,
-          username: cleanUsername,
-          role: "ROLE_ADMIN",
-          onboarded: true,
-          active: true,
-        },
-      };
-      setAccessToken(mockAdmin.accessToken);
-      return mockAdmin;
-    }
-    throw err;
-  }
+  } catch (err: any) { throw err; }
 }
 
 /**
@@ -232,13 +190,5 @@ export async function adminForgotPassword(data: AdminForgotPasswordData): Promis
       }),
     });
     return response;
-  } catch (err: any) {
-    if (!isApiEnabled || err?.message?.includes("Failed to fetch") || err?.status === 0) {
-      if (cleanPasscode !== ADMIN_STATIC_PASSCODE) {
-        throw new Error("Invalid administrator authorization passcode.");
-      }
-      return { message: "Password reset successfully. You can now sign in with your new credentials." };
-    }
-    throw err;
-  }
+  } catch (err: any) { throw err; }
 }

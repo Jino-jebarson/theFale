@@ -1,3 +1,5 @@
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
@@ -384,6 +386,7 @@ function AccountMenuContent({
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const profileLoad = usePageLoad();
   const s = useApp();
   const { theme, setTheme } = useTheme();
   const path = useRouterState({ select: (r) => r.location.pathname });
@@ -394,23 +397,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [adminTicketsLoaded, setAdminTicketsLoaded] = useState<boolean>(!isApiEnabled);
   const [adminSeenCounts, setAdminSeenCounts] = useState<AdminRouteCounts>(() => readAdminSeenCounts());
 
-  const pendingCandidateKYC = isApiEnabled && adminMetrics
+  const pendingCandidateKYC = adminMetrics
     ? (adminMetrics.pendingCandidateKycCount ?? 0)
     : s.candidateKYC.filter((c) => c.status === "pending").length;
 
-  const pendingFacilityKYC = isApiEnabled && adminMetrics
+  const pendingFacilityKYC = adminMetrics
     ? (adminMetrics.pendingFacilityKycCount ?? 0)
     : s.facilityKYC.filter((f) => f.status === "pending").length;
 
-  const pendingJobApprovals = isApiEnabled && adminMetrics
+  const pendingJobApprovals = adminMetrics
     ? (adminMetrics.pendingPostingsCount ?? 0)
     : s.jobApprovals.filter((j) => j.status === "pending").length;
 
-  const pendingShortlisting = isApiEnabled && adminMetrics
+  const pendingShortlisting = adminMetrics
     ? (adminMetrics.pendingApplicationsCount ?? 0)
     : s.adminApplications.filter((a) => a.status === "pending_admin").length;
 
-  const pendingHuddleModeration = isApiEnabled && adminMetrics
+  const pendingHuddleModeration = adminMetrics
     ? (adminMetrics.flaggedHuddlePostsCount ?? 0)
     : s.huddlePosts.filter(
         (p) => p.status === "review" || p.status === "hidden" || (p.reports && p.reports.length > 0)
@@ -430,8 +433,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isFacilityPath = path.startsWith("/employer");
   const activePortal = isAdminPath ? "admin" : isFacilityPath ? "facility" : s.portal;
 
-  const adminMetricsReady = !isApiEnabled || adminMetrics !== null;
-  const adminTicketsReady = !isApiEnabled || adminTicketsLoaded;
+  const adminMetricsReady = adminMetrics !== null;
+  const adminTicketsReady = adminTicketsLoaded;
 
   useEffect(() => {
     if (activePortal !== "admin" && !isAdminPath) return;
@@ -508,7 +511,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     const refreshFacilityApplicants = () => {
       const seen = getSeenApplicantIds();
 
-      if (isApiEnabled) {
+      {
         getFacilityApplicants()
           .then((data) => {
             if (isMounted && Array.isArray(data)) {
@@ -517,11 +520,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             }
           })
           .catch(() => { });
-      } else {
-        const unread = (s.adminApplications || [])
-          .filter((a) => a.status === "shortlisted" && !seen.has(String(a.id)))
-          .length;
-        setFacilityShortlistedCount(unread);
       }
     };
 
@@ -541,7 +539,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
 
     window.addEventListener("fale:applications-updated", handleUpdate);
-    const detachAutoRefresh = isApiEnabled && !isApplicantsPage
+    const detachAutoRefresh = !isApplicantsPage
       ? attachFocusAndPollRefresh(refreshFacilityApplicants, 60000)
       : () => {};
     return () => {
@@ -552,7 +550,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [activePortal, isFacilityPath, path, isApiEnabled, s.adminApplications]);
 
   useEffect(() => {
-    if (!isApiEnabled || (activePortal !== "admin" && !isAdminPath)) return;
+    if ((activePortal !== "admin" && !isAdminPath)) return;
     getAdminDashboardMetrics()
       .then((data) => {
         if (data) setAdminMetrics(data);
@@ -569,7 +567,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Real-time unread notification badge synchronization for navbar bell
   useEffect(() => {
-    if (!isApiEnabled) return;
     getNotifications()
       .then((data) => {
         if (Array.isArray(data)) {
@@ -626,7 +623,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     if (activePortal === "candidate") {
       getCandidateProfile()
         .then((profileData) => {
@@ -643,9 +639,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               mobile: profileData.phone || prev.profile["mobile"],
               city: profileData.city || prev.profile["city"],
               state: profileData.state || prev.profile["state"],
-              role: profileData.profession || prev.profile["role"] || (profileData.isStudent ? profileData.course : "Doctor"),
-              specialty: profileData.specialty || prev.profile["specialty"] || "General medicine",
-              qual: profileData.qualification || prev.profile["qual"] || "MBBS",
+              role: profileData.profession || prev.profile["role"] || (profileData.isStudent ? profileData.course : ""),
+              specialty: profileData.specialty || prev.profile["specialty"] || "",
+              qual: profileData.qualification || prev.profile["qual"] || "",
               college: profileData.college || prev.profile["college"],
               institution: profileData.college || prev.profile["institution"],
               council: profileData.council || prev.profile["council"],
@@ -655,13 +651,13 @@ export function AppShell({ children }: { children: ReactNode }) {
               level: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
               cadreLevel: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
               kycStatus: profileData.kycStatus || prev.profile["kycStatus"],
-              notice: profileData.noticePeriod || "Immediate",
-              availability: profileData.availability || "Immediate",
+              notice: profileData.noticePeriod || prev.profile["notice"] || "",
+              availability: profileData.availability || prev.profile["availability"] || "",
               avatar: photoDoc || prev.profile["avatar"],
             },
           }));
         })
-        .catch(console.error);
+        .catch(profileLoad.fail);
     } else if (activePortal === "facility") {
       getFacilityProfile()
         .then((facData) => {
@@ -678,9 +674,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             },
           }));
         })
-        .catch(console.error);
+        .catch(profileLoad.fail);
     }
-  }, [activePortal]);
+  }, [activePortal, profileLoad.retryKey]);
 
   const closeMenus = () => {
     setDesktopMenuOpen(false);
@@ -698,7 +694,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!pendingPortalSwitch) return;
     const target = pendingPortalSwitch;
     setPendingPortalSwitch(null);
-    if (isApiEnabled) {
+    {
       await logout();
     }
     setState({ signedIn: false, portal: target });
@@ -708,16 +704,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const handleSwitchPortal = (p: Portal) => {
     closeMenus();
     if (p === activePortal) return;
-    if (isApiEnabled) {
+    {
       setPendingPortalSwitch(p);
-    } else {
-      switchPortal(p);
     }
   };
 
   const handleSignOut = async () => {
     closeMenus();
-    if (isApiEnabled) {
+    {
       await logout();
     }
     setState({ signedIn: false });
@@ -909,7 +903,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="px-4 sm:px-6 lg:px-8 py-5 sm:py-8 animate-in fade-in duration-300 w-full min-w-0">{children}</main>
+      <main className="px-4 sm:px-6 lg:px-8 py-5 sm:py-8 animate-in fade-in duration-300 w-full min-w-0"><RequestError message={profileLoad.error ? `Profile details: ${profileLoad.error}` : null} onRetry={profileLoad.retry} />{children}</main>
       <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card/98 backdrop-blur md:hidden">
         {nav.map((n) => {
           const isPostOpening = n.to === "/employer/post" && (path === "/employer/post" || path === "/employer/post-shift");

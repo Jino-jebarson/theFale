@@ -71,7 +71,7 @@ export function mapNotificationToUi(dto: NotificationDto): UiNotificationItem {
  * Fetch all notifications for current user.
  */
 export async function getNotifications(): Promise<UiNotificationItem[]> {
-  const dtos = await apiFetch<NotificationDto[]>("/notifications");
+  const dtos = await apiFetch<NotificationDto[]>("/notifications", { validate: Array.isArray, cacheMs: 15000 });
   return dtos.map(mapNotificationToUi);
 }
 

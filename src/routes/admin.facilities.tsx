@@ -1,3 +1,7 @@
+import { AllyReviewNote } from "@/components/fale/AllyReviewNote";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute } from '@tanstack/react-router'
 import {
@@ -40,7 +44,7 @@ const ALLY_FACILITY_CACHE_KEY = "fale_ally_facility_audit_cache_v1";
 type AllyFacilityAuditResult = {
   status: AllyAuditStatus;
   isVerified: boolean;
-  confidence: number;
+  confidence: number | null;
   licenseSentence: string;
   infraSentence: string;
   recSentence: string;
@@ -49,7 +53,7 @@ type AllyFacilityAuditResult = {
 import { generateFacilityDocumentBlob } from "@/lib/clinicalDocumentPdf";
 import { toast } from "sonner";
 import { AdminLayout } from "@/components/fale/AdminLayout";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -117,6 +121,8 @@ function formatFacilityDocType(type?: string) {
 }
 
 function FacilityKYCAdmin() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const s = useApp();
   const [filter, setFilter] = useState<"all" | "pending" | "verified" | "rejected">("pending");
   const [search, setSearch] = useState("");
@@ -133,7 +139,7 @@ function FacilityKYCAdmin() {
 
   // Ally Institutional Accreditation Audit State (session-cached + concurrency-limited live checks)
   const getFacilityAuditCacheKey = useCallback((facility: FacilityKYCItem) => {
-    return `${facility.id}:${facility.licenseNumber || ""}:${facility.accreditation || ""}:${facility.gst || ""}`;
+    return `${facility.id}:${facility.licenseNumber || ""}:${facility.accreditation || ""}:${facility.gst || ""}:${facility.name}:${facility.beds}:${facility.icuBeds}:${facility.city}:${facility.state}`;
   }, []);
 
   const [aiAuditResults, setAiAuditResults] = useState<Record<string, AllyFacilityAuditResult>>(() =>
@@ -152,9 +158,9 @@ function FacilityKYCAdmin() {
       return {
         status: "PENDING",
         isVerified: false,
-        confidence: 0,
+        confidence: null,
         licenseSentence: `Ally accreditation audit queued for live statutory license review.`,
-        infraSentence: `CEA registration (${facility.licenseNumber || "Pending"}), ${facility.accreditation || "standard"} tier, and ICU capacity will be verified automatically by Ally.`,
+        infraSentence: `CEA registration (${facility.licenseNumber || "Pending"}), ${facility.accreditation || "standard"} tier, and ICU capacity will be reviewed by Ally; a human must verify the source.`,
         recSentence: `Verification summary will appear once Ally completes its review.`,
         verdict: "",
       };
@@ -165,7 +171,7 @@ function FacilityKYCAdmin() {
   const handleRunAiAudit = useCallback(
     async (facility: FacilityKYCItem, options?: { silent?: boolean }) => {
       const cacheKey = getFacilityAuditCacheKey(facility);
-      if (options?.silent && inFlightAuditKeysRef.current.has(cacheKey)) return;
+      if (inFlightAuditKeysRef.current.has(cacheKey)) return;
 
       inFlightAuditKeysRef.current.add(cacheKey);
       setRunningAuditIds((prev) => ({ ...prev, [facility.id]: true }));
@@ -204,19 +210,9 @@ function FacilityKYCAdmin() {
         );
         const lower = plainProse.toLowerCase();
 
-        const isVerified =
-          typeof sData["isVerified"] === "boolean"
-            ? sData["isVerified"]
-            : typeof sData["formatValid"] === "boolean"
-              ? sData["formatValid"]
-              : rawStatus === "VERIFIED"
-                ? true
-                : rawStatus.includes("FLAG") || rawStatus.includes("INVALID") || rawStatus.includes("PENDING")
-                  ? false
-                  : !lower.includes("flagged") &&
-                    !lower.includes("discrepancy") &&
-                    !lower.includes("pending") &&
-                    !lower.includes("invalid");
+        if (!plainProse.trim()) throw new Error("Ally returned no facility assessment.");
+        const isFlagged = /FLAG|INVALID|DISCREPANCY/.test(rawStatus);
+        const isVerified = false;
 
         const confidence = formatConfidencePercent(sData["confidence"], !isVerified);
         const sentences = plainProse
@@ -228,23 +224,23 @@ function FacilityKYCAdmin() {
           cleanMarkdownAndJsonNoise(typeof sData["licenseAssessment"] === "string" ? sData["licenseAssessment"] : "") ||
           sentences[0] ||
           (isVerified
-            ? `CEA License #${facility.licenseNumber} conforms to state healthcare establishment registry standards.`
+            ? `The supplied license still requires an official source check.`
             : `CEA License #${facility.licenseNumber || "Missing"} requires statutory compliance verification.`);
 
         const infraSentence =
           cleanMarkdownAndJsonNoise(typeof sData["infraAssessment"] === "string" ? sData["infraAssessment"] : "") ||
           sentences[1] ||
-          `Facility bed capacity (${facility.beds} beds, ${facility.icuBeds || 0} ICU) aligns with ${facility.accreditation || "clinical"} accreditation tier norms.`;
+          `Capacity and accreditation have not been independently checked.`;
 
         const recSentence =
           cleanMarkdownAndJsonNoise(typeof sData["recommendation"] === "string" ? sData["recommendation"] : "") ||
           sentences[2] ||
           (isVerified
-            ? `Hospital credentials verified active and ready for administrator approval.`
+            ? `A human must verify hospital credentials before approval.`
             : `Manual inspection of CEA license and statutory certificates recommended before approval.`);
 
         const nextEntry: AllyFacilityAuditResult = {
-          status: isVerified ? "VERIFIED" : "FLAGGED",
+          status: isFlagged ? "FLAGGED" : "REVIEW",
           isVerified,
           confidence,
           licenseSentence,
@@ -267,7 +263,7 @@ function FacilityKYCAdmin() {
         const errorEntry: AllyFacilityAuditResult = {
           status: "ERROR",
           isVerified: false,
-          confidence: 0,
+          confidence: null,
           licenseSentence: `Ally could not reach the statutory audit service right now.`,
           infraSentence: `Manual inspection of uploaded CEA license and accreditation documents is available below.`,
           recSentence: `Click Re-audit with Ally to retry automated statutory verification.`,
@@ -292,7 +288,7 @@ function FacilityKYCAdmin() {
   const renderAllyQueueBadge = (facility: FacilityKYCItem) => {
     const audit = getFacilityAiAudit(facility);
     const isAuditing = Boolean(runningAuditIds[facility.id]);
-    const isVerified = audit.status === "VERIFIED";
+    const isVerified = audit.status === "REVIEW";
     const isFlagged = audit.status === "FLAGGED" || audit.status === "ERROR";
 
     return (
@@ -307,14 +303,14 @@ function FacilityKYCAdmin() {
         )}
       >
         {isAuditing ? (
-          <HiOutlineArrowPath className="h-2.5 w-2.5 animate-spin shrink-0" />
+          <ButtonSpinner className="h-2.5 w-2.5 animate-spin shrink-0" />
         ) : (
           <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
         )}
         {isAuditing
           ? "Ally Auditing..."
           : isVerified
-            ? "Ally Pre-Check Verified"
+            ? "Ally Review Ready"
             : audit.status === "ERROR"
               ? "Ally Audit Retry"
               : isFlagged
@@ -437,6 +433,7 @@ function FacilityKYCAdmin() {
         setPreviewLoading(false);
       })
       .catch((err) => {
+        pageLoad.fail(err);
         if (!active) return;
         console.error("Direct blob PDF fetch failed, using fallback viewer:", err);
         setPreviewFailed(true);
@@ -446,12 +443,11 @@ function FacilityKYCAdmin() {
     return () => {
       active = false;
     };
-  }, [previewDoc, selectedFacility]);
+  }, [previewDoc, selectedFacility, pageLoad.retryKey]);
   const [apiFacilities, setApiFacilities] = useState<FacilityKYCItem[]>([]);
   const [loading, setLoading] = useState(isApiEnabled);
 
   const fetchFacilities = async () => {
-    if (!isApiEnabled) return;
     try {
       setLoading(true);
       const res = await getPendingFacilityKyc("all");
@@ -498,6 +494,7 @@ function FacilityKYCAdmin() {
       });
       setApiFacilities(mapped);
     } catch (err: any) {
+      pageLoad.fail(err);
       toast.error("Failed to load facility verifications", { description: err?.message });
     } finally {
       setLoading(false);
@@ -506,7 +503,7 @@ function FacilityKYCAdmin() {
 
   useEffect(() => {
     fetchFacilities();
-  }, []);
+  }, [pageLoad.retryKey]);
 
   // Keep selected facility updated with fresh API data
   useEffect(() => {
@@ -516,7 +513,7 @@ function FacilityKYCAdmin() {
     }
   }, [apiFacilities]);
 
-  const facilities = isApiEnabled ? apiFacilities : s.facilityKYC;
+  const facilities = apiFacilities;
 
   // Performance-safe background Ally verification: process pending facilities with bounded concurrency (MAX_CONCURRENT = 2)
   useEffect(() => {
@@ -547,7 +544,7 @@ function FacilityKYCAdmin() {
     return () => {
       cancelled = true;
     };
-  }, [facilities, aiAuditResults, getFacilityAuditCacheKey, handleRunAiAudit]);
+  }, [facilities, aiAuditResults, getFacilityAuditCacheKey, handleRunAiAudit, pageLoad.retryKey]);
 
   // Prioritize Ally verification immediately when an admin opens Inspect for a facility
   useEffect(() => {
@@ -556,7 +553,7 @@ function FacilityKYCAdmin() {
     if (!aiAuditResults[key] && !inFlightAuditKeysRef.current.has(key)) {
       void handleRunAiAudit(selectedFacility, { silent: true });
     }
-  }, [sheetOpen, selectedFacility, aiAuditResults, getFacilityAuditCacheKey, handleRunAiAudit]);
+  }, [sheetOpen, selectedFacility, aiAuditResults, getFacilityAuditCacheKey, handleRunAiAudit, pageLoad.retryKey]);
 
   const filtered = facilities.filter((f) => {
     const matchesFilter = filter === "all" ? true : f.status === filter;
@@ -568,8 +565,8 @@ function FacilityKYCAdmin() {
     return matchesFilter && matchesSearch;
   });
 
-  const handleVerify = async (id: string, name: string) => {
-    if (isApiEnabled) {
+  const handleVerify = async (id: string, name: string) => { await pageAction.run(async () => {
+    {
       try {
         await reviewFacilityKyc(id, "APPROVE", "Approved hospital credentials by compliance desk");
         toast.success("Hospital Accredited & Verified!", {
@@ -578,24 +575,17 @@ function FacilityKYCAdmin() {
         setSheetOpen(false);
         fetchFacilities();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Approval failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      facilityKYC: state.facilityKYC.map((f) =>
-        f.id === id ? { ...f, status: "verified" as const } : f
-      ),
-    }));
-    toast.success("Hospital Accredited & Verified!", {
-      description: `${name} has been approved. They can now publish clinical openings on FALE.`,
-    });
-    setSheetOpen(false);
-  };
 
-  const handleRejectConfirm = async () => {
+  }); };
+
+  const handleRejectConfirm = async () => { await pageAction.run(async () => {
     if (!selectedFacility) return;
-    if (isApiEnabled) {
+    {
       try {
         await reviewFacilityKyc(selectedFacility.id, "REJECT", rejectReason || "Insufficient documentation.");
         toast.error("Hospital Verification Rejected", {
@@ -606,24 +596,13 @@ function FacilityKYCAdmin() {
         setRejectReason("");
         fetchFacilities();
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Rejection failed", { description: err?.message });
       }
       return;
     }
-    setState((state) => ({
-      facilityKYC: state.facilityKYC.map((f) =>
-        f.id === selectedFacility.id
-          ? { ...f, status: "rejected" as const }
-          : f
-      ),
-    }));
-    toast.error("Hospital Verification Rejected", {
-      description: `${selectedFacility.name} was rejected: ${rejectReason || "Insufficient documentation."}`,
-    });
-    setRejectModalOpen(false);
-    setSheetOpen(false);
-    setRejectReason("");
-  };
+
+  }); };
 
   const getFacilityDocuments = (fac: FacilityKYCItem) => {
     if (fac.documents && fac.documents.length > 0) {
@@ -667,6 +646,8 @@ function FacilityKYCAdmin() {
         </Button>
       }
     >
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
+      <AllyReviewNote />
       {/* Metric Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs space-y-1">
@@ -898,7 +879,7 @@ function FacilityKYCAdmin() {
                           <>
                             <Button
                               size="sm"
-                              onClick={() => handleVerify(item.id, item.name)}
+                              disabled={pageAction.isPending} onClick={() => handleVerify(item.id, item.name)}
                               className="text-xs font-bold gap-1.5 h-8 px-3 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-2xs cursor-pointer"
                             >
                               <HiCheck className="h-3.5 w-3.5 stroke-[2.5]" />
@@ -1072,7 +1053,7 @@ function FacilityKYCAdmin() {
 
                       <Button
                         size="sm"
-                        onClick={() => handleVerify(item.id, item.name)}
+                        disabled={pageAction.isPending} onClick={() => handleVerify(item.id, item.name)}
                         className="h-9 px-2 sm:px-3 text-[11px] sm:text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white gap-1 shadow-none transition-all active:scale-[0.98] cursor-pointer min-w-0"
                       >
                         <HiCheck className="h-3.5 w-3.5 shrink-0" />
@@ -1140,7 +1121,7 @@ function FacilityKYCAdmin() {
             const facilityDocs = getFacilityDocuments(selectedFacility);
             return (
               <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 sm:p-6 space-y-4 sm:space-y-5">
-                
+
                 {/* 1. Facility Identity, Branding & Description */}
                 <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-4 shadow-xs">
                   <div className="flex flex-col xs:flex-row sm:flex-row items-start gap-3 sm:gap-4">
@@ -1233,7 +1214,7 @@ function FacilityKYCAdmin() {
                 {(() => {
                   const audit = getFacilityAiAudit(selectedFacility);
                   const isAuditing = Boolean(runningAuditIds[selectedFacility.id]);
-                  const isVerified = audit.status === "VERIFIED";
+                  const isVerified = audit.status === "REVIEW";
                   const isFlagged = audit.status === "FLAGGED";
                   const isError = audit.status === "ERROR";
 
@@ -1243,7 +1224,7 @@ function FacilityKYCAdmin() {
                         <div className="flex items-center gap-2.5 min-w-0">
                           <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
                             {isAuditing ? (
-                              <HiOutlineArrowPath className="h-4 w-4 animate-spin" />
+                              <ButtonSpinner className="h-4 w-4 animate-spin" />
                             ) : (
                               <BotMessageSquare className="h-4 w-4" />
                             )}
@@ -1285,9 +1266,9 @@ function FacilityKYCAdmin() {
                             {isAuditing
                               ? "Ally Auditing..."
                               : isVerified
-                                ? `Ally Verified · ${audit.confidence.toFixed(1)}%`
+                                ? "AI review - human verification required"
                                 : isFlagged
-                                  ? `Ally Flagged · ${audit.confidence.toFixed(1)}%`
+                                  ? "AI flagged - human review required"
                                   : isError
                                     ? "Ally Audit Retry"
                                     : "Ally Audit Queued"}
@@ -1300,7 +1281,7 @@ function FacilityKYCAdmin() {
                             className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1.5 border-primary/30 text-primary hover:bg-primary/10 bg-background/80 cursor-pointer shrink-0"
                           >
                             {isAuditing ? (
-                              <HiOutlineArrowPath className="h-3 w-3 animate-spin shrink-0" />
+                              <ButtonSpinner className="h-3 w-3 animate-spin shrink-0" />
                             ) : (
                               <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
                             )}
@@ -1711,7 +1692,7 @@ function FacilityKYCAdmin() {
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => handleVerify(selectedFacility.id, selectedFacility.name)}
+                    disabled={pageAction.isPending} onClick={() => handleVerify(selectedFacility.id, selectedFacility.name)}
                     className="flex-1 sm:flex-initial bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1 rounded-xl shadow-none whitespace-nowrap"
                   >
                     <HiCheck className="h-3.5 w-3.5 shrink-0" /> Approve & Issue Verified Badge
@@ -1748,7 +1729,7 @@ function FacilityKYCAdmin() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejectModalOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleRejectConfirm} className="font-bold text-xs">
+            <Button variant="destructive" disabled={pageAction.isPending} onClick={handleRejectConfirm} className="font-bold text-xs">
               Reject Facility
             </Button>
           </DialogFooter>
@@ -1823,7 +1804,7 @@ function FacilityKYCAdmin() {
           <div className="flex-1 min-h-0 relative bg-muted/20 flex flex-col items-center justify-center overflow-hidden">
             {previewLoading && (
               <div className="flex flex-col items-center justify-center gap-3 p-8 text-muted-foreground">
-                <HiOutlineArrowPath className="h-8 w-8 animate-spin text-primary" />
+                <ButtonSpinner className="h-8 w-8 animate-spin text-primary" />
                 <p className="text-xs font-bold text-foreground">Preparing document preview...</p>
                 <p className="text-[11px] text-muted-foreground">Rendering inline statutory certificate without downloading</p>
               </div>

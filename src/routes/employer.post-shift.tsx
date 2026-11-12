@@ -1,4 +1,7 @@
-import { useState, useMemo, useEffect } from "react";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   HiOutlineClock,
@@ -24,7 +27,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/fale/AppShell";
 import { OrgMark } from "@/components/fale/JobCard";
 import { SelectField } from "@/components/fale/fields";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -129,9 +132,11 @@ const availableCities = [
 ];
 
 function PostShiftScreen() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const store = useApp();
   const navigate = useNavigate();
-  const hospitalName = String(store.profile["org"] || (isApiEnabled ? (store.profile["hospitalName"] || "Healthcare Facility") : "Apollo Hospitals"));
+  const hospitalName = String(store.profile["org"] || ((store.profile["hospitalName"] || "Healthcare Facility")));
 
   const [availableEscrow, setAvailableEscrow] = useState<number>(0);
   const [hasLinkedBank, setHasLinkedBank] = useState<boolean>(false);
@@ -145,12 +150,12 @@ function PostShiftScreen() {
   }, []);
 
   useEffect(() => {
-    if (isApiEnabled) {
+    {
       Promise.all([
-        getFacilityWallet().catch(() => null),
-        getHospitalBankAccount().catch(() => null),
-        getFacilityShiftPolicy().catch(() => null),
-        editShiftId ? getFacilityShifts().catch(() => []) : Promise.resolve([] as UiShiftItem[]),
+        getFacilityWallet(),
+        getHospitalBankAccount(),
+        getFacilityShiftPolicy(),
+        editShiftId ? getFacilityShifts() : Promise.resolve([] as UiShiftItem[]),
       ]).then(([wallet, bank, policy, facShifts]) => {
         if (wallet) {
           setAvailableEscrow(paiseToRupees(wallet.availableBalancePaise));
@@ -191,17 +196,14 @@ function PostShiftScreen() {
             }
           }
         }
-      });
-    } else {
-      setAvailableEscrow(store.escrowBalance ?? 0);
-      setHasLinkedBank(Boolean(store.hospitalBankAccount && store.hospitalBankAccount.accountNumber && store.hospitalBankAccount.accountNumber.length > 3));
+      }).catch(pageLoad.fail);
     }
-  }, [store.escrowBalance, store.hospitalBankAccount, editShiftId]);
+  }, [store.escrowBalance, store.hospitalBankAccount, editShiftId, pageLoad.retryKey]);
 
   // Form State
   const [roleTitle, setRoleTitle] = useState("");
   const [dept, setDept] = useState("");
-  const [city, setCity] = useState(() => String(store.profile["city"] || "Chennai"));
+  const [city, setCity] = useState(() => String(store.profile["city"] || ""));
   const [dateOption, setDateOption] = useState("Today · Urgent");
   const [customDate, setCustomDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [selectedSlot, setSelectedSlot] = useState("night");
@@ -243,10 +245,12 @@ function PostShiftScreen() {
     recommendedHourlyRate: number;
     minHourlyRate: number;
     maxHourlyRate: number;
-    fillTimeEstimateMinutes?: number;
+    fillTimeEstimateMinutes?: number | undefined;
     explanation: string;
   } | null>(null);
   const [loadingAiRate, setLoadingAiRate] = useState(false);
+  const [aiRateError, setAiRateError] = useState<string | null>(null);
+  const rateRequest = useRef(false);
 
   const handleFetchAiRateSuggestion = async (
     targetRole?: string,
@@ -255,11 +259,13 @@ function PostShiftScreen() {
     targetCity?: string
   ) => {
     const role = targetRole || roleTitle;
-    if (!role.trim()) return;
+    if (!role.trim() || rateRequest.current) return;
+    rateRequest.current = true;
+    setAiRateError(null);
     setLoadingAiRate(true);
     try {
       const activeSlot = targetSlot || selectedSlot;
-      const activeCity = targetCity || city || "Bengaluru";
+      const activeCity = targetCity || city || "";
       const activeDept = targetDept || dept || "General";
 
       const res = await suggestShiftPayWithAi(
@@ -272,27 +278,20 @@ function PostShiftScreen() {
       if (b && b.recommendedHourlyRate) {
         setAiRateSuggestion({
           recommendedHourlyRate: Number(b.recommendedHourlyRate),
-          minHourlyRate: Number(b.minHourlyRate || Math.round((Number(b.recommendedHourlyRate) * 0.85) / 10) * 10),
-          maxHourlyRate: Number(b.maxHourlyRate || Math.round((Number(b.recommendedHourlyRate) * 1.25) / 10) * 10),
-          fillTimeEstimateMinutes: Number(b.fillTimeEstimateMinutes || 25),
-          explanation: b.explanation || `Recommended market rate for ${role} in ${activeCity}.`,
+          minHourlyRate: Number(b.minHourlyRate),
+          maxHourlyRate: Number(b.maxHourlyRate),
+          fillTimeEstimateMinutes: b.fillTimeEstimateMinutes,
+          explanation: b.explanation || "Planning suggestion from published FALE shifts; review before applying.",
         });
       }
     } catch (err) {
-      console.warn("Shift pay AI suggest failed:", err);
+      setAiRateSuggestion(null);
+      setAiRateError(err instanceof Error ? err.message : "Could not suggest pay. Enter a rate manually or retry.");
     } finally {
+      rateRequest.current = false;
       setLoadingAiRate(false);
     }
   };
-
-  useEffect(() => {
-    if (roleTitle.trim()) {
-      const t = setTimeout(() => {
-        handleFetchAiRateSuggestion(roleTitle, dept, selectedSlot, city);
-      }, 400);
-      return () => clearTimeout(t);
-    }
-  }, [roleTitle, dept, selectedSlot, city]);
 
   const handleAiMagicFill = async () => {
     if (!whatsAppPrompt.trim()) {
@@ -536,7 +535,7 @@ function PostShiftScreen() {
   };
 
   // Submit Shift
-  const handlePublishShift = async () => {
+  const handlePublishShift = async () => { await pageAction.run(async () => {
     const check = validateShiftForm();
     if (!check.valid || !check.startDate || !check.endDate || !check.effectiveHours) {
       return;
@@ -597,7 +596,7 @@ function PostShiftScreen() {
     setSubmitting(true);
     try {
       let returnedStatus = "PENDING_APPROVAL";
-      if (isApiEnabled) {
+      {
         const shiftPayload = {
           title: roleTitle.trim(),
           department: dept.trim(),
@@ -647,10 +646,11 @@ function PostShiftScreen() {
     } finally {
       setSubmitting(false);
     }
-  };
+  }); };
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="w-full min-w-0 space-y-6 pb-16">
         {/* ========================================================= */}
         {/* TOP HEADER & ROUTE TOGGLE SWITCHER */}
@@ -1027,7 +1027,7 @@ function PostShiftScreen() {
                         <BotMessageSquare className="h-3.5 w-3.5" />
                       </span>
                       <span className="text-xs font-bold text-foreground truncate">
-                        Ally Market Rate Benchmark
+                        Ally Pay Planning
                       </span>
                     </div>
 
@@ -1039,11 +1039,11 @@ function PostShiftScreen() {
                     >
                       {loadingAiRate ? (
                         <>
-                          <HiOutlineArrowPath className="h-3 w-3 animate-spin text-primary" />
+                          <ButtonSpinner className="h-3 w-3 animate-spin text-primary" />
                           <span>Calculating...</span>
                         </>
                       ) : (
-                        "Recalculate with Ally"
+                        "Suggest pay with Ally"
                       )}
                     </button>
                   </div>
@@ -1052,7 +1052,7 @@ function PostShiftScreen() {
                   <div className="text-[11px] text-muted-foreground leading-relaxed pl-8">
                     {loadingAiRate ? (
                       <span className="font-semibold text-primary animate-pulse">
-                        Analyzing prevailing hospital rate benchmarks in {city || "Bengaluru"} with Ally...
+                        Reviewing comparable published shift rates with Ally...
                       </span>
                     ) : aiRateSuggestion ? (
                       <span>
@@ -1060,7 +1060,7 @@ function PostShiftScreen() {
                       </span>
                     ) : (
                       <span>
-                        <strong className="text-foreground">Benchmark:</strong> Real-time rate intelligence available for {roleTitle || "this role"} in {city || "Bengaluru"}.
+                        {aiRateError || "Request a suggestion using comparable published FALE shifts. This is not a market-wide benchmark."}
                       </span>
                     )}
                   </div>
@@ -1072,7 +1072,7 @@ function PostShiftScreen() {
                         <span>Select Rate Strategy:</span>
                         <span className="text-primary font-medium flex items-center gap-1">
                           <HiOutlineSparkles className="h-3 w-3" />
-                          ~{aiRateSuggestion.fillTimeEstimateMinutes || 25}m estimated fill
+                          Fill time not predicted
                         </span>
                       </div>
 
@@ -1123,7 +1123,7 @@ function PostShiftScreen() {
                             ₹{aiRateSuggestion.recommendedHourlyRate}/hr
                           </span>
                           <span className="text-[9px] sm:text-[10px] opacity-90 mt-0.5 whitespace-nowrap">
-                            ~{aiRateSuggestion.fillTimeEstimateMinutes || 25}m fill
+                            Review before applying
                           </span>
                         </button>
 
@@ -1148,7 +1148,7 @@ function PostShiftScreen() {
                             ₹{aiRateSuggestion.maxHourlyRate}/hr
                           </span>
                           <span className="text-[9px] sm:text-[10px] text-muted-foreground/80 mt-0.5 whitespace-nowrap">
-                            &lt; 15m fill
+                            Upper observed range
                           </span>
                         </button>
                       </div>
@@ -1212,7 +1212,7 @@ function PostShiftScreen() {
             <div className="flex lg:hidden items-center gap-3 pt-2">
               <Button
                 type="button"
-                onClick={handlePublishShift}
+                disabled={pageAction.isPending} onClick={handlePublishShift}
                 isLoading={submitting}
                 loadingText="Publishing shift..."
                 className="w-full rounded-xl font-bold text-xs h-11 gap-1.5 shadow-sm bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer"
@@ -1389,7 +1389,7 @@ function PostShiftScreen() {
               <Button
                 type="button"
                 size="lg"
-                onClick={handlePublishShift}
+                disabled={pageAction.isPending} onClick={handlePublishShift}
                 isLoading={submitting}
                 loadingText="Publishing & Dispatching..."
                 className="w-full rounded-xl h-11 text-sm font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer flex items-center justify-center gap-2"

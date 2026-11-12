@@ -1,3 +1,7 @@
+import { copyText } from "@/lib/copyText";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -23,7 +27,7 @@ import {
 import { toast } from "sonner";
 import { BotMessageSquare, RotateCcw, Copy, Check, Star, KeyRound, AlertTriangle } from "lucide-react";
 import { AppShell, StatusBadge, initials } from "@/components/fale/AppShell";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -133,6 +137,8 @@ function formatAppliedTimestamp(raw?: string): string {
 }
 
 function Applicants() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const s = useApp();
   const [roleTypeTab, setRoleTypeTab] = useState<"all" | "jobs" | "shifts">("all");
   const [filter, setFilter] = useState("All");
@@ -153,7 +159,6 @@ function Applicants() {
   const [loading, setLoading] = useState(isApiEnabled);
 
   const fetchApplicants = (silent = false) => {
-    if (!isApiEnabled) return;
     if (!silent) setLoading(true);
     getFacilityApplicants()
       .then((data) => {
@@ -171,6 +176,7 @@ function Applicants() {
         }
       })
       .catch((err: any) => {
+        pageLoad.fail(err);
         if (!silent) {
           toast.error("Failed to load applicants", {
             description: err?.message || "Please check your session and try again.",
@@ -183,14 +189,13 @@ function Applicants() {
   };
 
   useEffect(() => {
-    if (!isApiEnabled) return;
     fetchApplicants(false);
     return attachFocusAndPollRefresh(() => fetchApplicants(true), 60000);
-  }, []);
+  }, [pageLoad.retryKey]);
 
   // Merge live status overrides with applicant records + admin shortlisted applications
   const allApplicants = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return apiApplicants.map((a: any) => {
         const candidateRole =
           a.candidateRole ||
@@ -199,44 +204,22 @@ function Applicants() {
           (a.jobTitle ? a.jobTitle.replace(/ \(Locum Shift\)/i, "") : "Clinician");
 
         const candidateExp =
-          a.candidateExperience ||
-          a.exp ||
-          (a.councilVerified ? "Council Registered" : "Fresher");
+          a.candidateExperience || a.exp || "Not provided";
 
-        const candidateCity = a.candidateCity || a.city || "Chennai";
+        const candidateCity = a.candidateCity || a.city || "";
 
         const candidateQual =
-          a.candidateQualification ||
-          (candidateRole.toLowerCase().includes("doctor")
-            ? "MBBS"
-            : candidateRole.toLowerCase().includes("nurse")
-              ? "B.Sc Nursing"
-              : "Certified Clinician");
+          a.candidateQualification || "Not provided";
 
-        const councilName = a.candidateCouncil || "State Medical Council";
+        const councilName = a.candidateCouncil || "Not provided";
         const regNum =
-          a.regNumber ||
-          (a.councilVerified ? "Council Verified" : "Registration Pending");
+          a.regNumber || "Not provided";
 
         // Dynamic clinical skill chips based on role and job assignment
-        const derivedSkills = (() => {
-          if (a.skills && a.skills.length > 0) return a.skills;
-          const r = (candidateRole + " " + (a.jobTitle || "")).toLowerCase();
-          if (r.includes("dialysis") || r.includes("technician")) {
-            return ["Dialysis Protocols", "Hemodialysis Machine Ops", "Patient Monitoring"];
-          }
-          if (r.includes("nurse") || r.includes("scrub") || r.includes("ot")) {
-            return ["Surgical Scrubbing", "Sterilization Protocols", "Patient Safety"];
-          }
-          if (r.includes("pharmacist")) {
-            return ["Clinical Dispensing", "Pharmacovigilance", "Inventory Management"];
-          }
-          return ["Clinical Protocols", "Inpatient Care", "Emergency Assessment"];
-        })();
+        const derivedSkills = Array.isArray(a.skills) ? a.skills : [];
 
         const dynamicBio =
-          a.candidateBio ||
-          `${candidateExp} experienced ${candidateRole} registered with ${councilName}. Proven track record in patient safety, clinical protocol adherence, and emergency intervention.`;
+          a.candidateBio || "Not provided";
 
         const uiStatus = status[a.id] ?? formatApplicationStatus(a.status);
 
@@ -253,7 +236,7 @@ function Applicants() {
               (candidateRole.toLowerCase().includes("doctor") ? "General medicine" : candidateRole),
             qualification: candidateQual,
             city: candidateCity,
-            state: a.candidateState || "Tamil Nadu",
+            state: a.candidateState || "",
             relocate: false,
             kycStatus: a.councilVerified ? "VERIFIED" : "PENDING",
             experienceYears: candidateExp,
@@ -269,7 +252,7 @@ function Applicants() {
         );
 
         const derivedMatch =
-          isApiEnabled && typeof a.matchScore === "number" && a.matchScore > 0
+          typeof a.matchScore === "number" && a.matchScore > 0
             ? a.matchScore
             : clinicalMatch?.score ||
             (s.adminApplications || []).find(
@@ -285,7 +268,7 @@ function Applicants() {
           city: candidateCity,
           for: a.jobTitle || "Clinical Role",
           status: uiStatus,
-          verified: a.councilVerified !== false,
+          verified: a.councilVerified === true,
           match: derivedMatch,
           appliedDate: formatAppliedTimestamp(a.appliedAt),
           appliedAtMs: a.appliedAt ? new Date(a.appliedAt).getTime() : 0,
@@ -299,26 +282,14 @@ function Applicants() {
           email: a.candidateEmail || a.email || "*****@fale.care",
           bio: dynamicBio,
           education: `${candidateQual} | ${councilName}`,
-          certifications: [
-            a.councilVerified !== false ? "Council Verified" : "Verification in Progress",
-            "BLS / ACLS Certified",
-            "NABH Clinical Protocols",
-          ],
-          experienceList: [
-            {
-              hospital: "Accredited Healthcare Partner",
-              role: candidateRole,
-              duration: candidateExp,
-              details:
-                "Direct patient care, clinical assessment, bedside monitoring, and multidisciplinary care coordination.",
-            },
-          ],
+          certifications: Array.isArray(a.certifications) ? a.certifications : [],
+          experienceList: Array.isArray(a.experienceList) ? a.experienceList : [],
           resumeUrl: a.resumeUrl || undefined,
           resumeFileName: a.resumeFileName || undefined,
           isShiftClaim: Boolean(a.isShiftClaim || a.shiftId || (a.jobTitle && a.jobTitle.toLowerCase().includes("shift"))),
           actualHours: a.actualHours || undefined,
           scheduledHours: a.scheduledHours || 8,
-          hourlyRate: a.hourlyRatePaise ? Math.round(a.hourlyRatePaise / 100) : (a.hourlyRate || 500),
+          hourlyRate: a.hourlyRatePaise ? Math.round(a.hourlyRatePaise / 100) : (a.hourlyRate || 0),
           checkInPin: a.checkInPin || undefined,
           disputeReason: a.disputeReason || undefined,
           hospitalRating: a.hospitalRating || undefined,
@@ -334,46 +305,7 @@ function Applicants() {
     }
 
     // Dynamically pull candidates shortlisted by Admin
-    const adminShortlistedConverted: Applicant[] = (s.adminApplications || [])
-      .filter((a) => a.status === "shortlisted")
-      .map((a) => {
-        const isShift = Boolean(a.isShiftClaim || a.jobTitle?.toLowerCase().includes("shift"));
-        return {
-          id: a.id,
-          name: a.candidateName,
-          role: a.candidateRole,
-          exp: a.exp,
-          city: a.candidateCity,
-          for: a.jobTitle,
-          status: "Shortlisted",
-          verified: a.councilVerified,
-          match: a.matchScore || 76,
-          appliedDate: a.appliedDate,
-          appliedAtMs: 0,
-          qualification: "MBBS / MD / Certified Clinician",
-          regNumber: a.regNumber || "Council Verified",
-          skills: ["Clinical Care", "ICU / Emergency Protocols", "Patient Safety"],
-          phone: a.phone || "+91 98401 23456",
-          email: a.email || "candidate@fale.care",
-          bio: a.summary || "Pre-screened and council-verified clinical professional.",
-          isShiftClaim: isShift,
-        };
-      });
 
-    const existingIds = new Set(adminShortlistedConverted.map((a) => a.id));
-    const combined = [
-      ...adminShortlistedConverted,
-      ...applicants.filter((a) => !existingIds.has(a.id)),
-    ];
-
-    return combined.map((a) => {
-      const isShift = Boolean(a.isShiftClaim || a.for?.toLowerCase().includes("shift"));
-      return {
-        ...a,
-        isShiftClaim: isShift,
-        status: status[a.id] ?? a.status,
-      };
-    });
   }, [isApiEnabled, apiApplicants, s.adminApplications, status]);
 
   // Overall counts for Permanent Roles vs Locum Shifts
@@ -406,10 +338,11 @@ function Applicants() {
           window.dispatchEvent(new CustomEvent("fale:applications-updated", { detail: { unreadCount: 0 } }));
         }
       } catch (err) {
+      pageLoad.fail(err);
         console.error("Failed to mark applicants as seen", err);
       }
     }
-  }, [allApplicants]);
+  }, [allApplicants, pageLoad.retryKey]);
 
   // Applicants scoped to active Role Type ("all" | "jobs" | "shifts")
   const applicantsInRoleType = useMemo(() => {
@@ -530,8 +463,8 @@ function Applicants() {
     });
   }, [applicantsInRoleType, filter, selectedRole, search]);
 
-  const handleShortlist = async (app: Applicant) => {
-    if (isApiEnabled) {
+  const handleShortlist = async (app: Applicant) => { await pageAction.run(async () => {
+    {
       try {
         await updateApplicantStatus(app.id, "SHORTLISTED");
       } catch (e: any) {
@@ -543,10 +476,10 @@ function Applicants() {
     toast.success(`${app.name} shortlisted`, {
       description: "Candidate moved to shortlisted candidates.",
     });
-  };
+  }); };
 
-  const handleConfirmShift = async (app: Applicant) => {
-    if (isApiEnabled) {
+  const handleConfirmShift = async (app: Applicant) => { await pageAction.run(async () => {
+    {
       try {
         await updateApplicantStatus(app.id, "CONFIRMED");
       } catch (e: any) {
@@ -559,7 +492,7 @@ function Applicants() {
       description: `Clinician is now confirmed for "${app.for}". Escrow payout is locked.`,
     });
     fetchApplicants();
-  };
+  }); };
 
   const [verifyTimesheetModalApp, setVerifyTimesheetModalApp] = useState<Applicant | null>(null);
   const [verifyHoursInput, setVerifyHoursInput] = useState<number>(8);
@@ -571,11 +504,11 @@ function Applicants() {
     setVerifyTimesheetModalApp(app);
   };
 
-  const handleApproveTimesheet = async () => {
+  const handleApproveTimesheet = async () => { await pageAction.run(async () => {
     if (!verifyTimesheetModalApp) return;
     setSubmittingVerifyTimesheet(true);
     try {
-      if (isApiEnabled) {
+      {
         await updateApplicantStatus(
           verifyTimesheetModalApp.id,
           "COMPLETED",
@@ -592,11 +525,12 @@ function Applicants() {
       setVerifyTimesheetModalApp(null);
       fetchApplicants();
     } catch (e: any) {
+      pageLoad.fail(e);
       toast.error(e?.message || "Verification failed");
     } finally {
       setSubmittingVerifyTimesheet(false);
     }
-  };
+  }); };
 
   // --- Shift Hardening: No-Show, Dispute & Clinician Star Rating ---
   const [disputeModalApp, setDisputeModalApp] = useState<Applicant | null>(null);
@@ -618,8 +552,8 @@ function Applicants() {
     "Protocol Compliant",
   ];
 
-  const handleMarkNoShow = async (app: Applicant) => {
-    if (isApiEnabled) {
+  const handleMarkNoShow = async (app: Applicant) => { await pageAction.run(async () => {
+    {
       try {
         await updateApplicantStatus(app.id, "NO_SHOW", "Clinician did not report on shift duty");
       } catch (e: any) {
@@ -632,9 +566,9 @@ function Applicants() {
       description: "Shift slot reopened so another verified clinician can claim.",
     });
     fetchApplicants();
-  };
+  }); };
 
-  const handleConfirmDispute = async () => {
+  const handleConfirmDispute = async () => { await pageAction.run(async () => {
     if (!disputeModalApp) return;
     if (!disputeReasonInput.trim()) {
       toast.error("Please describe the shift dispute reason");
@@ -642,7 +576,7 @@ function Applicants() {
     }
     setSubmittingDispute(true);
     try {
-      if (isApiEnabled) {
+      {
         await updateApplicantStatus(disputeModalApp.id, "DISPUTED", disputeReasonInput.trim());
       }
       setStatus((prev) => ({ ...prev, [disputeModalApp.id]: "Disputed" }));
@@ -653,11 +587,12 @@ function Applicants() {
       setDisputeReasonInput("");
       fetchApplicants();
     } catch (e: any) {
+      pageLoad.fail(e);
       toast.error(e?.message || "Failed to raise dispute");
     } finally {
       setSubmittingDispute(false);
     }
-  };
+  }); };
 
   const openRateModal = (app: Applicant) => {
     setRateModalApp(app);
@@ -672,11 +607,11 @@ function Applicants() {
     );
   };
 
-  const handleSubmitRating = async () => {
+  const handleSubmitRating = async () => { await pageAction.run(async () => {
     if (!rateModalApp) return;
     setSubmittingRating(true);
     try {
-      if (isApiEnabled) {
+      {
         await rateShiftClaim(rateModalApp.id, {
           rating: ratingScore,
           review: ratingReviewInput.trim() || undefined,
@@ -689,11 +624,12 @@ function Applicants() {
       setRateModalApp(null);
       fetchApplicants();
     } catch (e: any) {
+      pageLoad.fail(e);
       toast.error(e?.message || "Could not submit rating");
     } finally {
       setSubmittingRating(false);
     }
-  };
+  }); };
 
   // AI Interview Questions Generator State (#12)
   const [interviewQuestionsModalApp, setInterviewQuestionsModalApp] = useState<Applicant | null>(null);
@@ -708,7 +644,8 @@ function Applicants() {
   const handleGenerateSummary = async (app: Applicant) => {
     setLoadingSummaryId(app.id);
     try {
-      const expNumber = parseInt(app.exp || "3") || 3;
+      const parsedExperience = Number.parseFloat(app.exp || "");
+      const expNumber = Number.isFinite(parsedExperience) && parsedExperience >= 0 ? parsedExperience : undefined;
       const res = await summarizeCandidateWithAi(
         app.name,
         app.role,
@@ -736,7 +673,6 @@ function Applicants() {
       setLoadingSummaryId(null);
     }
   };
-
 
 
   const handleOpenInterviewQuestions = async (app: Applicant) => {
@@ -778,8 +714,8 @@ function Applicants() {
     }
   };
 
-  const handleInvite = async (app: Applicant) => {
-    if (isApiEnabled) {
+  const handleInvite = async (app: Applicant) => { await pageAction.run(async () => {
+    {
       try {
         await updateApplicantStatus(app.id, "INTERVIEW");
       } catch (e: any) {
@@ -788,13 +724,13 @@ function Applicants() {
       }
     }
     setStatus((prev) => ({ ...prev, [app.id]: "Interview" }));
-    toast.success(`Interview invite sent to ${app.name}`, {
-      description: "Candidate has been notified for interview scheduling.",
+    toast.success(`Application moved to Interview for ${app.name}`, {
+      description: "Interview status saved.",
     });
-  };
+  }); };
 
-  const handleMakeOffer = async (app: Applicant) => {
-    if (isApiEnabled) {
+  const handleMakeOffer = async (app: Applicant) => { await pageAction.run(async () => {
+    {
       try {
         await updateApplicantStatus(app.id, "OFFERED");
       } catch (e: any) {
@@ -803,13 +739,13 @@ function Applicants() {
       }
     }
     setStatus((prev) => ({ ...prev, [app.id]: "Offer" }));
-    toast.success(`Offer extended to ${app.name}`, {
-      description: "Candidate has been sent formal offer details for review.",
+    toast.success(`Application moved to Offer for ${app.name}`, {
+      description: "Offer status saved.",
     });
-  };
+  }); };
 
-  const handleHire = async (app: Applicant) => {
-    if (isApiEnabled) {
+  const handleHire = async (app: Applicant) => { await pageAction.run(async () => {
+    {
       try {
         await updateApplicantStatus(app.id, "HIRED");
       } catch (e: any) {
@@ -821,7 +757,7 @@ function Applicants() {
     toast.success(`${app.name} confirmed & hired!`, {
       description: "Candidate onboarding and escrow milestone initiated.",
     });
-  };
+  }); };
 
   const openRejectModal = (app: Applicant) => {
     setRejectCandidate(app);
@@ -830,14 +766,14 @@ function Applicants() {
     setRejectionReasonPreset(isShift ? "Council registration / credential mismatch" : "Interview performance");
   };
 
-  const handleConfirmReject = async () => {
+  const handleConfirmReject = async () => { await pageAction.run(async () => {
     if (!rejectCandidate) return;
     setSubmittingReject(true);
     const finalNotes = rejectionNotes.trim()
       ? `${rejectionReasonPreset} — ${rejectionNotes.trim()}`
       : rejectionReasonPreset;
 
-    if (isApiEnabled) {
+    {
       try {
         await updateApplicantStatus(rejectCandidate.id, "REJECTED", finalNotes);
         if (typeof window !== "undefined") {
@@ -859,7 +795,7 @@ function Applicants() {
     }
     setRejectCandidate(null);
     fetchApplicants();
-  };
+  }); };
 
   const handleDownloadPDF = (name: string) => {
     toast.success(`Downloading resume for ${name}...`, {
@@ -869,6 +805,7 @@ function Applicants() {
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="w-full min-w-0 space-y-6">
         {/* Clean Executive Header */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -1240,7 +1177,7 @@ function Applicants() {
                     >
                       {loadingSummaryId === a.id ? (
                         <>
-                          <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin" />
+                          <ButtonSpinner className="h-3.5 w-3.5 animate-spin" />
                           <span>{aiSummaries[a.id] ? "Regenerating..." : "Analyzing..."}</span>
                         </>
                       ) : aiSummaries[a.id] ? (
@@ -1260,7 +1197,7 @@ function Applicants() {
                   {loadingSummaryId === a.id ? (
                     <div className="py-5 sm:py-6 flex flex-col items-center justify-center gap-2 text-center rounded-xl border border-primary/20 bg-primary-soft/30 animate-pulse">
                       <div className="relative flex items-center justify-center">
-                        <HiOutlineArrowPath className="h-6 w-6 animate-spin text-primary" />
+                        <ButtonSpinner className="h-6 w-6 animate-spin text-primary" />
                         <BotMessageSquare className="h-3 w-3 text-primary absolute" />
                       </div>
                       <div className="space-y-0.5 px-3">
@@ -1285,9 +1222,9 @@ function Applicants() {
 
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={async () => {
                             if (aiSummaries[a.id]) {
-                              navigator.clipboard.writeText(aiSummaries[a.id]);
+                              if (!await copyText(aiSummaries[a.id])) return;
                               setCopiedSummaryId(a.id);
                               toast.success("Clinical summary copied to clipboard");
                               setTimeout(() => setCopiedSummaryId(null), 2000);
@@ -1473,7 +1410,7 @@ function Applicants() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleMarkNoShow(a)}
+                            disabled={pageAction.isPending} onClick={() => handleMarkNoShow(a)}
                             className="rounded-xl text-xs font-semibold text-foreground border-input hover:border-primary/40 cursor-pointer"
                           >
                             Mark No-Show
@@ -1564,7 +1501,7 @@ function Applicants() {
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => handleConfirmShift(a)}
+                            disabled={pageAction.isPending} onClick={() => handleConfirmShift(a)}
                             className="rounded-xl text-xs font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             Confirm Shift
@@ -1586,7 +1523,7 @@ function Applicants() {
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => handleInvite(a)}
+                            disabled={pageAction.isPending} onClick={() => handleInvite(a)}
                             className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             Invite to interview
@@ -1606,7 +1543,7 @@ function Applicants() {
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => handleInvite(a)}
+                            disabled={pageAction.isPending} onClick={() => handleInvite(a)}
                             className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             Invite to interview
@@ -1626,7 +1563,7 @@ function Applicants() {
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => handleMakeOffer(a)}
+                            disabled={pageAction.isPending} onClick={() => handleMakeOffer(a)}
                             className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             Extend offer
@@ -1646,7 +1583,7 @@ function Applicants() {
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => handleHire(a)}
+                            disabled={pageAction.isPending} onClick={() => handleHire(a)}
                             className="rounded-xl text-xs font-semibold shadow-2xs bg-success hover:bg-success/90 text-white cursor-pointer"
                           >
                             Confirm Hired
@@ -1873,7 +1810,7 @@ function Applicants() {
                         </Button>
                         <Button
                           size="sm"
-                          onClick={() => {
+                          disabled={pageAction.isPending} onClick={() => {
                             handleConfirmShift(selectedResume);
                             setSelectedResume(null);
                           }}
@@ -1903,7 +1840,7 @@ function Applicants() {
                       {(selectedResume.status === "New" || selectedResume.status === "Shortlisted") && (
                         <Button
                           size="sm"
-                          onClick={() => {
+                          disabled={pageAction.isPending} onClick={() => {
                             handleInvite(selectedResume);
                             setSelectedResume(null);
                           }}
@@ -1916,7 +1853,7 @@ function Applicants() {
                       {selectedResume.status === "Interview" && (
                         <Button
                           size="sm"
-                          onClick={() => {
+                          disabled={pageAction.isPending} onClick={() => {
                             handleMakeOffer(selectedResume);
                             setSelectedResume(null);
                           }}
@@ -1929,7 +1866,7 @@ function Applicants() {
                       {selectedResume.status === "Offer" && (
                         <Button
                           size="sm"
-                          onClick={() => {
+                          disabled={pageAction.isPending} onClick={() => {
                             handleHire(selectedResume);
                             setSelectedResume(null);
                           }}
@@ -2036,7 +1973,7 @@ function Applicants() {
                 <Button
                   type="button"
                   size="sm"
-                  disabled={submittingReject}
+                  disabled={pageAction.isPending || (submittingReject)}
                   onClick={handleConfirmReject}
                   className="rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer"
                 >
@@ -2073,7 +2010,7 @@ function Applicants() {
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground font-medium">Scheduled Duty</span>
                   <span className="font-bold text-foreground">
-                    {verifyTimesheetModalApp.scheduledHours || 8} hrs @ ₹{(verifyTimesheetModalApp.hourlyRate || 500).toLocaleString("en-IN")}/hr
+                    {verifyTimesheetModalApp.scheduledHours || 8} hrs @ ₹{(verifyTimesheetModalApp.hourlyRate || 0).toLocaleString("en-IN")}/hr
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -2085,7 +2022,7 @@ function Applicants() {
                 <div className="flex justify-between items-center pt-1 border-t border-border">
                   <span className="text-muted-foreground font-medium">Total Locked Escrow</span>
                   <span className="font-bold text-primary">
-                    ₹{((verifyTimesheetModalApp.hourlyRate || 500) * (verifyTimesheetModalApp.scheduledHours || 8)).toLocaleString("en-IN")}
+                    ₹{((verifyTimesheetModalApp.hourlyRate || 0) * (verifyTimesheetModalApp.scheduledHours || 8)).toLocaleString("en-IN")}
                   </span>
                 </div>
               </div>
@@ -2123,13 +2060,13 @@ function Applicants() {
                   <div className="flex justify-between text-foreground font-medium">
                     <span>Clinician Gross Payout ({verifyHoursInput} hrs):</span>
                     <span className="font-bold text-foreground">
-                      ₹{((verifyTimesheetModalApp.hourlyRate || 500) * verifyHoursInput).toLocaleString("en-IN")}
+                      ₹{((verifyTimesheetModalApp.hourlyRate || 0) * verifyHoursInput).toLocaleString("en-IN")}
                     </span>
                   </div>
                   <div className="pt-1 border-t border-emerald-200 dark:border-emerald-900/40 flex justify-between font-bold text-emerald-700 dark:text-emerald-400">
                     <span>Auto-Refund to Hospital Wallet:</span>
                     <span>
-                      ₹{((verifyTimesheetModalApp.hourlyRate || 500) * ((verifyTimesheetModalApp.scheduledHours || 8) - verifyHoursInput)).toLocaleString("en-IN")}
+                      ₹{((verifyTimesheetModalApp.hourlyRate || 0) * ((verifyTimesheetModalApp.scheduledHours || 8) - verifyHoursInput)).toLocaleString("en-IN")}
                     </span>
                   </div>
                 </div>
@@ -2142,20 +2079,20 @@ function Applicants() {
                   <div className="flex justify-between text-foreground font-medium">
                     <span>Approved Clinician Gross ({verifyHoursInput} hrs):</span>
                     <span className="font-bold text-foreground">
-                      ₹{((verifyTimesheetModalApp.hourlyRate || 500) * verifyHoursInput).toLocaleString("en-IN")}
+                      ₹{((verifyTimesheetModalApp.hourlyRate || 0) * verifyHoursInput).toLocaleString("en-IN")}
                     </span>
                   </div>
                   <div className="pt-1 border-t border-amber-200 dark:border-amber-900/40 flex justify-between font-bold text-amber-800 dark:text-amber-300">
                     <span>Extra Escrow Debited from Wallet:</span>
                     <span>
-                      ₹{((verifyTimesheetModalApp.hourlyRate || 500) * (verifyHoursInput - (verifyTimesheetModalApp.scheduledHours || 8))).toLocaleString("en-IN")}
+                      ₹{((verifyTimesheetModalApp.hourlyRate || 0) * (verifyHoursInput - (verifyTimesheetModalApp.scheduledHours || 8))).toLocaleString("en-IN")}
                     </span>
                   </div>
                 </div>
               ) : (
                 <div className="rounded-2xl border border-muted bg-muted/40 p-3 text-xs text-muted-foreground flex items-center gap-2">
                   <HiOutlineShieldCheck className="h-4 w-4 shrink-0 text-primary" />
-                  <span>Full scheduled escrow of ₹{((verifyTimesheetModalApp.hourlyRate || 500) * (verifyTimesheetModalApp.scheduledHours || 8)).toLocaleString("en-IN")} will be verified and disbursed to the clinician.</span>
+                  <span>Full scheduled escrow of ₹{((verifyTimesheetModalApp.hourlyRate || 0) * (verifyTimesheetModalApp.scheduledHours || 8)).toLocaleString("en-IN")} will be verified and disbursed to the clinician.</span>
                 </div>
               )}
             </div>
@@ -2170,7 +2107,7 @@ function Applicants() {
                 Cancel
               </Button>
               <Button
-                disabled={submittingVerifyTimesheet}
+                disabled={pageAction.isPending || (submittingVerifyTimesheet)}
                 onClick={handleApproveTimesheet}
                 className="rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
               >
@@ -2227,7 +2164,7 @@ function Applicants() {
                 Cancel
               </Button>
               <Button
-                disabled={submittingDispute}
+                disabled={pageAction.isPending || (submittingDispute)}
                 onClick={handleConfirmDispute}
                 className="rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer"
               >
@@ -2337,7 +2274,7 @@ function Applicants() {
                 Skip
               </Button>
               <Button
-                disabled={submittingRating}
+                disabled={pageAction.isPending || (submittingRating)}
                 onClick={handleSubmitRating}
                 className="rounded-xl font-bold text-xs bg-amber-500 hover:bg-amber-600 text-white shadow-xs cursor-pointer gap-1.5"
               >

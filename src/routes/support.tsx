@@ -1,3 +1,6 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useMemo, useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -184,6 +187,8 @@ const faqs: FAQItem[] = [
 ];
 
 function SupportPage() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const s = useApp();
   const isFacility = s.portal === "facility";
   const [copiedType, setCopiedType] = useState<"email" | "phone" | null>(null);
@@ -314,7 +319,6 @@ function SupportPage() {
   };
 
   const fetchMyTickets = async () => {
-    if (!isApiEnabled) return;
     setIsLoadingTickets(true);
     try {
       const list = await getMyTickets();
@@ -324,6 +328,7 @@ function SupportPage() {
         loadTicketDetails(list[0]);
       }
     } catch (err) {
+      pageLoad.fail(err);
       console.warn("Could not fetch user tickets", err);
     } finally {
       setIsLoadingTickets(false);
@@ -332,7 +337,7 @@ function SupportPage() {
 
   useEffect(() => {
     fetchMyTickets();
-  }, [activeMainTab]);
+  }, [activeMainTab, pageLoad.retryKey]);
 
   const copyToClipboard = async (text: string, type: "email" | "phone") => {
     try {
@@ -347,15 +352,14 @@ function SupportPage() {
     }
   };
 
-  const handleTicketSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleTicketSubmit = async (e: React.FormEvent) => { e.preventDefault(); await pageAction.run(async () => {
     if (!fullName.trim() || !email.trim() || !message.trim()) {
       toast.error("Please complete all required fields.");
       return;
     }
 
     setIsSubmitting(true);
-    if (isApiEnabled) {
+    {
       try {
         const created = await createSupportTicket(subject || "Support Inquiry", category, message);
         setSubmittedTicket({
@@ -370,26 +374,13 @@ function SupportPage() {
           description: `Ticket #${created.id} is active and assigned.`,
         });
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error(err.message || "Failed to create support ticket.");
       } finally {
         setIsSubmitting(false);
       }
-    } else {
-      setTimeout(() => {
-        setIsSubmitting(false);
-        const ticketRef = `FALE-${urgency === "emergency" ? "EMG" : "CARE"}-${Math.floor(10000 + Math.random() * 90000)}`;
-        setSubmittedTicket({
-          id: ticketRef,
-          category,
-          urgency,
-          timestamp: "Just now",
-        });
-        toast.success("Support ticket registered!", {
-          description: `Ticket #${ticketRef} logged.`,
-        });
-      }, 700);
     }
-  };
+  }); };
 
   const handleTrackTicket = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -398,7 +389,7 @@ function SupportPage() {
       return;
     }
     const cleanId = trackIdInput.trim().toLowerCase();
-    if (isApiEnabled) {
+    {
       try {
         const tickets = await getMyTickets();
         setMyTickets(tickets || []);
@@ -412,25 +403,12 @@ function SupportPage() {
           toast.error(`Ticket #${trackIdInput.trim()} not found in your account.`);
         }
       } catch (err: any) {
+      pageLoad.fail(err);
         toast.error("Failed to retrieve ticket status: " + (err.message || "Network error"));
       }
       return;
     }
-    const isEmg = cleanId.includes("emg");
-    setTrackedStatus({
-      id: trackIdInput.trim(),
-      status: isEmg ? "Active Clinical Dispatch · Level 1 Expedited" : "In Review with Senior Clinical Lead",
-      rawStatus: isEmg ? "IN_PROGRESS" : "OPEN",
-      step: isEmg ? 3 : 2,
-      agent: "Dr. Kavitha Menon (Chief Healthcare Operations Lead)",
-      eta: isEmg ? "Within 15 minutes" : "Within 45 minutes",
-      type: "Clinical Credential & 24-Hr Escrow Review",
-      lastUpdate: "3 mins ago (Automated timesheet verification check)",
-      badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
-      dotClass: "bg-amber-500",
-      pulse: true,
-    });
-    toast.success(`Ticket #${trackIdInput.trim()} retrieved successfully`);
+
   };
 
   const handleFeedback = (faqId: string, val: "yes" | "no") => {
@@ -451,6 +429,7 @@ function SupportPage() {
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="w-full min-w-0 space-y-10 pb-24 max-w-6xl mx-auto">
         {/* ================= 1. MINIMALIST EXECUTIVE HERO ================= */}
         <div className="relative pt-6 sm:pt-10 pb-2 text-center space-y-4">
@@ -1065,7 +1044,7 @@ function SupportPage() {
                       Enter any ticket reference ID or select from your submitted inquiries below.
                     </p>
                   </div>
-                  {isApiEnabled && (
+                  {(
                     <Button
                       type="button"
                       variant="outline"
@@ -1094,37 +1073,7 @@ function SupportPage() {
                 </form>
 
                 {/* Quick sample ticket triggers when API is offline */}
-                {!trackedStatus && !isApiEnabled && (
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="text-[11px] font-semibold">Try sample tickets:</span>
-                    {["FALE-CARE-84920", "FALE-EMG-10492"].map((sample) => (
-                      <button
-                        key={sample}
-                        type="button"
-                        onClick={() => {
-                          setTrackIdInput(sample);
-                          const isEmg = sample.includes("EMG");
-                          setTrackedStatus({
-                            id: sample,
-                            status: isEmg ? "Active Clinical Dispatch · Level 1 Expedited" : "In Review with Senior Clinical Lead",
-                            rawStatus: isEmg ? "IN_PROGRESS" : "OPEN",
-                            step: isEmg ? 3 : 2,
-                            agent: "Dr. Kavitha Menon (Chief Healthcare Operations Lead)",
-                            eta: isEmg ? "Within 15 minutes" : "Within 45 minutes",
-                            type: "Clinical Credential & 24-Hr Escrow Review",
-                            lastUpdate: "3 mins ago (Automated timesheet verification check)",
-                            badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
-                            dotClass: "bg-amber-500",
-                            pulse: true,
-                          });
-                        }}
-                        className="rounded-lg border border-border/80 bg-muted/40 px-2.5 py-1 font-mono text-[11px] font-bold text-foreground hover:border-primary/50 cursor-pointer"
-                      >
-                        #{sample}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {false}
 
                 {/* Live Milestone Tracker Card */}
                 {trackedStatus && (
@@ -1375,14 +1324,14 @@ function SupportPage() {
                   },
                   {
                     level: "Level 2: Clinical Grievance Redressal Officer",
-                    role: "Dr. Ananya Sundaram (Head of Quality & Compliance)",
+                    role: "Quality & Compliance Team",
                     tat: "SLA: Within 24 Hours",
                     contact: "grievance@thefale.com · Desk Extension: #104",
                     desc: "Handles hospital contractual disagreements, clinician conduct disputes, and ICU/OT ratio compliance concerns.",
                   },
                   {
                     level: "Level 3: Principal Nodal Officer",
-                    role: "Arjun Verma (Nodal Officer for Institutional Escrows & Regulatory Compliance)",
+                    role: "Institutional Escrow Support Team",
                     tat: "SLA: Within 48 Hours",
                     contact: "nodal.officer@thefale.com",
                     desc: "Statutory escalation for RBI nodal banking settlement questions, institutional audits, and legal notices.",

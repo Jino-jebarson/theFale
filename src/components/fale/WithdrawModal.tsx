@@ -1,3 +1,6 @@
+import { useRef } from "react";
+import { toast } from "sonner";
+import { errorMessage } from "@/lib/errorMessage";
 import { useState } from "react";
 import { HiXMark, HiOutlineArrowUturnLeft, HiOutlineExclamationTriangle } from "react-icons/hi2";
 import { Button } from "@/components/ui/button";
@@ -5,7 +8,7 @@ import { Button } from "@/components/ui/button";
 interface WithdrawModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (reason: string, notes: string) => void;
+  onConfirm: (reason: string, notes: string) => void | boolean | Promise<void | boolean>;
   jobTitle: string;
   orgName: string;
 }
@@ -23,16 +26,16 @@ export function WithdrawModal({ isOpen, onClose, onConfirm, jobTitle, orgName }:
   const [selectedReason, setSelectedReason] = useState<string>(reasons[0] ?? "Other");
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitting = useRef(false);
 
   if (!isOpen) return null;
 
-  const handleConfirm = () => {
-    setIsSubmitting(true);
-    setTimeout(() => {
-      onConfirm(selectedReason, notes.trim());
-      setIsSubmitting(false);
-      onClose();
-    }, 250);
+  const handleConfirm = async () => {
+    if (submitting.current) return;
+    submitting.current = true; setIsSubmitting(true);
+    try { const saved = await onConfirm(selectedReason, notes.trim()); if (saved !== false) onClose(); }
+    catch (error) { toast.error(errorMessage(error)); }
+    finally { submitting.current = false; setIsSubmitting(false); }
   };
 
   return (

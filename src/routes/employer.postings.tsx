@@ -1,3 +1,6 @@
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
+import { usePageLoad } from "@/hooks/use-page-load";
+import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useMemo } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -61,6 +64,8 @@ export const Route = createFileRoute("/employer/postings")({
 });
 
 function EmployerPostings() {
+  const pageLoad = usePageLoad();
+  const pageAction = useConfirmedAction();
   const s = useApp();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"jobs" | "shifts">("jobs");
@@ -78,18 +83,17 @@ function EmployerPostings() {
   const [loading, setLoading] = useState(isApiEnabled);
 
   const fetchPostings = (silent = false) => {
-    if (!isApiEnabled) return;
     if (!silent) setLoading(true);
     Promise.all([
-      getFacilityJobs().catch(() => null),
-      getFacilityShifts().catch(() => null),
-      getFacilityApplicants().catch(() => null),
+      getFacilityJobs(),
+      getFacilityShifts(),
+      getFacilityApplicants(),
     ])
       .then(([fJobs, fShifts, fApps]) => {
         if (fJobs) setApiJobs(fJobs);
         if (fShifts) setApiShifts(fShifts);
         if (fApps) setApiApplicants(fApps);
-      })
+      }).catch(pageLoad.fail)
       .finally(() => {
         if (!silent) setLoading(false);
       });
@@ -97,7 +101,6 @@ function EmployerPostings() {
 
   useEffect(() => {
     fetchPostings(false);
-    if (!isApiEnabled) return;
     const handleAppsUpdated = () => fetchPostings(true);
     window.addEventListener("fale:applications-updated", handleAppsUpdated);
     const detachAutoRefresh = attachFocusAndPollRefresh(() => fetchPostings(true), 15000);
@@ -105,13 +108,13 @@ function EmployerPostings() {
       window.removeEventListener("fale:applications-updated", handleAppsUpdated);
       detachAutoRefresh();
     };
-  }, []);
+  }, [pageLoad.retryKey]);
 
-  const handleConfirmCancelShift = async () => {
+  const handleConfirmCancelShift = async () => { await pageAction.run(async () => {
     if (!shiftToCancel) return;
     setCancellingShift(true);
     try {
-      if (isApiEnabled) {
+      {
         await cancelShift(shiftToCancel.id);
       }
       setApiShifts((prev) => prev.map((x) => (x.id === shiftToCancel.id ? { ...x, status: "CANCELLED" } : x)));
@@ -126,11 +129,11 @@ function EmployerPostings() {
     } finally {
       setCancellingShift(false);
     }
-  };
+  }); };
 
   // Map jobs
   const allJobs = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return apiJobs.map((j) => {
         const minRupees = j.salaryMinPaise ? paiseToRupees(j.salaryMinPaise) : Number(j.salaryMin || 0);
         const maxRupees = j.salaryMaxPaise ? paiseToRupees(j.salaryMaxPaise) : Number(j.salaryMax || 0);
@@ -144,7 +147,7 @@ function EmployerPostings() {
           id: j.id,
           title: j.title,
           dept: j.department || "Clinical Medicine",
-          city: j.city || "Chennai",
+          city: j.city || "",
           workLocation: j.workLocation || j.city || "Main Campus",
           openings: j.openings || 1,
           employmentType: j.employmentType || "Full-time",
@@ -167,31 +170,13 @@ function EmployerPostings() {
       });
     }
 
-    // Mock data fallback
-    return (s.postedJobs.length > 0 ? s.postedJobs : jobs.slice(0, 4)).map((j: any) => ({
-      id: j.id,
-      title: j.title,
-      dept: j.dept || "General Medicine",
-      city: j.city || "Chennai",
-      workLocation: j.workLocation || j.city || "Main Hospital Campus",
-      openings: j.openings || 2,
-      employmentType: j.type || "Full-time",
-      minSalary: 45000,
-      maxSalary: 75000,
-      salaryDisplay: j.salary || "₹45k–₹75k/mo",
-      status: "Active",
-      rawStatus: "ACTIVE",
-      applicantsCount: (s.adminApplications || []).filter((a) => a.jobId === j.id).length || 1,
-      postedDate: "Recent",
-      experienceRequired: j.exp || "2-5 yrs",
-      qualificationRequired: j.qualification || "State Council Registration",
-      description: "Comprehensive medical and clinical care in a collaborative setting.",
-    }));
+
+
   }, [isApiEnabled, apiJobs, apiApplicants, s.postedJobs, s.adminApplications]);
 
   // Map shifts
   const allShifts = useMemo(() => {
-    if (isApiEnabled) {
+    {
       return apiShifts.map((sh: any) => {
         let uiStatus = "Live Broadcast";
         if (sh.status === "FILLED" || sh.status === "COMPLETED") uiStatus = "Clinician Assigned";
@@ -200,7 +185,7 @@ function EmployerPostings() {
         else if (sh.status === "REJECTED") uiStatus = "Rejected";
         else if (sh.status === "EXPIRED") uiStatus = "Expired";
 
-        const perWorkerTotal = sh.totalPayNumber || ((sh.rate || 650) * (sh.hours || 8));
+        const perWorkerTotal = sh.totalPayNumber || ((sh.rate || 0) * (sh.hours || 8));
         const totalEscrow = sh.totalEscrowRequiredPaise ? paiseToRupees(sh.totalEscrowRequiredPaise) : perWorkerTotal * (sh.slots || 1);
 
         return {
@@ -210,7 +195,7 @@ function EmployerPostings() {
           date: sh.date || "Today",
           timeSlot: sh.time || sh.timeSlot || `${sh.startTime || "08:00"} - ${sh.endTime || "16:00"}`,
           hours: sh.hours || 8,
-          rate: sh.rate || 650,
+          rate: sh.rate || 0,
           totalPayout: perWorkerTotal,
           totalEscrow,
           facilityFeePercent: sh.facilityFeePercent ?? 0,
@@ -224,24 +209,7 @@ function EmployerPostings() {
       });
     }
 
-    return shifts.slice(0, 4).map((sh) => ({
-      id: sh.id,
-      title: sh.role,
-      dept: sh.dept,
-      date: sh.date,
-      timeSlot: sh.timing,
-      hours: 8,
-      rate: sh.rate,
-      totalPayout: sh.total,
-      totalEscrow: sh.total * 2,
-      facilityFeePercent: 0,
-      autoApproved: false,
-      slots: 2,
-      slotsClaimed: 1,
-      status: "Live Broadcast",
-      rawStatus: "OPEN",
-      urgency: "Urgent",
-    }));
+
   }, [isApiEnabled, apiShifts]);
 
   // Filtered lists
@@ -284,6 +252,7 @@ function EmployerPostings() {
 
   return (
     <AppShell>
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="w-full min-w-0 space-y-6">
         {/* Executive Header & Quick Post Actions */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -797,7 +766,7 @@ function EmployerPostings() {
                 type="button"
                 variant="destructive"
                 size="sm"
-                disabled={cancellingShift}
+                disabled={pageAction.isPending || (cancellingShift)}
                 onClick={handleConfirmCancelShift}
                 className="h-9 px-4 rounded-xl text-xs font-bold w-full sm:w-auto cursor-pointer"
               >

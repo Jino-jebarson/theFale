@@ -1,24 +1,25 @@
 // src/lib/api.ts
 // Unified API client layer for The Fale Healthcare Platform
 
-export const isApiEnabled = import.meta.env.VITE_USE_API === "true";
+// API-only application. Kept as a compatibility export for existing consumers.
+export const isApiEnabled: boolean = true;
 
 export const API_BASE_URL: string =
-  (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") ||
+  (import.meta.env["VITE_API_URL"] as string | undefined)?.replace(/\/+$/, "") ||
   "http://localhost:8080/api/v1";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. IN-MEMORY TOKEN MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 let inMemoryAccessToken: string | null = null;
-let isRefreshing = false;
-let refreshSubscribers: Array<(token: string | null) => void> = [];
+let refreshPromise: Promise<Record<string, unknown>> | null = null;
 
 export function getAccessToken(): string | null {
   return inMemoryAccessToken;
 }
 
 export function setAccessToken(token: string | null): void {
+  if (token === null || token !== inMemoryAccessToken) clearReadCache();
   inMemoryAccessToken = token;
 }
 
@@ -32,15 +33,6 @@ export function expireAccessTokenForTesting(): void {
 
 if (import.meta.env.DEV && typeof window !== "undefined") {
   (window as any).__expireAccessToken = expireAccessTokenForTesting;
-}
-
-function subscribeTokenRefresh(cb: (token: string | null) => void) {
-  refreshSubscribers.push(cb);
-}
-
-function onRefreshed(token: string | null) {
-  refreshSubscribers.forEach((cb) => cb(token));
-  refreshSubscribers = [];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,8 +85,9 @@ export interface ApiErrorResponse {
 
 export class ApiError extends Error {
   status: number;
-  validationErrors?: Record<string, string>;
-  rawResponse?: unknown;
+  validationErrors: Record<string, string> | undefined;
+  rawResponse: unknown;
+  retryAfterSeconds: number | undefined;
 
   constructor(
     message: string,
@@ -140,147 +133,188 @@ export function generateIdempotencyKey(): string {
 export interface RequestOptions extends RequestInit {
   skipAuth?: boolean;
   skipRefresh?: boolean;
+  timeoutMs?: number;
+  retry?: boolean;
+  /** Successful reads may be reused briefly; 0 disables reuse after completion. */
+  cacheMs?: number;
+  validate?: ((value: unknown) => boolean) | undefined;
 }
 
-export async function apiFetch<T = unknown>(
-  endpoint: string,
-  options: RequestOptions = {}
-): Promise<T> {
-  let cleanEndpoint = endpoint;
-  if (cleanEndpoint.startsWith("/api/v1/")) {
-    cleanEndpoint = cleanEndpoint.replace(/^\/api\/v1/, "");
-  }
-  const url = cleanEndpoint.startsWith("http")
-    ? cleanEndpoint
-    : `${API_BASE_URL}${cleanEndpoint.startsWith("/") ? "" : "/"}${cleanEndpoint}`;
+interface PayloadResponse { response: Response; payload: unknown }
 
-  const headers = new Headers(options.headers || {});
-
-  if (!options.skipAuth && inMemoryAccessToken) {
-    headers.set("Authorization", `Bearer ${inMemoryAccessToken}`);
-  }
-
-  // Idempotency key for critical mutations
-  if (
-    shouldAttachIdempotencyKey(endpoint, options.method) &&
-    !headers.has("Idempotency-Key")
-  ) {
-    headers.set("Idempotency-Key", generateIdempotencyKey());
-  }
-
-  // JSON content type by default unless body is FormData or already defined
-  if (
-    options.body &&
-    !(options.body instanceof FormData) &&
-    !headers.has("Content-Type")
-  ) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const fetchOptions: RequestInit = {
-    ...options,
-    headers,
-    credentials: "include", // Refresh token HttpOnly cookie is always attached
-  };
-
-  let response: Response;
+async function requestPayload(url: string, init: RequestInit, timeoutMs: number): Promise<PayloadResponse> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abort = () => controller.abort();
+  if (init.signal?.aborted) controller.abort();
+  init.signal?.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   try {
-    response = await fetch(url, fetchOptions);
-  } catch (err: unknown) {
-    const errorMsg =
-      err instanceof Error ? err.message : "Network error or server unreachable";
-    throw new ApiError(`Network request failed: ${errorMsg}`, 0);
-  }
-
-  // Handle 401 Unauthorized: Attempt token refresh once, then replay or logout
-  if (response.status === 401 && !options.skipRefresh && endpoint !== "/auth/refresh" && endpoint !== "/auth/logout") {
-    if (isRefreshing) {
-      // Refresh in flight: wait for new token and replay request
-      return new Promise<T>((resolve, reject) => {
-        subscribeTokenRefresh(async (newToken) => {
-          if (!newToken) {
-            return reject(new ApiError("Session expired. Please sign in again.", 401));
-          }
-          headers.set("Authorization", `Bearer ${newToken}`);
-          try {
-            const replayed = await fetch(url, { ...fetchOptions, headers });
-            const data = await parseResponse<T>(replayed);
-            resolve(data);
-          } catch (replayErr) {
-            reject(replayErr);
-          }
-        });
-      });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const body = await response.text();
+    let payload: unknown = null;
+    if (body) {
+      try { payload = JSON.parse(body); }
+      catch {
+        if (response.ok) throw new ApiError("The server returned an invalid response.", 502);
+        payload = null;
+      }
     }
+    return { response, payload };
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause;
+    if (timedOut) throw new ApiError("The request timed out. Please try again.", 408);
+    if (init.signal?.aborted) throw new ApiError("Request cancelled.", 499);
+    throw new ApiError("Cannot reach the server. Please try again.", 0);
+  } finally {
+    clearTimeout(timer);
+    init.signal?.removeEventListener("abort", abort);
+  }
+}
 
-    isRefreshing = true;
+function parsePayload<T>({ response, payload }: PayloadResponse): T {
+  const object = payload && typeof payload === "object" ? payload as Record<string, unknown> : null;
+  if (!response.ok || object?.["success"] === false) {
+    const status = response.ok ? 422 : response.status;
+    const validation = object?.["validationErrors"];
+    const error = new ApiError(
+      typeof object?.["message"] === "string" ? object["message"] : "Request failed (" + status + ").",
+      status,
+      validation && typeof validation === "object" ? validation as Record<string, string> : undefined,
+      payload,
+    );
+    const retryAfter = response.headers.get("Retry-After");
+    if (retryAfter) {
+      const seconds = Number(retryAfter);
+      const delay = Number.isFinite(seconds) ? seconds : (Date.parse(retryAfter) - Date.now()) / 1000;
+      if (Number.isFinite(delay)) error.retryAfterSeconds = Math.max(0, Math.ceil(delay));
+    }
+    throw error;
+  }
+  if (object && "success" in object && typeof object["success"] !== "boolean") {
+    throw new ApiError("The server returned an invalid response.", 502);
+  }
+  if (response.status !== 204 && response.status !== 205 && (payload === null || typeof payload !== "object")) {
+    throw new ApiError("The server returned an invalid response.", 502);
+  }
+  if (object?.["success"] === true && "data" in object) return object["data"] as T;
+  return payload as T;
+}
+
+function expireSession() {
+  setAccessToken(null);
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("fale:auth-expired"));
+}
+
+async function refreshSessionData(timeoutMs: number): Promise<Record<string, unknown>> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const result = await requestPayload(API_BASE_URL + "/auth/refresh", { method: "POST", credentials: "include" }, timeoutMs);
+      if (result.response.status === 401 || result.response.status === 403) expireSession();
+      const auth = parsePayload<Record<string, unknown>>(result);
+      const token = auth?.["accessToken"];
+      if (typeof token !== "string" || !token.trim()) throw new ApiError("The server returned an invalid session response.", 502);
+      setAccessToken(token);
+      return auth;
+    })().finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
+async function apiFetchNetwork<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const { skipAuth = false, skipRefresh = false, timeoutMs = 15000, retry = true, validate, ...init } = options;
+  const cleanEndpoint = endpoint.replace(/^\/api\/v1(?=\/)/, "");
+  const url = /^https?:\/\//.test(cleanEndpoint) ? cleanEndpoint : API_BASE_URL + (cleanEndpoint.startsWith("/") ? "" : "/") + cleanEndpoint;
+  const headers = new Headers(init.headers);
+  if (!skipAuth && getAccessToken()) headers.set("Authorization", "Bearer " + getAccessToken());
+  if (shouldAttachIdempotencyKey(cleanEndpoint, init.method) && !headers.has("Idempotency-Key")) headers.set("Idempotency-Key", generateIdempotencyKey());
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const request: RequestInit = { ...init, headers, credentials: "include" };
+  const limit = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000;
+  if (cleanEndpoint === "/auth/refresh" && (init.method || "GET").toUpperCase() === "POST") {
+    return await refreshSessionData(limit) as T;
+  }
+  const isRead = ["GET", "HEAD"].includes((init.method || "GET").toUpperCase());
+  const attempts = isRead && retry ? 2 : 1;
+  let refreshed = false;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const refreshResponse = await fetch(`${API_BASE_URL}/auth/refresh`, {
-        method: "POST",
-        credentials: "include",
-      });
-
-      if (!refreshResponse.ok) {
-        throw new Error("Refresh failed");
+      let result = await requestPayload(url, request, limit);
+      if (result.response.status === 401 && !skipAuth && !skipRefresh && !cleanEndpoint.startsWith("/auth/") && !refreshed) {
+        const session = await refreshSessionData(limit);
+        const token = session["accessToken"] as string;
+        refreshed = true;
+        headers.set("Authorization", "Bearer " + token);
+        result = await requestPayload(url, request, limit);
+        if (result.response.status === 401) expireSession();
       }
-
-      const refreshData = await refreshResponse.json();
-      const newToken: string | undefined = refreshData?.data?.accessToken || refreshData?.accessToken;
-
-      if (!newToken) {
-        throw new Error("No access token returned from refresh");
-      }
-
-      setAccessToken(newToken);
-      isRefreshing = false;
-      onRefreshed(newToken);
-
-      // Replay original request with new token
-      headers.set("Authorization", `Bearer ${newToken}`);
-      const retriedResponse = await fetch(url, { ...fetchOptions, headers });
-      return parseResponse<T>(retriedResponse);
-    } catch {
-      isRefreshing = false;
-      setAccessToken(null);
-      onRefreshed(null);
-
-      // Dispatch global auth expired event for UI store logout
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("fale:auth-expired"));
-      }
-      throw new ApiError("Session expired. Please sign in again.", 401);
+      const data = parsePayload<T>(result);
+      if (validate && !validate(data)) throw new ApiError("The server returned an unexpected response.", 502);
+      return data;
+    } catch (error) {
+      const transient = error instanceof ApiError && [0, 502, 503, 504].includes(error.status);
+      if (!(transient && attempt + 1 < attempts)) throw error;
     }
   }
-
-  return parseResponse<T>(response);
+  throw new ApiError("The request failed.", 503);
 }
 
-async function parseResponse<T>(response: Response): Promise<T> {
-  let json: unknown;
-  const text = await response.text();
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = text;
+// Memory only, scoped to the current session. Writes invalidate all reads because
+// a single action can affect profiles, badges, lists and wallet totals together.
+let readGeneration = 0;
+const readResults = new Map<string, { expires: number; data: unknown }>();
+const readRequests = new Map<string, Promise<unknown>>();
+
+export function clearReadCache(): void {
+  readGeneration++;
+  readResults.clear();
+  readRequests.clear();
+}
+
+export async function apiFetch<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const { cacheMs = 10000, validate, ...networkOptions } = options;
+  const method = (options.method || "GET").toUpperCase();
+  const cleanEndpoint = endpoint.replace(/^\/api\/v1(?=\/)/, "");
+  const authRequest = /(?:^|\/)auth\//.test(cleanEndpoint);
+  const read = method === "GET" && !authRequest;
+  if (!read || options.signal || options.cache === "no-store" || options.cache === "reload") {
+    const write = !["GET", "HEAD", "OPTIONS"].includes(method) && !authRequest;
+    if (write) clearReadCache();
+    try { return await apiFetchNetwork<T>(endpoint, { ...networkOptions, validate }); }
+    finally { if (write) clearReadCache(); }
   }
-
-  if (!response.ok) {
-    let msg = `HTTP error ${response.status}`;
-    let validationErrors: Record<string, string> | undefined;
-
-    if (json && typeof json === "object") {
-      const apiResp = json as ApiErrorResponse;
-      if (apiResp.message) msg = apiResp.message;
-      if (apiResp.validationErrors) validationErrors = apiResp.validationErrors;
+  const generation = readGeneration;
+  const key = JSON.stringify([generation, cleanEndpoint, options.skipAuth || false,
+    options.skipRefresh || false, options.timeoutMs || 15000, options.retry !== false,
+    [...new Headers(options.headers).entries()].sort()]);
+  // Credentials and public credential verification must always be freshly read.
+  const ttl = /(?:^|\/)verifications(?:\/|$)/.test(cleanEndpoint) ? 0 : Math.max(0, cacheMs);
+  const cached = readResults.get(key);
+  let data: unknown;
+  if (ttl > 0 && cached && cached.expires > Date.now()) {
+    data = cached.data;
+  } else {
+    if (cached) readResults.delete(key);
+    let request = readRequests.get(key);
+    if (!request) {
+      request = apiFetchNetwork(endpoint, networkOptions);
+      readRequests.set(key, request);
     }
-
-    throw new ApiError(msg, response.status, validationErrors, json);
+    try {
+      data = await request;
+      if (validate && !validate(data)) throw new ApiError("The server returned an unexpected response.", 502);
+      if (ttl > 0 && generation === readGeneration) {
+        if (readResults.size >= 200) readResults.delete(readResults.keys().next().value!);
+        readResults.set(key, { data: structuredClone(data), expires: Date.now() + ttl });
+      }
+    } finally {
+      if (readRequests.get(key) === request) readRequests.delete(key);
+    }
   }
-
-  // If backend wraps payloads in { success: true, data: ... }
-  if (json && typeof json === "object" && "data" in json && "success" in json) {
-    return (json as { data: T }).data;
+  if (validate && !validate(data)) {
+    readResults.delete(key);
+    throw new ApiError("The server returned an unexpected response.", 502);
   }
-
-  return json as T;
+  // Callers can sort or edit local state without changing another screen's data.
+  return structuredClone(data) as T;
 }
