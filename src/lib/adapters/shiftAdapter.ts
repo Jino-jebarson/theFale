@@ -28,6 +28,22 @@ export interface LocumShiftDto {
   description?: string;
   createdAt?: string;
   hasClaimed?: boolean;
+  facilityFeePercent?: number;
+  facilityFeePaise?: number;
+  totalEscrowRequiredPaise?: number;
+  autoApproved?: boolean;
+  matchScore?: number;
+}
+
+export interface FacilityShiftPolicyDto {
+  hasLinkedBank: boolean;
+  kycVerified: boolean;
+  firstShiftApprovalRequired: boolean;
+  firstShiftFeeWaived: boolean;
+  platformFeePercent: number;
+  priorApprovedShiftsCount: number;
+  priorValidShiftsCount: number;
+  availableBalancePaise: number;
 }
 
 export interface ShiftClaimDto {
@@ -63,6 +79,18 @@ export interface ShiftClaimDto {
   checkInTime?: string;
   completionTime?: string;
   disputeReason?: string;
+  disputedAt?: string;
+  disputedBy?: string;
+  platformFeePercent?: number;
+  firstShiftFree?: boolean;
+  checkInPin?: string;
+  hospitalRating?: number;
+  hospitalReview?: string;
+  ratingTags?: string;
+  ratedAt?: string;
+  candidateRatingAvg?: number;
+  candidateRatingCount?: number;
+  completedShiftsCount?: number;
 }
 
 export interface UiShiftItem {
@@ -88,6 +116,15 @@ export interface UiShiftItem {
   rawRatePerHourPaise: number;
   rawTotalPayoutPaise: number;
   hasClaimed?: boolean;
+  surgeRatePerHourPaise?: number;
+  surgeLabel?: string;
+  endAt?: string;
+  description?: string;
+  facilityFeePercent?: number;
+  facilityFeePaise?: number;
+  totalEscrowRequiredPaise?: number;
+  autoApproved?: boolean;
+  matchScore?: number;
 }
 
 export function mapLocumShiftToUi(dto: LocumShiftDto): UiShiftItem {
@@ -134,6 +171,15 @@ export function mapLocumShiftToUi(dto: LocumShiftDto): UiShiftItem {
     rawRatePerHourPaise: dto.ratePerHourPaise,
     rawTotalPayoutPaise: dto.totalPayPaise || dto.totalPayoutPaise || ((dto.ratePerHourPaise + (dto.surgeRatePerHourPaise || 0)) * hours),
     hasClaimed: Boolean(dto.hasClaimed),
+    surgeRatePerHourPaise: dto.surgeRatePerHourPaise || 0,
+    surgeLabel: dto.surgeLabel,
+    endAt: dto.endAt,
+    description: dto.description,
+    facilityFeePercent: dto.facilityFeePercent ?? 0,
+    facilityFeePaise: dto.facilityFeePaise ?? 0,
+    totalEscrowRequiredPaise: dto.totalEscrowRequiredPaise ?? ((dto.totalPayPaise || 0) * (dto.openings || 1)),
+    autoApproved: Boolean(dto.autoApproved),
+    matchScore: dto.matchScore,
   };
 }
 
@@ -157,9 +203,10 @@ export async function getMyClaims(): Promise<ShiftClaimDto[]> {
   return apiFetch<ShiftClaimDto[]>("/shifts/claims");
 }
 
-export async function checkInShift(claimId: string): Promise<ShiftClaimDto> {
+export async function checkInShift(claimId: string, pin?: string): Promise<ShiftClaimDto> {
   return apiFetch<ShiftClaimDto>(`/shifts/claims/${claimId}/check-in`, {
     method: "POST",
+    body: pin ? JSON.stringify({ pin: pin.trim() }) : undefined,
   });
 }
 
@@ -183,6 +230,78 @@ export async function disputeShift(claimId: string, reason?: string): Promise<Sh
   const query = reason ? `?reason=${encodeURIComponent(reason)}` : "";
   return apiFetch<ShiftClaimDto>(`/shifts/claims/${claimId}/dispute${query}`, {
     method: "POST",
+    body: reason ? JSON.stringify({ reason }) : undefined,
+  });
+}
+
+export interface RateShiftClaimPayload {
+  rating: number;
+  review?: string;
+  tags?: string[];
+}
+
+export async function rateShiftClaim(
+  claimId: string,
+  payload: RateShiftClaimPayload
+): Promise<ShiftClaimDto> {
+  return apiFetch<ShiftClaimDto>(`/shifts/claims/${claimId}/rate`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getFacilityShiftPolicy(): Promise<FacilityShiftPolicyDto> {
+  return apiFetch<FacilityShiftPolicyDto>("/shifts/facility/policy");
+}
+
+export async function updateShift(
+  shiftId: string,
+  payload: PostShiftPayload
+): Promise<LocumShiftDto> {
+  const isUrgentVal = Boolean(payload.urgent ?? payload.isUrgent);
+  const bodyData = {
+    title: payload.title.trim(),
+    department: payload.department.trim(),
+    startAt: payload.startAt,
+    endAt: payload.endAt,
+    hours: payload.hours,
+    ratePerHourPaise: Number(payload.ratePerHourPaise),
+    surgeRatePerHourPaise: Number(payload.surgeRatePerHourPaise || 0),
+    surgeLabel: payload.surgeLabel || null,
+    openings: Number(payload.openings),
+    urgent: isUrgentVal,
+    isUrgent: isUrgentVal,
+    description: payload.description || undefined,
+  };
+  return apiFetch<LocumShiftDto>(`/shifts/${shiftId}`, {
+    method: "PUT",
+    body: JSON.stringify(bodyData),
+  });
+}
+
+export async function cancelShift(shiftId: string): Promise<void> {
+  await apiFetch(`/shifts/${shiftId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function getDisputedShiftClaims(): Promise<ShiftClaimDto[]> {
+  return apiFetch<ShiftClaimDto[]>("/admin/shifts/claims/disputed");
+}
+
+export interface ResolveDisputePayload {
+  resolution: "RELEASE_TO_CANDIDATE" | "PARTIAL_SPLIT" | "REFUND_HOSPITAL";
+  approvedHours?: number;
+  notes?: string;
+}
+
+export async function resolveShiftDispute(
+  claimId: string,
+  payload: ResolveDisputePayload
+): Promise<void> {
+  await apiFetch(`/admin/shifts/claims/${claimId}/resolve-dispute`, {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

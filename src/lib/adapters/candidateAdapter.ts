@@ -85,6 +85,10 @@ export interface CandidateProfile {
   kycNotes?: string;
   isMentor?: boolean;
   mentorStatus?: string;
+  shiftRatingAvg?: number;
+  shiftRatingCount?: number;
+  completedShiftsCount?: number;
+  topRated?: boolean;
   verifiedAt?: string;
   createdAt?: string;
   documents: CandidateDocument[];

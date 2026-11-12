@@ -27,6 +27,7 @@ import {
   HiOutlineCamera,
 } from "react-icons/hi2";
 import { RiRobot2Line, RiVerifiedBadgeFill } from "react-icons/ri";
+import { Star } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell, initials } from "@/components/fale/AppShell";
 import { Button, ButtonSpinner } from "@/components/ui/button";
@@ -856,6 +857,16 @@ function Profile() {
                   <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
                   Council Verified
                 </span>
+                {candidateData?.shiftRatingAvg && candidateData?.shiftRatingCount && candidateData.shiftRatingCount > 0 ? (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold border border-amber-500/25 text-[11px] sm:text-xs px-2.5 py-0.5 select-none"
+                    title={`${candidateData.completedShiftsCount || candidateData.shiftRatingCount} completed shifts`}
+                  >
+                    <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500 shrink-0" />
+                    {Number(candidateData.shiftRatingAvg).toFixed(1)}/5 ({candidateData.shiftRatingCount} shifts)
+                    {candidateData.topRated ? " · Top Rated" : ""}
+                  </span>
+                ) : null}
               </div>
 
               {/* Professional Title & Cadre */}

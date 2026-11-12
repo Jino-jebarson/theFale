@@ -244,10 +244,10 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
     if (typeof window !== "undefined") {
       try {
         window.localStorage.removeItem(`${CHAT_STORAGE_PREFIX}${sessionScopeKey}`);
-      } catch {}
+      } catch { }
     }
     if (isApiEnabled && s.signedIn) {
-      clearAllyChatHistory(roleConfig.aiRoleKey).catch(() => {});
+      clearAllyChatHistory(roleConfig.aiRoleKey).catch(() => { });
     }
   };
 
@@ -302,7 +302,7 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
           return [welcomeFirst, ...mapped];
         });
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       active = false;
     };
@@ -375,7 +375,7 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
         prev.map((m) => (m.id === messageId ? { ...m, ticketId: shortId } : m))
       );
       if (targetMsg?.serverId) {
-        attachTicketToAllyMessage(targetMsg.serverId, shortId).catch(() => {});
+        attachTicketToAllyMessage(targetMsg.serverId, shortId).catch(() => { });
       }
       toast.success(`Support Ticket #${shortId} submitted`, {
         description: "Our FALE Operations team has received your conversation context.",
@@ -490,15 +490,15 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
         prev.map((m) =>
           m.id === botMsgId
             ? {
-                ...m,
-                serverId: persistedMessageId,
-                text: cleanedReply,
-                createdAt: Date.now(),
-                action: res.action,
-                actionLabel,
-                suggestions: res.suggestions,
-                isStreaming: false,
-              }
+              ...m,
+              serverId: persistedMessageId,
+              text: cleanedReply,
+              createdAt: Date.now(),
+              action: res.action,
+              actionLabel,
+              suggestions: res.suggestions,
+              isStreaming: false,
+            }
             : m
         )
       );
@@ -508,12 +508,12 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
         prev.map((m) =>
           m.id === botMsgId
             ? {
-                ...m,
-                text: "Ally AI is temporarily unavailable right now. Please try your question again in a moment.",
-                createdAt: Date.now(),
-                isError: true,
-                isStreaming: false,
-              }
+              ...m,
+              text: "Ally AI is temporarily unavailable right now. Please try your question again in a moment.",
+              createdAt: Date.now(),
+              isError: true,
+              isStreaming: false,
+            }
             : m
         )
       );
@@ -621,221 +621,221 @@ export function FlowAIFloatingButton({ className }: AllyFloatingButtonProps) {
             <div className="w-12 h-1.5 rounded-full bg-muted-foreground/30 mx-auto mb-2.5 sm:hidden shrink-0" />
 
             {/* Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-border/60 shrink-0">
-            <div className="flex items-center gap-2.5">
-              <span className="grid h-8.5 w-8.5 place-items-center rounded-2xl bg-[#FF5A1F]/10 text-[#FF5A1F] border border-[#FF5A1F]/20 shadow-2xs">
-                <BotMessageSquare className="h-5 w-5 text-[#FF5A1F]" />
-              </span>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <h3 className="text-xs font-black tracking-tight text-foreground">Ally</h3>
-                  <span className="rounded-full bg-[#FF5A1F]/10 px-1.5 py-0.2 text-[9px] font-bold text-[#FF5A1F]">
-                    AI Copilot
-                  </span>
+            <div className="flex items-center justify-between pb-3 border-b border-border/60 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-8.5 w-8.5 place-items-center rounded-2xl bg-[#FF5A1F]/10 text-[#FF5A1F] border border-[#FF5A1F]/20 shadow-2xs">
+                  <BotMessageSquare className="h-5 w-5 text-[#FF5A1F]" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-xs font-black tracking-tight text-foreground">Ally</h3>
+                    <span className="rounded-full bg-[#FF5A1F]/10 px-1.5 py-0.2 text-[9px] font-bold text-[#FF5A1F]">
+                      AI Copilot
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">{roleConfig.subtitle}</p>
                 </div>
-                <p className="text-[10px] text-muted-foreground">{roleConfig.subtitle}</p>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                {/* Regional Language Switcher */}
+                <Select value={language} onValueChange={(val: any) => setLanguage(val)}>
+                  <SelectTrigger
+                    aria-label="Select Regional Language"
+                    className="h-7 w-[105px] shrink-0 rounded-lg border border-border/70 bg-muted/50 px-2.5 py-0 text-[11px] font-bold text-foreground shadow-2xs hover:bg-muted"
+                  >
+                    <SelectValue placeholder="Language" />
+                  </SelectTrigger>
+                  <SelectContent
+                    align="end"
+                    style={{ width: "auto", minWidth: "170px" }}
+                    className="!w-auto !min-w-[170px] text-xs font-medium shadow-xl bg-white dark:bg-card border border-border/80 p-1 rounded-xl z-[100]"
+                  >
+                    <SelectItem value="en" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
+                      English (EN)
+                    </SelectItem>
+                    <SelectItem value="kn" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
+                      ಕನ್ನಡ (KN)
+                    </SelectItem>
+                    <SelectItem value="ml" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
+                      മലയാളം (ML)
+                    </SelectItem>
+                    <SelectItem value="hi" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
+                      हिन्दी (HI)
+                    </SelectItem>
+                    <SelectItem value="ta" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
+                      தமிழ் (TA)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <button
+                  type="button"
+                  onClick={resetChatToWelcome}
+                  title="New conversation"
+                  className="grid h-7 w-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                  aria-label="Reset Ally chat"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="grid h-7 w-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+                  aria-label="Close Ally"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              {/* Regional Language Switcher */}
-              <Select value={language} onValueChange={(val: any) => setLanguage(val)}>
-                <SelectTrigger
-                  aria-label="Select Regional Language"
-                  className="h-7 w-[105px] shrink-0 rounded-lg border border-border/70 bg-muted/50 px-2.5 py-0 text-[11px] font-bold text-foreground shadow-2xs hover:bg-muted"
-                >
-                  <SelectValue placeholder="Language" />
-                </SelectTrigger>
-                <SelectContent
-                  align="end"
-                  style={{ width: "auto", minWidth: "170px" }}
-                  className="!w-auto !min-w-[170px] text-xs font-medium shadow-xl bg-white dark:bg-card border border-border/80 p-1 rounded-xl z-[100]"
-                >
-                  <SelectItem value="en" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
-                    English (EN)
-                  </SelectItem>
-                  <SelectItem value="kn" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
-                    ಕನ್ನಡ (KN)
-                  </SelectItem>
-                  <SelectItem value="ml" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
-                    മലയാളം (ML)
-                  </SelectItem>
-                  <SelectItem value="hi" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
-                    हिन्दी (HI)
-                  </SelectItem>
-                  <SelectItem value="ta" className="cursor-pointer pr-8 py-2 whitespace-nowrap text-xs font-semibold">
-                    தமிழ் (TA)
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-
-              <button
-                type="button"
-                onClick={resetChatToWelcome}
-                title="New conversation"
-                className="grid h-7 w-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-                aria-label="Reset Ally chat"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                className="grid h-7 w-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-                aria-label="Close Ally"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Conversation Stream */}
-          <div className="flex-1 overflow-y-auto py-3 space-y-3 pr-1 [scrollbar-width:thin]">
-            {messages
-              .filter((m) => !(m.isStreaming && !m.text))
-              .map((m) => (
-              <div
-                key={m.id}
-                className={cn(
-                  "flex flex-col max-w-[88%] text-xs leading-relaxed",
-                  m.sender === "user" ? "ml-auto items-end" : "mr-auto items-start"
-                )}
-              >
-                <div
-                  className={cn(
-                    "rounded-2xl px-3.5 py-2.5",
-                    m.sender === "user"
-                      ? "bg-[#FF5A1F] text-white rounded-br-none font-medium"
-                      : "bg-muted/60 text-foreground border border-border/60 rounded-bl-none"
-                  )}
-                >
-                  <div className="whitespace-pre-line">
-                    {m.text}
-                    {m.isStreaming && (
-                      <span className="inline-block w-1.5 h-3.5 ml-1 align-middle bg-[#FF5A1F] animate-pulse rounded-xs" />
+            {/* Conversation Stream */}
+            <div className="flex-1 overflow-y-auto py-3 space-y-3 pr-1 [scrollbar-width:thin]">
+              {messages
+                .filter((m) => !(m.isStreaming && !m.text))
+                .map((m) => (
+                  <div
+                    key={m.id}
+                    className={cn(
+                      "flex flex-col max-w-[88%] text-xs leading-relaxed",
+                      m.sender === "user" ? "ml-auto items-end" : "mr-auto items-start"
                     )}
-                  </div>
+                  >
+                    <div
+                      className={cn(
+                        "rounded-2xl px-3.5 py-2.5",
+                        m.sender === "user"
+                          ? "bg-[#FF5A1F] text-white rounded-br-none font-medium"
+                          : "bg-muted/60 text-foreground border border-border/60 rounded-bl-none"
+                      )}
+                    >
+                      <div className="whitespace-pre-line">
+                        {m.text}
+                        {m.isStreaming && (
+                          <span className="inline-block w-1.5 h-3.5 ml-1 align-middle bg-[#FF5A1F] animate-pulse rounded-xs" />
+                        )}
+                      </div>
 
-                  {/* Trigger Action Pill / Direct Support Escalation if present */}
-                  {!m.isStreaming && m.action && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
-                      {m.action === "handover_human" && activeRole !== "admin" ? (
-                        <button
-                          type="button"
-                          disabled={creatingTicketMsgId === m.id}
-                          onClick={() =>
-                            m.ticketId
-                              ? executeAction("handover_human")
-                              : handleCreateTicketFromChat(m.id)
-                          }
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-white/95 dark:bg-card px-2.5 py-1.5 text-[11px] font-bold text-[#FF5A1F] border border-[#FF5A1F]/30 shadow-2xs hover:bg-white transition-all cursor-pointer disabled:opacity-60"
-                        >
-                          <Ticket className="h-3.5 w-3.5 text-[#FF5A1F]" />
-                          <span>
-                            {creatingTicketMsgId === m.id
-                              ? "Submitting Ticket..."
-                              : m.ticketId
-                              ? `Ticket #${m.ticketId} Logged · Open Desk`
-                              : "Create Priority Support Ticket"}
-                          </span>
-                          <ArrowRight className="h-3 w-3" />
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => executeAction(m.action!)}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-white/95 dark:bg-card px-2.5 py-1.5 text-[11px] font-bold text-[#FF5A1F] border border-[#FF5A1F]/30 shadow-2xs hover:bg-white transition-all cursor-pointer"
-                        >
-                          <BotMessageSquare className="h-3.5 w-3.5 text-[#FF5A1F]" />
-                          <span>{m.actionLabel || "Open in FALE"}</span>
-                          <ArrowRight className="h-3 w-3" />
-                        </button>
+                      {/* Trigger Action Pill / Direct Support Escalation if present */}
+                      {!m.isStreaming && m.action && (
+                        <div className="mt-2.5 flex flex-wrap gap-1.5">
+                          {m.action === "handover_human" && activeRole !== "admin" ? (
+                            <button
+                              type="button"
+                              disabled={creatingTicketMsgId === m.id}
+                              onClick={() =>
+                                m.ticketId
+                                  ? executeAction("handover_human")
+                                  : handleCreateTicketFromChat(m.id)
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-white/95 dark:bg-card px-2.5 py-1.5 text-[11px] font-bold text-[#FF5A1F] border border-[#FF5A1F]/30 shadow-2xs hover:bg-white transition-all cursor-pointer disabled:opacity-60"
+                            >
+                              <Ticket className="h-3.5 w-3.5 text-[#FF5A1F]" />
+                              <span>
+                                {creatingTicketMsgId === m.id
+                                  ? "Submitting Ticket..."
+                                  : m.ticketId
+                                    ? `Ticket #${m.ticketId} Logged · Open Desk`
+                                    : "Create Priority Support Ticket"}
+                              </span>
+                              <ArrowRight className="h-3 w-3" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => executeAction(m.action!)}
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-white/95 dark:bg-card px-2.5 py-1.5 text-[11px] font-bold text-[#FF5A1F] border border-[#FF5A1F]/30 shadow-2xs hover:bg-white transition-all cursor-pointer"
+                            >
+                              <BotMessageSquare className="h-3.5 w-3.5 text-[#FF5A1F]" />
+                              <span>{m.actionLabel || "Open in FALE"}</span>
+                              <ArrowRight className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
 
-                {/* Suggestions Pills underneath Ally message */}
-                {!m.isStreaming && m.suggestions && m.suggestions.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {m.suggestions.map((sug, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => handleSendMessage(sug)}
-                        className="rounded-full bg-muted/80 hover:bg-muted px-2.5 py-1 text-[11px] font-semibold text-[#FF5A1F] border border-[#FF5A1F]/25 hover:border-[#FF5A1F] transition-all cursor-pointer text-left"
-                      >
-                        {sug}
-                      </button>
-                    ))}
+                    {/* Suggestions Pills underneath Ally message */}
+                    {!m.isStreaming && m.suggestions && m.suggestions.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {m.suggestions.map((sug, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => handleSendMessage(sug)}
+                            className="rounded-full bg-muted/80 hover:bg-muted px-2.5 py-1 text-[11px] font-semibold text-[#FF5A1F] border border-[#FF5A1F]/25 hover:border-[#FF5A1F] transition-all cursor-pointer text-left"
+                          >
+                            {sug}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {!m.isStreaming && (
+                      <span className="text-[9px] text-muted-foreground mt-1 px-1">
+                        {formatChatTimestamp(m.createdAt)}
+                      </span>
+                    )}
                   </div>
-                )}
+                ))}
 
-                {!m.isStreaming && (
-                  <span className="text-[9px] text-muted-foreground mt-1 px-1">
-                    {formatChatTimestamp(m.createdAt)}
+              {loading && messages.every((m) => !(m.isStreaming && m.text.length > 0)) && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground mr-auto bg-muted/40 px-3 py-2 rounded-2xl border border-border/50">
+                  <span className="flex gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce [animation-delay:0.2s]" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce [animation-delay:0.4s]" />
                   </span>
-                )}
-              </div>
-            ))}
+                  <span>Ally is thinking...</span>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
 
-            {loading && messages.every((m) => !(m.isStreaming && m.text.length > 0)) && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mr-auto bg-muted/40 px-3 py-2 rounded-2xl border border-border/50">
-                <span className="flex gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce" />
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce [animation-delay:0.2s]" />
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#FF5A1F] animate-bounce [animation-delay:0.4s]" />
-                </span>
-                <span>Ally is thinking...</span>
-              </div>
-            )}
-            <div ref={chatEndRef} />
-          </div>
-
-          {/* Footer Input Bar */}
-          <div className="pt-2 border-t border-border/60 shrink-0">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage();
-              }}
-              className="relative flex items-center"
-            >
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={
-                  language === "kn"
-                    ? "Ally ಗೆ ಪ್ರಶ್ನೆ ಕೇಳಿ..."
-                    : language === "ml"
-                    ? "Ally യോട് ചോദിക്കൂ..."
-                    : language === "hi"
-                    ? "Ally से पूछें..."
-                    : language === "ta"
-                    ? "Ally யிடம் கேளுங்கள்..."
-                    : roleConfig.placeholder
-                }
-                className="w-full rounded-2xl border border-border/80 bg-background/90 py-2.5 pl-3.5 pr-10 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[#FF5A1F] focus:border-[#FF5A1F]"
-              />
-              <button
-                type="submit"
-                disabled={!input.trim() || loading}
-                className="absolute right-1.5 grid h-7 w-7 place-items-center rounded-xl bg-[#FF5A1F] text-white hover:bg-[#E04A14] disabled:opacity-40 transition-colors cursor-pointer"
-                aria-label="Send"
+            {/* Footer Input Bar */}
+            <div className="pt-2 border-t border-border/60 shrink-0">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSendMessage();
+                }}
+                className="relative flex items-center"
               >
-                <Send className="h-3.5 w-3.5" />
-              </button>
-            </form>
-            <div className="mt-1.5 flex items-center justify-between text-[9px] text-muted-foreground px-1">
-              <span>{roleConfig.footer}</span>
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">● Live AI</span>
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder={
+                    language === "kn"
+                      ? "Ally ಗೆ ಪ್ರಶ್ನೆ ಕೇಳಿ..."
+                      : language === "ml"
+                        ? "Ally യോട് ചോദിക്കൂ..."
+                        : language === "hi"
+                          ? "Ally से पूछें..."
+                          : language === "ta"
+                            ? "Ally யிடம் கேளுங்கள்..."
+                            : roleConfig.placeholder
+                  }
+                  className="w-full rounded-2xl border border-border/80 bg-background/90 py-2.5 pl-3.5 pr-10 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[#FF5A1F] focus:border-[#FF5A1F]"
+                />
+                <button
+                  type="submit"
+                  disabled={!input.trim() || loading}
+                  className="absolute right-1.5 grid h-7 w-7 place-items-center rounded-xl bg-[#FF5A1F] text-white hover:bg-[#E04A14] disabled:opacity-40 transition-colors cursor-pointer"
+                  aria-label="Send"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              </form>
+              <div className="mt-1.5 flex items-center justify-between text-[9px] text-muted-foreground px-1">
+                <span>{roleConfig.footer}</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">● Live AI</span>
+              </div>
             </div>
           </div>
-        </div>
-      </>
-    )}
+        </>
+      )}
 
       {/* Floating Action Trigger Button: White bg, Saffron icon, No shadow, Simple "Ally" */}
       <button

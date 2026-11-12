@@ -46,6 +46,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees } from "@/lib/api";
 import {
+  attachFocusAndPollRefresh,
+  formatApplicationStatus,
   getFacilityJobs,
   getFacilityApplicants,
   getFacilityWallet,
@@ -131,24 +133,41 @@ function EmployerDashboard() {
 
   useEffect(() => {
     if (!isApiEnabled) return;
-    setLoading(true);
-    Promise.all([
-      getFacilityJobs().catch(() => []),
-      getFacilityShifts().catch(() => []),
-      getFacilityApplicants().catch(() => []),
-      getFacilityWallet().catch(() => null),
-      getFacilityProfile().catch(() => null),
-    ])
-      .then(([fJobs, fShifts, fApps, fWallet, fProfile]) => {
-        setApiJobs(fJobs);
-        setApiShifts(fShifts);
-        setApiApplicants(fApps);
-        setApiWallet(fWallet);
-        setApiProfile(fProfile);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+    let isMounted = true;
+
+    const fetchDashboard = (silent = false) => {
+      if (!silent) setLoading(true);
+      Promise.all([
+        getFacilityJobs().catch(() => null),
+        getFacilityShifts().catch(() => null),
+        getFacilityApplicants().catch(() => null),
+        getFacilityWallet().catch(() => null),
+        getFacilityProfile().catch(() => null),
+      ])
+        .then(([fJobs, fShifts, fApps, fWallet, fProfile]) => {
+          if (!isMounted) return;
+          if (fJobs) setApiJobs(fJobs);
+          if (fShifts) setApiShifts(fShifts);
+          if (fApps) setApiApplicants(fApps);
+          if (fWallet) setApiWallet(fWallet);
+          if (fProfile) setApiProfile(fProfile);
+        })
+        .finally(() => {
+          if (isMounted && !silent) setLoading(false);
+        });
+    };
+
+    fetchDashboard(false);
+
+    const handleAppsUpdated = () => fetchDashboard(true);
+    window.addEventListener("fale:applications-updated", handleAppsUpdated);
+    const detachAutoRefresh = attachFocusAndPollRefresh(() => fetchDashboard(true), 15000);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener("fale:applications-updated", handleAppsUpdated);
+      detachAutoRefresh();
+    };
   }, []);
 
   const orgName = isApiEnabled
@@ -245,7 +264,12 @@ function EmployerDashboard() {
         : "₹0";
 
   // Effective applicants list
-  const effectiveApplicants = isApiEnabled ? apiApplicants : applicants;
+  const effectiveApplicants = useMemo(() => {
+    if (isApiEnabled) return apiApplicants;
+    const localApps = s.adminApplications || [];
+    const seen = new Set(localApps.map((a) => a.id));
+    return [...localApps, ...applicants.filter((a) => !seen.has(a.id))];
+  }, [isApiEnabled, apiApplicants, s.adminApplications]);
 
   // Filtered jobs
   const allJobs = useMemo(() => {
@@ -327,7 +351,15 @@ function EmployerDashboard() {
   const shortlistedApplicants = useMemo(() => {
     return effectiveApplicants.filter((a: any) => {
       const st = (a.status || "").toUpperCase();
-      return st === "SHORTLISTED" || st === "INTERVIEW_SCHEDULED";
+      return (
+        st === "SHORTLISTED" ||
+        st === "INTERVIEW_SCHEDULED" ||
+        st === "CLAIMED" ||
+        st === "CLAIM_PENDING_ADMIN" ||
+        st === "CONFIRMED" ||
+        st === "CHECKED_IN" ||
+        st === "TIMESHEET_SUBMITTED"
+      );
     });
   }, [effectiveApplicants]);
 
@@ -1424,7 +1456,11 @@ function EmployerDashboard() {
                           <HiOutlineShieldCheck className="h-3.5 w-3.5" /> 24h Escrow Protected
                         </span>
                         <Button asChild variant="outline" size="sm" className="h-7 text-xs rounded-lg font-bold">
-                          <Link to="/employer/post-shift">Manage Shift</Link>
+                          {Number((sh as any).slotsClaimed || 0) > 0 ? (
+                            <Link to="/employer/applicants">Review Claimed ({(sh as any).slotsClaimed})</Link>
+                          ) : (
+                            <Link to="/employer/postings">Manage Shift</Link>
+                          )}
                         </Button>
                       </div>
                     </div>
@@ -1466,28 +1502,31 @@ function EmployerDashboard() {
                     </div>
                   </div>
                 ) : (
-                  effectiveApplicants.map((a) => (
-                    <div
-                      key={a.id}
-                      className="rounded-2xl border border-border/70 bg-card p-4 shadow-xs hover:border-primary/40 transition-all flex items-center justify-between gap-3"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-sm font-bold text-primary">
-                          {initials(a.candidateName || a.name || "Candidate")}
-                        </span>
-                        <div className="min-w-0">
-                          <h4 className="text-sm font-bold text-foreground truncate">{a.candidateName || a.name}</h4>
-                          <p className="text-xs text-muted-foreground truncate">{a.jobTitle || a.role || "Healthcare Clinician"} • {a.status || "Shortlisted"}</p>
+                  effectiveApplicants.map((a) => {
+                    const displayStatus = formatApplicationStatus(a.status);
+                    return (
+                      <div
+                        key={a.id}
+                        className="rounded-2xl border border-border/70 bg-card p-4 shadow-xs hover:border-primary/40 transition-all flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-sm font-bold text-primary">
+                            {initials(a.candidateName || a.name || "Candidate")}
+                          </span>
+                          <div className="min-w-0">
+                            <h4 className="text-sm font-bold text-foreground truncate">{a.candidateName || a.name}</h4>
+                            <p className="text-xs text-muted-foreground truncate">{a.jobTitle || a.role || "Healthcare Clinician"} • {displayStatus}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <StatusBadge status={displayStatus} />
+                          <Button asChild size="sm" variant="outline" className="h-7 text-xs rounded-lg font-bold">
+                            <Link to="/employer/applicants">Review</Link>
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <StatusBadge status={a.status} />
-                        <Button asChild size="sm" variant="outline" className="h-7 text-xs rounded-lg font-bold">
-                          <Link to="/employer/applicants">Review</Link>
-                        </Button>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}

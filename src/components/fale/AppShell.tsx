@@ -40,7 +40,11 @@ import {
 import { isApiEnabled } from "@/lib/api";
 import { logout } from "@/lib/adapters/authAdapter";
 import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
-import { getFacilityApplicants, getFacilityProfile } from "@/lib/adapters/facilityAdapter";
+import {
+  attachFocusAndPollRefresh,
+  getFacilityApplicants,
+  getFacilityProfile,
+} from "@/lib/adapters/facilityAdapter";
 import { getAdminDashboardMetrics, getAdminSupportTickets, type AdminDashboardMetricsDto } from "@/lib/adapters/adminAdapter";
 import { getNotifications } from "@/lib/adapters/notificationAdapter";
 import {
@@ -499,6 +503,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (activePortal !== "facility" && !isFacilityPath) return;
     let isMounted = true;
+    const isApplicantsPage = path.startsWith("/employer/applicants");
 
     const refreshFacilityApplicants = () => {
       const seen = getSeenApplicantIds();
@@ -520,16 +525,29 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
     };
 
-    refreshFacilityApplicants();
-
-    const handleUpdate = () => {
+    if (!isApplicantsPage) {
       refreshFacilityApplicants();
+    }
+
+    const handleUpdate = (e: Event) => {
+      const detail = (e as CustomEvent<{ unreadCount?: number }>)?.detail;
+      if (typeof detail?.unreadCount === "number") {
+        setFacilityShortlistedCount(detail.unreadCount);
+        return;
+      }
+      if (!isApplicantsPage) {
+        refreshFacilityApplicants();
+      }
     };
 
     window.addEventListener("fale:applications-updated", handleUpdate);
+    const detachAutoRefresh = isApiEnabled && !isApplicantsPage
+      ? attachFocusAndPollRefresh(refreshFacilityApplicants, 60000)
+      : () => {};
     return () => {
       isMounted = false;
       window.removeEventListener("fale:applications-updated", handleUpdate);
+      detachAutoRefresh();
     };
   }, [activePortal, isFacilityPath, path, isApiEnabled, s.adminApplications]);
 
@@ -960,15 +978,15 @@ export function PageHead({ title, sub, action }: { title: string; sub?: string; 
 
 export function StatusBadge({ status }: { status: string }) {
   const tone =
-    ["Withdrawn", "Rejected", "Not Selected", "Declined"].includes(status)
+    ["Withdrawn", "Rejected", "Not Selected", "Declined", "Disputed", "No-Show"].includes(status)
       ? "bg-rose-50 text-rose-700 border border-rose-200/60 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/50"
       : status === "Position Filled" || status === "Slot Filled"
         ? "bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"
-        : ["Hired", "Verified", "Approved", "Paid", "Confirmed"].includes(status)
+        : ["Hired", "Verified", "Approved", "Paid", "Confirmed", "Completed"].includes(status)
           ? "bg-success-soft text-success"
           : ["Interview", "Shortlisted", "Open", "Offer"].includes(status)
             ? "bg-primary-soft text-primary"
-            : ["Claimed", "Timesheet Submitted"].includes(status)
+            : ["Claimed", "Checked In", "Timesheet Submitted"].includes(status)
               ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20"
               : ["Under review", "New", "Applied", "Pending", "Draft"].includes(status)
                 ? "bg-warning-soft text-warning"

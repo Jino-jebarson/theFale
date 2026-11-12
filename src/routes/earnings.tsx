@@ -54,7 +54,8 @@ import { isApiEnabled, paiseToRupees } from "@/lib/api";
 import { getMyClaims, type ShiftClaimDto } from "@/lib/adapters/shiftAdapter";
 import { getCandidateProfile, savePayoutMethod as apiSavePayoutMethod, getPayoutMethod } from "@/lib/adapters/candidateAdapter";
 
-export interface UiPayoutTransaction extends CandidatePayoutTransaction {
+export interface UiPayoutTransaction extends Omit<CandidatePayoutTransaction, "status"> {
+  status: string;
   grossAmount?: number;
   platformFee?: number;
   tdsAmount?: number;
@@ -200,8 +201,27 @@ function CandidateEarningsPage() {
               ? paiseToRupees(c.payoutPaise)
               : gross ? gross - fee - tds : 0;
 
+          const isDisputed = c.status === "DISPUTED";
+          const isRefunded = c.status === "CANCELLED" && c.payoutStatus === "REFUNDED";
+          const isCancelled = c.status === "CANCELLED" && !isRefunded;
           const isDisbursed = c.payoutStatus === "DISBURSED";
-          const isPendingDisbursement = c.payoutStatus === "PENDING_DISBURSEMENT" || c.status === "COMPLETED";
+          const isPendingDisbursement =
+            !isDisputed &&
+            !isRefunded &&
+            !isCancelled &&
+            (c.payoutStatus === "PENDING_DISBURSEMENT" || c.status === "COMPLETED");
+
+          const mappedStatus = isDisputed
+            ? "Disputed (Frozen)"
+            : isRefunded
+              ? "Refunded to Hospital"
+              : isCancelled
+                ? "Cancelled"
+                : isDisbursed
+                  ? "Disbursed"
+                  : isPendingDisbursement
+                    ? "Pending Payout"
+                    : "In Escrow (24h SLA)";
 
           const effectiveHours = c.actualHours || c.hours || 8;
           const effectiveRate = gross ? Math.round(gross / effectiveHours) : (amt ? Math.round(amt / effectiveHours) : 500);
@@ -219,16 +239,22 @@ function CandidateEarningsPage() {
                 : "Recent",
             hours: effectiveHours,
             rate: effectiveRate,
-            amount: amt,
-            grossAmount: gross || (amt + fee + tds),
-            platformFee: fee,
-            tdsAmount: tds,
-            payoutDate: isDisbursed
-              ? (c.completedAt ? new Date(c.completedAt).toLocaleDateString("en-IN") : "Disbursed")
-              : isPendingDisbursement
-                ? "Releasing Soon (Pending UTR)"
-                : "In Escrow (24h SLA)",
-            status: isDisbursed ? "Disbursed" : "In Escrow (24h SLA)",
+            amount: isRefunded || isCancelled ? 0 : amt,
+            grossAmount: isRefunded || isCancelled ? 0 : (gross || (amt + fee + tds)),
+            platformFee: isRefunded || isCancelled ? 0 : fee,
+            tdsAmount: isRefunded || isCancelled ? 0 : tds,
+            payoutDate: isDisputed
+              ? "Frozen — Under FALE Ops Review"
+              : isRefunded
+                ? "Escrow Refunded to Hospital"
+                : isCancelled
+                  ? "Shift Cancelled"
+                  : isDisbursed
+                    ? (c.completedAt ? new Date(c.completedAt).toLocaleDateString("en-IN") : "Disbursed")
+                    : isPendingDisbursement
+                      ? "Releasing Soon (24h SLA)"
+                      : "In Escrow (24h SLA)",
+            status: mappedStatus,
             payoutMethodUsed: defaultMethodDesc,
             utr: c.utr || (isDisbursed ? `CFUTR${c.id.slice(0, 8).toUpperCase()}` : undefined),
             slipRef: c.payoutSlipRef || `FALE-PAY-${c.id.slice(0, 6).toUpperCase()}`,
@@ -334,7 +360,7 @@ function CandidateEarningsPage() {
   }, [payouts]);
 
   const inEscrowPayouts = useMemo(() => {
-    return payouts.filter((p) => p.status === "In Escrow (24h SLA)");
+    return payouts.filter((p) => p.status === "In Escrow (24h SLA)" || p.status === "Pending Payout");
   }, [payouts]);
 
   const inEscrowAmount = useMemo(() => {
@@ -371,7 +397,7 @@ function CandidateEarningsPage() {
   const filteredPayouts = useMemo(() => {
     let list = payouts;
     if (activeTab === "pending") {
-      list = list.filter((p) => p.status === "In Escrow (24h SLA)");
+      list = list.filter((p) => p.status === "In Escrow (24h SLA)" || p.status === "Pending Payout");
     }
     if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase();
@@ -921,12 +947,16 @@ function CandidateEarningsPage() {
                               <div className="font-black tracking-tight text-base sm:text-lg text-foreground">
                                 ₹{Math.round(tx.amount).toLocaleString("en-IN")}
                               </div>
-                              <span
+                                <span
                                 className={cn(
                                   "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider mt-1",
                                   tx.status === "Disbursed"
                                     ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
-                                    : "bg-primary-soft text-primary border border-primary/25"
+                                    : tx.status === "Disputed (Frozen)"
+                                      ? "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20"
+                                      : tx.status === "Refunded to Hospital" || tx.status === "Cancelled"
+                                        ? "bg-muted text-muted-foreground border border-border/60"
+                                        : "bg-primary-soft text-primary border border-primary/25"
                                 )}
                               >
                                 {tx.status}
@@ -1077,7 +1107,11 @@ function CandidateEarningsPage() {
                                     "inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
                                     tx.status === "Disbursed"
                                       ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
-                                      : "bg-primary-soft text-primary border border-primary/25"
+                                      : tx.status === "Disputed (Frozen)"
+                                        ? "bg-red-500/10 text-red-700 dark:text-red-400 border border-red-500/20"
+                                        : tx.status === "Refunded to Hospital" || tx.status === "Cancelled"
+                                          ? "bg-muted text-muted-foreground border border-border/60"
+                                          : "bg-primary-soft text-primary border border-primary/25"
                                   )}
                                 >
                                   {tx.status}

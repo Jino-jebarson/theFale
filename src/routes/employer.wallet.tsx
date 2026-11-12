@@ -218,8 +218,37 @@ function EmployerWalletPage() {
     ? `FALEHOSP${apiWallet.facilityId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase()}`
     : `FALEHOSP${hospitalCode}`;
 
+  const resolveInvoiceBreakdown = (total: number, rawType?: string, invId?: string) => {
+    const t = (rawType || "").toLowerCase();
+    const idUpper = (invId || "").toUpperCase();
+    if (t.includes("refund") || idUpper.startsWith("CRN-")) {
+      return {
+        docType: "CREDIT_NOTE" as const,
+        subtotal: total,
+        gst: 0,
+        statusLabel: "Refunded",
+      };
+    }
+    if (t.includes("topup") || t.includes("escrow")) {
+      return {
+        docType: "ESCROW_RECEIPT" as const,
+        subtotal: total,
+        gst: 0,
+        statusLabel: "Escrow Credited",
+      };
+    }
+    const subtotal = Math.round((total / 1.18) * 100) / 100;
+    const gst = Math.round((total - subtotal) * 100) / 100;
+    return {
+      docType: "TAX_INVOICE" as const,
+      subtotal,
+      gst,
+      statusLabel: t.includes("disburs") ? "Settled" : "Paid",
+    };
+  };
+
   const dynamicInvoices = useMemo(() => {
-    // 1. If backend API transactions exist, derive real tax invoices
+    // 1. If backend API transactions exist, derive real tax invoices & credit notes
     if (isApiEnabled && apiTransactions.length > 0) {
       const billable = apiTransactions.filter(
         (tx) => tx.invoiceId || tx.type?.toLowerCase().includes("credit") || tx.type?.toLowerCase().includes("topup") || tx.type?.toLowerCase().includes("refund") || tx.type?.toLowerCase().includes("disburs")
@@ -228,12 +257,13 @@ function EmployerWalletPage() {
         return billable.map((tx) => {
           const totalPaise = Math.abs(tx.amountPaise || 0);
           const total = totalPaise > 0 ? paiseToRupees(totalPaise) : 1999;
-          const subtotal = Math.round((total / 1.18) * 100) / 100;
-          const gst = Math.round((total - subtotal) * 100) / 100;
+          const rawType = (tx.type || "").toLowerCase();
+          const defaultPrefix = rawType.includes("refund") ? "CRN" : "INV";
+          const invId = tx.invoiceId || `${defaultPrefix}-2026-${tx.id.replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
+          const { docType, subtotal, gst, statusLabel } = resolveInvoiceBreakdown(total, tx.type, invId);
           const dateObj = tx.createdAt ? new Date(tx.createdAt) : new Date();
           const month = dateObj.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
           const dateStr = dateObj.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-          const invId = tx.invoiceId || `INV-2026-${tx.id.replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
           return {
             id: invId,
             month,
@@ -242,7 +272,9 @@ function EmployerWalletPage() {
             gst,
             total,
             date: dateStr,
-            status: tx.status === "COMPLETED" ? "Paid" : "Completed",
+            status: tx.status?.toUpperCase() === "PENDING" ? "Processing" : statusLabel,
+            docType,
+            txType: tx.type,
             refNumber: tx.refNumber || tx.utr || "CRD-FALE-TXN",
             utr: tx.utr,
             subtitle: tx.subtitle || "Institutional clinical staffing, sourcing credits & escrow custody services",
@@ -259,9 +291,9 @@ function EmployerWalletPage() {
       if (billable.length > 0) {
         return billable.map((tx) => {
           const total = Math.max(1, Math.abs(tx.amount || 0));
-          const subtotal = Math.round((total / 1.18) * 100) / 100;
-          const gst = Math.round((total - subtotal) * 100) / 100;
-          const invId = tx.invoiceId || `INV-2026-${(tx.id || "").replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
+          const defaultPrefix = tx.type === "refund" ? "CRN" : "INV";
+          const invId = tx.invoiceId || `${defaultPrefix}-2026-${(tx.id || "").replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
+          const { docType, subtotal, gst, statusLabel } = resolveInvoiceBreakdown(total, tx.type, invId);
           return {
             id: invId,
             month: new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" }),
@@ -270,7 +302,9 @@ function EmployerWalletPage() {
             gst,
             total,
             date: tx.date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-            status: tx.status === "Completed" ? "Paid" : "Completed",
+            status: tx.status === "Pending" ? "Processing" : statusLabel,
+            docType,
+            txType: tx.type,
             refNumber: tx.refNumber || tx.utr || "CRD-FALE-TXN",
             utr: tx.utr,
             subtitle: tx.subtitle || "Institutional clinical staffing, sourcing credits & escrow custody services",
@@ -359,16 +393,24 @@ function EmployerWalletPage() {
   };
 
   const prepareInvoiceData = (invOrTx: any): HospitalInvoicePdfData => {
-    const isTx = "amount" in invOrTx || "amountPaise" in invOrTx;
     const rawAmount = "amountPaise" in invOrTx
       ? paiseToRupees(invOrTx.amountPaise)
       : "amount" in invOrTx
         ? invOrTx.amount
         : invOrTx.total;
     const total = Math.max(1, Math.abs(Number(rawAmount) || 0));
-    const subtotal = Math.round((total / 1.18) * 100) / 100;
-    const gst = Math.round((total - subtotal) * 100) / 100;
-    const invId = invOrTx.invoiceId || invOrTx.id || `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    const rawType = invOrTx.txType || invOrTx.type || "";
+    const defaultPrefix = String(rawType).toLowerCase().includes("refund") ? "CRN" : "INV";
+    const invId = invOrTx.invoiceId || invOrTx.id || `${defaultPrefix}-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    const hasPrecomputed = invOrTx.docType && invOrTx.subtotal !== undefined && invOrTx.gst !== undefined;
+    const breakdown = hasPrecomputed
+      ? {
+          docType: invOrTx.docType as HospitalInvoicePdfData["docType"],
+          subtotal: Number(invOrTx.subtotal),
+          gst: Number(invOrTx.gst),
+          statusLabel: invOrTx.status || "Paid",
+        }
+      : resolveInvoiceBreakdown(total, rawType, invId);
 
     return {
       invoiceId: invId,
@@ -381,11 +423,12 @@ function EmployerWalletPage() {
       utr: invOrTx.utr,
       description: invOrTx.title || invOrTx.desc || invOrTx.description || "Clinical Staffing & Escrow Settlement",
       subtitle: invOrTx.subtitle || "Institutional clinical staffing, sourcing credits & escrow custody services",
-      subtotal,
-      gst,
+      subtotal: breakdown.subtotal,
+      gst: breakdown.gst,
       total,
-      status: (invOrTx.status || "Paid").toUpperCase() === "PENDING" ? "Processing" : "Paid",
+      status: (invOrTx.status || breakdown.statusLabel).toUpperCase() === "PENDING" ? "Processing" : breakdown.statusLabel,
       nodalAccount: virtualAccount,
+      docType: breakdown.docType,
     };
   };
 
@@ -398,9 +441,14 @@ function EmployerWalletPage() {
     try {
       const invData = prepareInvoiceData(invOrTx);
       generateHospitalInvoicePdf(invData);
-      toast.success(`Tax invoice ${invData.invoiceId} downloaded successfully!`);
+      const label = invData.docType === "CREDIT_NOTE"
+        ? "Credit note"
+        : invData.docType === "ESCROW_RECEIPT"
+          ? "Escrow receipt"
+          : "Tax invoice";
+      toast.success(`${label} ${invData.invoiceId} downloaded successfully!`);
     } catch (err: any) {
-      toast.error("Failed to download tax invoice", {
+      toast.error("Failed to download document", {
         description: err?.message || "Please preview the invoice first.",
       });
     }
@@ -1799,10 +1847,14 @@ function EmployerWalletPage() {
               </span>
               <div className="min-w-0">
                 <h3 className="text-xs sm:text-sm font-bold text-foreground truncate">
-                  Official Tax Invoice &amp; Settlement Receipt
+                  {selectedInvoice?.docType === "CREDIT_NOTE"
+                    ? "Escrow Credit Note & Refund Receipt"
+                    : selectedInvoice?.docType === "ESCROW_RECEIPT"
+                      ? "Escrow Funding Receipt"
+                      : "Official Tax Invoice & Settlement Receipt"}
                 </h3>
                 <span className="text-[10px] text-muted-foreground font-mono truncate block">
-                  Invoice #: {selectedInvoice?.invoiceId}
+                  {selectedInvoice?.docType === "CREDIT_NOTE" ? "Credit Note #:" : "Invoice #:"} {selectedInvoice?.invoiceId}
                 </span>
               </div>
             </div>
@@ -1848,8 +1900,16 @@ function EmployerWalletPage() {
                   </div>
 
                   <div className="text-left sm:text-right space-y-1 shrink-0">
-                    <span className="inline-block text-[11px] font-mono font-bold tracking-wider px-2.5 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20">
-                      OFFICIAL TAX INVOICE
+                    <span className={`inline-block text-[11px] font-mono font-bold tracking-wider px-2.5 py-1 rounded-lg border ${
+                      selectedInvoice.docType === "CREDIT_NOTE"
+                        ? "bg-amber-500/10 text-amber-700 border-amber-500/20"
+                        : "bg-primary/10 text-primary border-primary/20"
+                    }`}>
+                      {selectedInvoice.docType === "CREDIT_NOTE"
+                        ? "ESCROW CREDIT NOTE"
+                        : selectedInvoice.docType === "ESCROW_RECEIPT"
+                          ? "ESCROW FUNDING RECEIPT"
+                          : "OFFICIAL TAX INVOICE"}
                     </span>
                     <div className="font-mono text-xs font-bold text-foreground mt-1">
                       {selectedInvoice.invoiceId}
@@ -1864,15 +1924,37 @@ function EmployerWalletPage() {
                 </div>
 
                 {/* Status banner */}
-                <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 flex items-center justify-between flex-wrap gap-2 text-xs">
+                <div className={`p-3.5 rounded-xl border flex items-center justify-between flex-wrap gap-2 text-xs ${
+                  selectedInvoice.docType === "CREDIT_NOTE"
+                    ? "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300"
+                }`}>
                   <div className="flex items-center gap-2">
-                    <HiOutlineCheckBadge className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <HiOutlineCheckBadge className={`h-4 w-4 shrink-0 ${
+                      selectedInvoice.docType === "CREDIT_NOTE"
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-emerald-600 dark:text-emerald-400"
+                    }`} />
                     <div>
-                      <span className="font-bold block">PAID &amp; SETTLED VIA ESCROW RESERVE</span>
-                      <span className="text-[11px] opacity-85">Rule 48 CGST Rules, 2017 • Valid electronic tax invoice</span>
+                      <span className="font-bold block">
+                        {selectedInvoice.docType === "CREDIT_NOTE"
+                          ? "REFUNDED TO HOSPITAL WALLET"
+                          : selectedInvoice.docType === "ESCROW_RECEIPT"
+                            ? "CREDITED TO NODAL ESCROW RESERVE"
+                            : "PAID & SETTLED VIA ESCROW RESERVE"}
+                      </span>
+                      <span className="text-[11px] opacity-85">
+                        {selectedInvoice.docType === "CREDIT_NOTE"
+                          ? "Timesheet / Dispute escrow reversal • Credited to Available Balance"
+                          : selectedInvoice.docType === "ESCROW_RECEIPT"
+                            ? "RBI Nodal Escrow Custody • Tax invoice issued upon settlement"
+                            : "Rule 48 CGST Rules, 2017 • Valid electronic tax invoice"}
+                      </span>
                     </div>
                   </div>
-                  <div className="font-mono text-[11px] bg-background/90 px-2.5 py-1 rounded-lg border border-emerald-500/30 font-bold">
+                  <div className={`font-mono text-[11px] bg-background/90 px-2.5 py-1 rounded-lg border font-bold ${
+                    selectedInvoice.docType === "CREDIT_NOTE" ? "border-amber-500/30" : "border-emerald-500/30"
+                  }`}>
                     Ref: {selectedInvoice.refNumber}
                   </div>
                 </div>
@@ -1934,25 +2016,45 @@ function EmployerWalletPage() {
                 {/* Financial Totals */}
                 <div className="flex flex-col sm:flex-row justify-between gap-4 pt-2">
                   <div className="space-y-1 text-[11px] text-muted-foreground max-w-xs">
-                    <p className="font-semibold text-foreground">Input Tax Credit (ITC) Eligible</p>
-                    <p>This invoice is fully eligible for GST input tax credit under Section 16 of the CGST Act.</p>
+                    {selectedInvoice.docType === "CREDIT_NOTE" ? (
+                      <>
+                        <p className="font-semibold text-foreground">Escrow Refund Credit Note</p>
+                        <p>Credited back to your Hospital Available Balance. No Input Tax Credit is claimed on reversed escrow amounts.</p>
+                      </>
+                    ) : selectedInvoice.docType === "ESCROW_RECEIPT" ? (
+                      <>
+                        <p className="font-semibold text-foreground">Nodal Escrow Custody Receipt</p>
+                        <p>Funds are held in RBI-compliant nodal escrow. Official GST tax invoices are issued upon shift settlement or credit purchase.</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-foreground">Input Tax Credit (ITC) Eligible</p>
+                        <p>This invoice is fully eligible for GST input tax credit under Section 16 of the CGST Act.</p>
+                      </>
+                    )}
                   </div>
 
                   <div className="w-full sm:w-64 space-y-1.5 p-3 rounded-xl bg-muted/20 border border-border/60 font-mono text-xs">
                     <div className="flex justify-between text-muted-foreground">
-                      <span>Subtotal:</span>
+                      <span>{selectedInvoice.docType === "CREDIT_NOTE" ? "Refund Subtotal:" : "Subtotal:"}</span>
                       <span>₹{selectedInvoice.subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                     </div>
                     <div className="flex justify-between text-muted-foreground">
-                      <span>CGST (9%):</span>
+                      <span>CGST ({selectedInvoice.docType === "TAX_INVOICE" ? "9%" : "N/A"}):</span>
                       <span>₹{(selectedInvoice.gst / 2).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                     </div>
                     <div className="flex justify-between text-muted-foreground">
-                      <span>SGST (9%):</span>
+                      <span>SGST ({selectedInvoice.docType === "TAX_INVOICE" ? "9%" : "N/A"}):</span>
                       <span>₹{(selectedInvoice.gst / 2).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                     </div>
                     <div className="border-t border-border/70 pt-1.5 flex justify-between font-bold text-sm text-foreground">
-                      <span>Total Paid:</span>
+                      <span>
+                        {selectedInvoice.docType === "CREDIT_NOTE"
+                          ? "Total Refunded:"
+                          : selectedInvoice.docType === "ESCROW_RECEIPT"
+                            ? "Total Credited:"
+                            : "Total Paid:"}
+                      </span>
                       <span className="text-primary">₹{selectedInvoice.total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                     </div>
                   </div>

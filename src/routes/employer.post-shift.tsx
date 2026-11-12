@@ -8,17 +8,12 @@ import {
   HiOutlineMapPin,
   HiOutlineCalendarDays,
   HiOutlineBolt,
-  HiOutlineCurrencyRupee,
-  HiOutlineBuildingOffice2,
-  HiOutlineUserGroup,
   HiCheck,
   HiOutlineCheckCircle,
-  HiOutlinePhone,
   HiOutlineArrowTopRightOnSquare,
   HiOutlineSun,
   HiOutlineMoon,
   HiOutlineAdjustmentsHorizontal,
-  HiOutlineAcademicCap,
   HiOutlineFire,
   HiOutlineLockClosed,
   HiOutlineArrowPath,
@@ -42,7 +37,14 @@ import { useApp, setState } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees } from "@/lib/api";
 import { getFacilityWallet, getHospitalBankAccount } from "@/lib/adapters/facilityAdapter";
-import { postShift } from "@/lib/adapters/shiftAdapter";
+import {
+  postShift,
+  updateShift,
+  getFacilityShifts,
+  getFacilityShiftPolicy,
+  type FacilityShiftPolicyDto,
+  type UiShiftItem,
+} from "@/lib/adapters/shiftAdapter";
 import { parseWhatsAppJobMessage, suggestShiftPayWithAi } from "@/lib/adapters/aiAdapter";
 
 export const Route = createFileRoute("/employer/post-shift")({
@@ -126,18 +128,6 @@ const availableCities = [
   "Pune",
 ];
 
-const experienceOptions = ["Fresher OK", "1–2 yrs", "2–5 yrs", "5+ yrs"];
-
-const staffPerksList = [
-  "Dinner provided",
-  "Lunch included",
-  "Breakfast provided",
-  "Cab drop / Travel allowance",
-  "Scrub kit provided",
-  "Duty rest room access",
-  "ACLS floor support",
-];
-
 function PostShiftScreen() {
   const store = useApp();
   const navigate = useNavigate();
@@ -145,48 +135,98 @@ function PostShiftScreen() {
 
   const [availableEscrow, setAvailableEscrow] = useState<number>(0);
   const [hasLinkedBank, setHasLinkedBank] = useState<boolean>(false);
+  const [shiftPolicy, setShiftPolicy] = useState<FacilityShiftPolicyDto | null>(null);
+  const [editingShift, setEditingShift] = useState<UiShiftItem | null>(null);
+  const [publishedStatus, setPublishedStatus] = useState<string>("PENDING_APPROVAL");
+
+  const editShiftId = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("editId");
+  }, []);
 
   useEffect(() => {
     if (isApiEnabled) {
       Promise.all([
         getFacilityWallet().catch(() => null),
         getHospitalBankAccount().catch(() => null),
-      ]).then(([wallet, bank]) => {
+        getFacilityShiftPolicy().catch(() => null),
+        editShiftId ? getFacilityShifts().catch(() => []) : Promise.resolve([] as UiShiftItem[]),
+      ]).then(([wallet, bank, policy, facShifts]) => {
         if (wallet) {
           setAvailableEscrow(paiseToRupees(wallet.availableBalancePaise));
         }
         if (bank && (bank.accountNumber || (bank as any).accountNumberMasked || (bank as any).accountNumberLast4)) {
           setHasLinkedBank(true);
         }
+        if (policy) {
+          setShiftPolicy(policy);
+          if (policy.availableBalancePaise) {
+            setAvailableEscrow(paiseToRupees(policy.availableBalancePaise));
+          }
+        }
+        if (editShiftId && Array.isArray(facShifts)) {
+          const match = facShifts.find((x) => x.id === editShiftId);
+          if (match) {
+            setEditingShift(match);
+            setRoleTitle(match.title || "");
+            setDept(match.dept || "");
+            setCity(match.city || "");
+            setOpenings(match.slots || 1);
+            setIsUrgent(Boolean(match.urgent));
+            setSurgeReason(match.surgeLabel || "");
+            setDutyNotes(match.description || "");
+            const baseHourly = paiseToRupees(match.rawRatePerHourPaise || 0);
+            setHourlyRate(baseHourly || match.rate || 600);
+            setSelectedSlot("custom");
+            setCustomHours(match.hours || 8);
+            if (match.startAt) {
+              const sDt = new Date(match.startAt);
+              setCustomDate(sDt.toISOString().slice(0, 10));
+              setDateOption("Custom Date");
+              setCustomStartTime(`${String(sDt.getHours()).padStart(2, "0")}:${String(sDt.getMinutes()).padStart(2, "0")}`);
+            }
+            if (match.endAt) {
+              const eDt = new Date(match.endAt);
+              setCustomEndTime(`${String(eDt.getHours()).padStart(2, "0")}:${String(eDt.getMinutes()).padStart(2, "0")}`);
+            }
+          }
+        }
       });
     } else {
       setAvailableEscrow(store.escrowBalance ?? 0);
       setHasLinkedBank(Boolean(store.hospitalBankAccount && store.hospitalBankAccount.accountNumber && store.hospitalBankAccount.accountNumber.length > 3));
     }
-  }, [store.escrowBalance, store.hospitalBankAccount]);
+  }, [store.escrowBalance, store.hospitalBankAccount, editShiftId]);
 
   // Form State
   const [roleTitle, setRoleTitle] = useState("");
   const [dept, setDept] = useState("");
-  const [city, setCity] = useState("");
-  const [unitFloor, setUnitFloor] = useState("");
+  const [city, setCity] = useState(() => String(store.profile["city"] || "Chennai"));
   const [dateOption, setDateOption] = useState("Today · Urgent");
-  const [customDate, setCustomDate] = useState("2026-10-31");
+  const [customDate, setCustomDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [selectedSlot, setSelectedSlot] = useState("night");
   const [customStartTime, setCustomStartTime] = useState("20:00");
   const [customEndTime, setCustomEndTime] = useState("08:00");
   const [customHours, setCustomHours] = useState(12);
+
+  useEffect(() => {
+    if (!customStartTime || !customEndTime) return;
+    const [sh, sm] = customStartTime.split(":").map(Number);
+    const [eh, em] = customEndTime.split(":").map(Number);
+    if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return;
+    const startMinutes = sh * 60 + sm;
+    let endMinutes = eh * 60 + em;
+    if (endMinutes <= startMinutes) {
+      endMinutes += 24 * 60;
+    }
+    setCustomHours(Math.max(1, Math.round((endMinutes - startMinutes) / 60)));
+  }, [customStartTime, customEndTime]);
   const [hourlyRate, setHourlyRate] = useState(0);
   const [openings, setOpenings] = useState(1);
   const [isUrgent, setIsUrgent] = useState(false);
   const [surgeReason, setSurgeReason] = useState("");
-  const [requireCouncilReg, setRequireCouncilReg] = useState(true);
-  const [requireBLS, setRequireBLS] = useState(true);
-  const [minExp, setMinExp] = useState("");
-  const [selectedPerks, setSelectedPerks] = useState<string[]>([]);
-  const [supervisorName, setSupervisorName] = useState("");
-  const [supervisorPhone, setSupervisorPhone] = useState("");
   const [dutyNotes, setDutyNotes] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Success Modal State
   const [publishedShiftModalOpen, setPublishedShiftModalOpen] = useState(false);
@@ -286,8 +326,10 @@ function PostShiftScreen() {
         else if (shiftType.includes("EVENING")) setSelectedSlot("evening");
         else if (shiftType.includes("DAY") || shiftType.includes("MORNING")) setSelectedSlot("morning");
         if (ratePerHour) setHourlyRate(Number(ratePerHour));
-        if (d.location) setUnitFloor(d.location);
-        if (d.notes) setDutyNotes(d.notes);
+        const extraNotes = [d.notes, d.location ? `Unit: ${d.location}` : null]
+          .filter(Boolean)
+          .join(" · ");
+        if (extraNotes) setDutyNotes(extraNotes);
 
         // Extended dynamically extracted fields
         if (d.city) {
@@ -310,12 +352,7 @@ function PostShiftScreen() {
           setIsUrgent(Boolean(d.isUrgent));
         }
 
-        if (d.supervisorName) setSupervisorName(String(d.supervisorName));
-        if (d.supervisorPhone) setSupervisorPhone(String(d.supervisorPhone));
-
-        if (d.perks && Array.isArray(d.perks) && d.perks.length > 0) {
-          setSelectedPerks((prev) => Array.from(new Set([...prev, ...d.perks])));
-        }
+        setFieldErrors({});
 
         const summaryParts: string[] = [];
         if (role) summaryParts.push(role);
@@ -359,102 +396,30 @@ function PostShiftScreen() {
     return slot ? slot.hours : 12;
   }, [selectedSlot, customHours]);
 
-  // Economics
-  const payPerWorker = useMemo(() => hourlyRate * activeHours, [hourlyRate, activeHours]);
-  const totalEscrowAmount = useMemo(() => payPerWorker * openings, [payPerWorker, openings]);
+  // Economics (includes urgent +₹50/hr surge + facility service fee: 0% 1st shift, 5% 2nd+ shift)
+  const effectiveHourlyRate = useMemo(() => hourlyRate + (isUrgent ? 50 : 0), [hourlyRate, isUrgent]);
+  const payPerWorker = useMemo(() => effectiveHourlyRate * activeHours, [effectiveHourlyRate, activeHours]);
+  const workerEscrowTotal = useMemo(() => payPerWorker * openings, [payPerWorker, openings]);
+  const facilityFeePercent = useMemo(() => {
+    if (editingShift) return editingShift.facilityFeePercent ?? 0;
+    return shiftPolicy?.platformFeePercent ?? 0;
+  }, [editingShift, shiftPolicy]);
+  const facilityFeeAmount = useMemo(
+    () => Math.round((workerEscrowTotal * facilityFeePercent) / 100),
+    [workerEscrowTotal, facilityFeePercent]
+  );
+  const totalEscrowAmount = useMemo(() => workerEscrowTotal + facilityFeeAmount, [workerEscrowTotal, facilityFeeAmount]);
+  const existingLockedEscrow = useMemo(
+    () => (editingShift ? paiseToRupees(editingShift.totalEscrowRequiredPaise || 0) : 0),
+    [editingShift]
+  );
+  const additionalEscrowNeeded = useMemo(
+    () => (editingShift ? Math.max(0, totalEscrowAmount - existingLockedEscrow) : totalEscrowAmount),
+    [editingShift, totalEscrowAmount, existingLockedEscrow]
+  );
 
-  // Rate Benchmark analysis
-  const benchmarkAnalysis = useMemo(() => {
-    let typicalMin = 350;
-    let typicalMax = 450;
-    if (
-      dept.toLowerCase().includes("emergency") ||
-      roleTitle.toLowerCase().includes("officer") ||
-      roleTitle.toLowerCase().includes("doctor")
-    ) {
-      typicalMin = 700;
-      typicalMax = 950;
-    } else if (
-      dept.toLowerCase().includes("sample") ||
-      roleTitle.toLowerCase().includes("phlebotomist")
-    ) {
-      typicalMin = 220;
-      typicalMax = 300;
-    }
-
-    if (hourlyRate >= typicalMax) {
-      return {
-        label: "Competitive Rate",
-        color: "text-emerald-700 bg-emerald-500/10 border-emerald-500/30 dark:text-emerald-400",
-        message: "High pay rate. Typically claimed within 15–30 minutes by verified talent.",
-        multiplier: "2.8x faster acceptance",
-      };
-    }
-    if (hourlyRate >= typicalMin) {
-      return {
-        label: "Market Standard",
-        color: "text-blue-700 bg-blue-500/10 border-blue-500/30 dark:text-blue-400",
-        message: "Aligns with prevailing city benchmarks for verified healthcare professionals.",
-        multiplier: "1–2 hr response",
-      };
-    }
-    return {
-      label: "Below Benchmark",
-      color: "text-amber-700 bg-amber-500/10 border-amber-500/30 dark:text-amber-400",
-      message: `Consider adjusting to ₹${typicalMin}/hr for faster urgent fill.`,
-      multiplier: "Slower match",
-    };
-  }, [hourlyRate, dept, roleTitle]);
-
-  // Talent pool estimate
-  const estimatedTalentCount = useMemo(() => {
-    const base = city === "Bengaluru" ? 92 : city === "Chennai" ? 78 : city === "Mumbai" ? 114 : 64;
-    return isUrgent ? base : Math.round(base * 0.7);
-  }, [city, isUrgent]);
-
-  // Toggle perk
-  const handleTogglePerk = (perk: string) => {
-    setSelectedPerks((prev) =>
-      prev.includes(perk) ? prev.filter((p) => p !== perk) : [...prev, perk]
-    );
-  };
-
-  // Submit Shift
-  const handlePublishShift = async (status: "Open" | "Draft" = "Open") => {
-    if (!roleTitle.trim()) {
-      toast.error("Please enter a clinical role title.");
-      return;
-    }
-
-    if (status === "Draft") {
-      toast.success("Shift draft saved successfully", {
-        description: "You can review and publish this shift anytime from your dashboard.",
-      });
-      navigate({ to: "/employer" });
-      return;
-    }
-
-    if (!hasLinkedBank) {
-      setBankRequiredModalOpen(true);
-      return;
-    }
-
-    if (availableEscrow < totalEscrowAmount) {
-      setInsufficientEscrowModalOpen(true);
-      return;
-    }
-
-    const newShiftId = "shift_" + Date.now();
-    const formattedDate =
-      dateOption === "Today · Urgent"
-        ? "Tonight"
-        : dateOption === "Tomorrow"
-          ? "Tomorrow"
-          : dateOption === "Weekend"
-            ? "This Weekend"
-            : customDate;
-
-    // Resolve accurate start and end timestamps based on user selections
+  // Compute resolved start & end timestamps from form selection
+  const resolveShiftTimestamps = () => {
     const now = new Date();
     let targetYear = now.getFullYear();
     let targetMonth = now.getMonth();
@@ -521,9 +486,91 @@ function PostShiftScreen() {
     }
 
     const diffHours = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
-    const effectiveHours = Math.max(4, Math.min(24, activeHours || diffHours));
-    const startIso = startDate.toISOString();
-    const endIso = endDate.toISOString();
+    const effectiveHours = selectedSlot === "custom" ? customHours : activeHours || diffHours;
+    return { startDate, endDate, effectiveHours };
+  };
+
+  // Validate form fields & business rules, surfacing first error via toast
+  const validateShiftForm = (): { valid: boolean; startDate?: Date; endDate?: Date; effectiveHours?: number } => {
+    const errors: Record<string, string> = {};
+
+    if (!roleTitle.trim() || roleTitle.trim().length < 3) {
+      errors.roleTitle = "Enter a valid clinical shift title (minimum 3 characters).";
+    }
+    if (!dept.trim()) {
+      errors.dept = "Please select a hospital department.";
+    }
+    if (dateOption === "Custom Date" && !customDate) {
+      errors.customDate = "Please select a duty date.";
+    }
+    if (selectedSlot === "custom" && (!customStartTime || !customEndTime)) {
+      errors.customTime = "Please enter both start and end times.";
+    }
+
+    const { startDate, endDate, effectiveHours } = resolveShiftTimestamps();
+
+    if (effectiveHours < 4 || effectiveHours > 24) {
+      errors.hours = `Shift duration must be between 4 and 24 hours (currently ${effectiveHours}h).`;
+    }
+    if (startDate.getTime() < Date.now() - 5 * 60 * 1000) {
+      errors.startTime = "Shift start time must be in the future. Choose a later slot or tomorrow.";
+    }
+    if (!hourlyRate || hourlyRate < 150) {
+      errors.hourlyRate = "Enter a valid hourly pay rate (minimum ₹150/hr).";
+    } else if (hourlyRate > 10000) {
+      errors.hourlyRate = "Hourly pay rate cannot exceed ₹10,000/hr.";
+    }
+    if (!openings || openings < 1 || openings > 20) {
+      errors.openings = "Professionals required must be between 1 and 20.";
+    }
+
+    setFieldErrors(errors);
+    const firstError = Object.values(errors)[0];
+    if (firstError) {
+      toast.error("Please fix the highlighted shift details", {
+        description: firstError,
+      });
+      return { valid: false };
+    }
+    return { valid: true, startDate, endDate, effectiveHours };
+  };
+
+  // Submit Shift
+  const handlePublishShift = async () => {
+    const check = validateShiftForm();
+    if (!check.valid || !check.startDate || !check.endDate || !check.effectiveHours) {
+      return;
+    }
+
+    if (!hasLinkedBank) {
+      toast.error("Hospital settlement bank account required", {
+        description: "Link your settlement bank account in Wallet & Escrow before posting shifts.",
+      });
+      setBankRequiredModalOpen(true);
+      return;
+    }
+
+    if (availableEscrow < additionalEscrowNeeded) {
+      toast.error("Insufficient escrow balance", {
+        description: `Required ₹${additionalEscrowNeeded.toLocaleString("en-IN")}, available ₹${availableEscrow.toLocaleString("en-IN")}. Please top up your wallet.`,
+      });
+      setInsufficientEscrowModalOpen(true);
+      return;
+    }
+
+    const newShiftId = "shift_" + Date.now();
+    const formattedDate =
+      dateOption === "Today · Urgent"
+        ? "Tonight"
+        : dateOption === "Tomorrow"
+          ? "Tomorrow"
+          : dateOption === "Weekend"
+            ? "This Weekend"
+            : customDate;
+
+    const effectiveHours = check.effectiveHours;
+    const startIso = check.startDate.toISOString();
+    const endIso = check.endDate.toISOString();
 
     const newShift = {
       id: newShiftId,
@@ -537,7 +584,7 @@ function PostShiftScreen() {
       dept,
       urgent: isUrgent,
       surge: isUrgent ? surgeReason : undefined,
-      perks: selectedPerks,
+      perks: [],
       verified: true,
       openings,
       status: "Pending Approval",
@@ -549,30 +596,53 @@ function PostShiftScreen() {
 
     setSubmitting(true);
     try {
+      let returnedStatus = "PENDING_APPROVAL";
       if (isApiEnabled) {
-        await postShift({
+        const shiftPayload = {
           title: roleTitle.trim(),
-          department: dept || "Critical care",
+          department: dept.trim(),
           startAt: startIso,
           endAt: endIso,
           hours: effectiveHours,
-          ratePerHourPaise: hourlyRate * 100,
+          ratePerHourPaise: Math.round(hourlyRate * 100),
           surgeRatePerHourPaise: isUrgent ? 5000 : 0,
           surgeLabel: isUrgent ? (surgeReason || "+₹50/hr Night Surge") : undefined,
           openings: openings || 1,
           urgent: isUrgent,
           isUrgent: isUrgent,
-          description: dutyNotes || `${roleTitle} locum duty coverage for ${dept} on ${formattedDate} (${activeTimeStr}).`,
-        });
+          description: dutyNotes.trim() || `${roleTitle.trim()} locum duty coverage for ${dept.trim()} on ${formattedDate} (${activeTimeStr}).`,
+        };
+        const savedShift = editingShift
+          ? await updateShift(editingShift.id, shiftPayload)
+          : await postShift(shiftPayload);
+        returnedStatus = savedShift.status || "PENDING_APPROVAL";
       }
 
-      toast.success("Shift Broadcasted Successfully!", {
-        description: "Your locum shift is now submitted to Compliance Admin for verification.",
-      });
+      setPublishedStatus(returnedStatus);
+      const isLive = returnedStatus === "OPEN";
+      const needsKyc = shiftPolicy && !shiftPolicy.kycVerified && (shiftPolicy.priorApprovedShiftsCount ?? 0) > 0;
+      toast.success(
+        editingShift
+          ? "Shift Updated & Escrow Reconciled!"
+          : isLive
+          ? "Shift Broadcasted & Live Immediately!"
+          : needsKyc
+            ? "Shift Submitted for Admin Review"
+            : "First Shift Submitted for Admin Review!",
+        {
+          description: editingShift
+            ? "Your shift details and wallet escrow lock were updated."
+            : isLive
+            ? "Verified hospital fast-track active: clinicians are being notified now."
+            : needsKyc
+              ? "Hospital KYC verification is still pending — Admin will approve this shift shortly."
+              : "Your 1st shift is under Compliance Admin review. Subsequent shifts go live once KYC is verified.",
+        }
+      );
       setPublishedShiftModalOpen(true);
     } catch (err: any) {
-      toast.error("Failed to broadcast shift", {
-        description: err?.message || "Please check your escrow wallet balance.",
+      toast.error(err?.message || "Failed to broadcast shift", {
+        description: err?.message ? "Please check the details above and try again." : "Please check your escrow wallet balance.",
       });
     } finally {
       setSubmitting(false);
@@ -588,7 +658,7 @@ function PostShiftScreen() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border/70 pb-5">
           <div className="space-y-1">
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight text-foreground">
-              Post an On-Demand Shift
+              {editingShift ? "Update On-Demand Shift" : "Post an On-Demand Shift"}
             </h1>
             <p className="text-xs sm:text-sm text-muted-foreground max-w-2xl">
               Broadcast verified on-demand shifts to clinical staff with automated 24-hour escrow payout.
@@ -677,50 +747,48 @@ function PostShiftScreen() {
                   type="text"
                   required
                   value={roleTitle}
-                  onChange={(e) => setRoleTitle(e.target.value)}
+                  onChange={(e) => {
+                    setRoleTitle(e.target.value);
+                    if (fieldErrors.roleTitle) {
+                      setFieldErrors((prev) => ({ ...prev, roleTitle: "" }));
+                    }
+                  }}
                   placeholder="e.g. ICU Staff Nurse, Duty Medical Officer, Emergency Physician"
-                  className="w-full h-11 px-3.5 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-medium"
+                  className={cn(
+                    "w-full h-11 px-3.5 rounded-xl border bg-background text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 transition-all font-medium",
+                    fieldErrors.roleTitle
+                      ? "border-destructive focus:ring-destructive/20 focus:border-destructive"
+                      : "border-input focus:ring-primary/20 focus:border-primary"
+                  )}
                 />
               </div>
 
               {/* Department & City Custom Selects */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <SelectField
-                  label="Department"
-                  required
-                  options={hospitalDepts}
-                  value={dept}
-                  onChange={setDept}
-                  placeholder="Select Department"
-                  searchable
-                />
+                <div className={cn(fieldErrors.dept && "rounded-xl ring-1 ring-destructive/70 p-0.5")}>
+                  <SelectField
+                    label="Department"
+                    required
+                    options={hospitalDepts}
+                    value={dept}
+                    onChange={(val) => {
+                      setDept(val);
+                      if (fieldErrors.dept) {
+                        setFieldErrors((prev) => ({ ...prev, dept: "" }));
+                      }
+                    }}
+                    placeholder="Select Department"
+                    searchable
+                  />
+                </div>
 
                 <SelectField
                   label="City / Hub"
-                  required
                   options={availableCities}
                   value={city}
                   onChange={setCity}
                   placeholder="Select hospital city / hub"
                 />
-              </div>
-
-              {/* Unit / Floor Specifics */}
-              <div className="space-y-1.5">
-                <label htmlFor="unit-floor" className="text-xs font-semibold text-foreground block">
-                  Hospital Floor &amp; Unit
-                </label>
-                <div className="relative">
-                  <HiOutlineBuildingOffice2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <input
-                    id="unit-floor"
-                    type="text"
-                    value={unitFloor}
-                    onChange={(e) => setUnitFloor(e.target.value)}
-                    placeholder="e.g. 3rd Floor, Medical ICU, Block B"
-                    className="w-full h-11 pl-10 pr-3.5 rounded-xl border border-input bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-muted-foreground/60 font-medium"
-                  />
-                </div>
               </div>
             </section>
 
@@ -849,15 +917,13 @@ function PostShiftScreen() {
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
-                        Total Hours
+                        Total Hours <span className="text-[10px] font-normal text-primary">(Auto)</span>
                       </label>
                       <input
                         type="number"
-                        min={1}
-                        max={24}
+                        readOnly
                         value={customHours}
-                        onChange={(e) => setCustomHours(Number(e.target.value) || 1)}
-                        className="h-10 w-full rounded-xl border border-input bg-background px-2.5 text-xs font-medium font-mono"
+                        className="h-10 w-full rounded-xl border border-input bg-muted/60 px-2.5 text-xs font-bold font-mono text-foreground cursor-default focus:outline-none"
                       />
                     </div>
                   </div>
@@ -930,12 +996,22 @@ function PostShiftScreen() {
                     id="hourly-rate"
                     type="number"
                     min={150}
-                    max={5000}
+                    max={10000}
                     step={10}
                     placeholder="450"
                     value={hourlyRate || ""}
-                    onChange={(e) => setHourlyRate(Math.max(0, Number(e.target.value)))}
-                    className="h-11 w-full rounded-xl border border-input bg-background pl-9 pr-20 text-base font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono"
+                    onChange={(e) => {
+                      setHourlyRate(Math.max(0, Number(e.target.value)));
+                      if (fieldErrors.hourlyRate) {
+                        setFieldErrors((prev) => ({ ...prev, hourlyRate: "" }));
+                      }
+                    }}
+                    className={cn(
+                      "h-11 w-full rounded-xl border bg-background pl-9 pr-20 text-base font-bold text-foreground focus:outline-none focus:ring-2 font-mono",
+                      fieldErrors.hourlyRate
+                        ? "border-destructive focus:ring-destructive/20 focus:border-destructive"
+                        : "border-input focus:ring-primary/20 focus:border-primary"
+                    )}
                   />
                   <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
                     / hour
@@ -1081,41 +1157,16 @@ function PostShiftScreen() {
                 </div>
               </div>
 
-              {/* Benchmark Summary Chip */}
-              <div className={cn("p-3 sm:p-3.5 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3", benchmarkAnalysis.color)}>
-                <div className="flex items-start gap-2 min-w-0">
-                  <HiOutlineSparkles className="h-4 w-4 shrink-0 mt-0.5" />
-                  <div className="leading-relaxed">
-                    <span className="font-bold mr-1">{benchmarkAnalysis.label}:</span>
-                    <span className="opacity-90">{benchmarkAnalysis.message}</span>
-                  </div>
-                </div>
-                <span className="font-semibold text-[11px] shrink-0 font-mono self-start sm:self-center px-2 py-0.5 rounded-md bg-background/50 border border-current/20">
-                  {benchmarkAnalysis.multiplier}
-                </span>
-              </div>
-
-              {/* Escrow Commitment Breakdown */}
-              <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 text-xs space-y-1.5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-emerald-900 dark:text-emerald-200">
-                  <span className="font-semibold">Nodal Escrow Allocation ({openings} {openings === 1 ? "opening" : "openings"} × {activeHours}h @ ₹{hourlyRate}/h):</span>
-                  <span className="font-mono font-bold text-sm self-start sm:self-auto">₹{totalEscrowAmount.toLocaleString("en-IN")}</span>
-                </div>
-                <p className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 leading-relaxed">
-                  Funds remain safely held in Reserve Bank of India regulated Cashfree Nodal Escrow and are only transferred upon your supervisor's timesheet approval.
-                </p>
-              </div>
-
               {/* Urgent Surge Toggle */}
               <div className="pt-2 border-t border-border/60 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                      <HiOutlineFire className="h-4 w-4 text-amber-500" />
-                      <span>Urgent Night / Surge Pay Incentive</span>
+                      <HiOutlineFire className="h-4 w-4 text-primary" />
+                      <span>Urgent Night / Surge Pay Incentive (+₹50/hr)</span>
                     </span>
                     <span className="text-[11px] text-muted-foreground block mt-0.5">
-                      Broadcast instant push notification to nearby off-duty clinicians
+                      Adds +₹50/hr surge incentive and sends priority push alerts to verified clinicians
                     </span>
                   </div>
                   <Switch
@@ -1135,163 +1186,23 @@ function PostShiftScreen() {
                       value={surgeReason}
                       onChange={(e) => setSurgeReason(e.target.value)}
                       placeholder="e.g. +₹50/hr Night Surge, Critical ICU shortage cover"
-                      className="h-10 w-full rounded-xl border border-input bg-background px-3.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="h-10 w-full rounded-xl border border-input bg-background px-3.5 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                     />
                   </div>
                 )}
               </div>
-            </section>
 
-            {/* ----------------------------------------------------- */}
-            {/* 04 · COMPLIANCE & AMENITIES */}
-            {/* ----------------------------------------------------- */}
-            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-5">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
-                04 · Screening &amp; Amenities
-              </p>
-
-              {/* Screening Toggles */}
-              <div className="space-y-3">
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setRequireCouncilReg(!requireCouncilReg)}
-                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setRequireCouncilReg(!requireCouncilReg)}
-                  className="flex items-center justify-between p-3.5 rounded-xl border border-border/70 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-start gap-3">
-                    <HiOutlineShieldCheck className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="text-xs font-bold text-foreground block">
-                        Require State Council Registration
-                      </span>
-                      <span className="text-[11px] text-muted-foreground block mt-0.5">
-                        Only candidates with verified NMC / Nursing Council credentials can claim this shift.
-                      </span>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={requireCouncilReg}
-                    onCheckedChange={setRequireCouncilReg}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </div>
-
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setRequireBLS(!requireBLS)}
-                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setRequireBLS(!requireBLS)}
-                  className="flex items-center justify-between p-3.5 rounded-xl border border-border/70 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-start gap-3">
-                    <HiOutlineAcademicCap className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="text-xs font-bold text-foreground block">
-                        Require Active BLS / ACLS Certification
-                      </span>
-                      <span className="text-[11px] text-muted-foreground block mt-0.5">
-                        Mandatory life support credential for Critical Care and Emergency duties.
-                      </span>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={requireBLS}
-                    onCheckedChange={setRequireBLS}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </div>
-              </div>
-
-              {/* Custom Select for Experience */}
-              <SelectField
-                label="Minimum Experience Required"
-                options={experienceOptions}
-                value={minExp}
-                onChange={setMinExp}
-                placeholder="Select Experience"
-              />
-
-              {/* Perks / Amenities */}
-              <div className="space-y-2 pt-2 border-t border-border/60">
-                <label className="text-xs font-semibold text-foreground block">
-                  Duty Amenities &amp; Perks Provided
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {staffPerksList.map((perk) => {
-                    const isSelected = selectedPerks.includes(perk);
-                    return (
-                      <button
-                        type="button"
-                        key={perk}
-                        onClick={() => handleTogglePerk(perk)}
-                        className={cn(
-                          "px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 transition-all cursor-pointer",
-                          isSelected
-                            ? "bg-primary text-primary-foreground border-primary font-bold shadow-2xs"
-                            : "bg-muted/40 border-border/70 text-foreground hover:bg-muted"
-                        )}
-                      >
-                        {isSelected && <HiCheck className="h-3.5 w-3.5 stroke-[3]" />}
-                        <span>{perk}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
-
-            {/* ----------------------------------------------------- */}
-            {/* 05 · REPORTING & SUPERVISOR IN-CHARGE */}
-            {/* ----------------------------------------------------- */}
-            <section className="rounded-2xl border border-border/80 bg-card p-4 sm:p-6 shadow-2xs space-y-5">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-primary">
-                05 · Supervisor &amp; Duty Instructions
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label htmlFor="supervisor-name" className="text-xs font-semibold text-foreground block">
-                    Nursing Superintendent / In-Charge Name
-                  </label>
-                  <input
-                    id="supervisor-name"
-                    type="text"
-                    value={supervisorName}
-                    onChange={(e) => setSupervisorName(e.target.value)}
-                    placeholder="e.g. Nursing Superintendent / Duty In-Charge"
-                    className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-xs sm:text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label htmlFor="supervisor-phone" className="text-xs font-semibold text-foreground block">
-                    Duty Desk Direct Phone / Ext.
-                  </label>
-                  <div className="relative">
-                    <HiOutlinePhone className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <input
-                      id="supervisor-phone"
-                      type="text"
-                      value={supervisorPhone}
-                      onChange={(e) => setSupervisorPhone(e.target.value)}
-                      placeholder="Enter 10 digit number"
-                      className="h-11 w-full rounded-xl border border-input bg-background pl-10 pr-3.5 text-xs sm:text-sm font-mono font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
+              {/* Reporting & Duty Notes */}
+              <div className="pt-2 border-t border-border/60 space-y-1.5">
                 <label htmlFor="duty-instructions" className="text-xs font-semibold text-foreground block">
-                  Reporting &amp; Security Pass Instructions
+                  Reporting &amp; Duty Instructions (Optional)
                 </label>
                 <textarea
                   id="duty-instructions"
                   rows={3}
                   value={dutyNotes}
                   onChange={(e) => setDutyNotes(e.target.value)}
-                  placeholder="Specify reporting station, uniform/scrubs, security badge entry, and direct contact..."
+                  placeholder="Specify reporting station/floor, duty supervisor contact, uniform/scrubs, or security pass instructions..."
                   className="w-full rounded-xl border border-input bg-background p-3.5 text-xs sm:text-sm font-normal text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none leading-relaxed"
                 />
               </div>
@@ -1301,21 +1212,13 @@ function PostShiftScreen() {
             <div className="flex lg:hidden items-center gap-3 pt-2">
               <Button
                 type="button"
-                variant="outline"
-                onClick={() => handlePublishShift("Draft")}
-                className="flex-1 rounded-xl font-semibold text-xs h-11 cursor-pointer"
-              >
-                Save as draft
-              </Button>
-              <Button
-                type="button"
-                onClick={() => handlePublishShift("Open")}
+                onClick={handlePublishShift}
                 isLoading={submitting}
                 loadingText="Publishing shift..."
-                className="flex-2 rounded-xl font-bold text-xs h-11 gap-1.5 shadow-sm bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer"
+                className="w-full rounded-xl font-bold text-xs h-11 gap-1.5 shadow-sm bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer"
               >
                 <HiOutlineBolt className="h-4 w-4" />
-                <span>Publish shift</span>
+                <span>{editingShift ? "Update & Reconcile Shift" : "Publish & Dispatch Shift"}</span>
               </Button>
             </div>
           </div>
@@ -1414,43 +1317,67 @@ function PostShiftScreen() {
                 <div className="h-full bg-primary rounded-full w-full" />
               </div>
 
-              <div className="text-[11px] text-muted-foreground leading-relaxed flex items-center justify-between">
-                <span>Nearby verified {dept} specialists:</span>
-                <span className="font-bold text-foreground">~{estimatedTalentCount} available</span>
-              </div>
-
               {/* Escrow Balance & Bank Account Status */}
               <div className="pt-2.5 border-t border-border/60 space-y-1.5 text-[11px]">
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Clinician Escrow ({openings} × {activeHours}h):</span>
+                  <span className="font-mono font-semibold text-foreground">₹{workerEscrowTotal.toLocaleString("en-IN")}</span>
+                </div>
                 <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    Platform Fee ({facilityFeePercent === 0 ? "1st Shift Free" : `${facilityFeePercent}%`}):
+                  </span>
+                  <span className={cn("font-mono font-bold", facilityFeePercent === 0 ? "text-success" : "text-foreground")}>
+                    {facilityFeePercent === 0 ? "₹0 (Waived)" : `₹${facilityFeeAmount.toLocaleString("en-IN")}`}
+                  </span>
+                </div>
+                {shiftPolicy && !editingShift && (
+                  <div className={cn(
+                    "rounded-lg p-2 border text-[10.5px] font-semibold flex items-center gap-1.5",
+                    shiftPolicy.firstShiftApprovalRequired
+                      ? "bg-primary-soft border-primary/25 text-primary"
+                      : "bg-success-soft border-success/25 text-success"
+                  )}>
+                    <HiOutlineShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      {!shiftPolicy.kycVerified
+                        ? "Hospital KYC pending: Admin will verify this shift before it goes live"
+                        : shiftPolicy.firstShiftApprovalRequired
+                          ? "1st shift requires Admin approval · 2nd+ go live instantly"
+                          : "Verified Partner: Goes LIVE immediately upon publish"}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between pt-1">
                   <span className="text-muted-foreground">Available Escrow:</span>
-                  <span className={cn("font-mono font-bold", availableEscrow >= totalEscrowAmount ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>
+                  <span className={cn("font-mono font-bold", availableEscrow >= additionalEscrowNeeded ? "text-success" : "text-destructive")}>
                     ₹{availableEscrow.toLocaleString("en-IN")}
                   </span>
                 </div>
                 {!hasLinkedBank ? (
-                  <div className="rounded-lg p-2 bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 flex items-center justify-between gap-1.5">
+                  <div className="rounded-lg p-2 bg-primary-soft border border-primary/25 text-primary flex items-center justify-between gap-1.5">
                     <span>Bank account not linked</span>
                     <button
                       type="button"
                       onClick={() => navigate({ to: "/employer/wallet" })}
-                      className="font-bold underline hover:text-amber-900 cursor-pointer text-[10px]"
+                      className="font-bold underline cursor-pointer text-[10px]"
                     >
                       Link Bank &rarr;
                     </button>
                   </div>
-                ) : availableEscrow < totalEscrowAmount ? (
-                  <div className="rounded-lg p-2 bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 flex items-center justify-between gap-1.5">
+                ) : availableEscrow < additionalEscrowNeeded ? (
+                  <div className="rounded-lg p-2 bg-destructive/10 border border-destructive/25 text-destructive flex items-center justify-between gap-1.5">
                     <span>Insufficient escrow balance</span>
                     <button
                       type="button"
                       onClick={() => navigate({ to: "/employer/wallet" })}
-                      className="font-bold underline hover:text-amber-900 cursor-pointer text-[10px]"
+                      className="font-bold underline cursor-pointer text-[10px]"
                     >
                       Top Up &rarr;
                     </button>
                   </div>
                 ) : (
-                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                  <div className="text-[10px] text-success font-medium flex items-center gap-1">
                     <span>✓ Settlement bank verified · Escrow funds ready</span>
                   </div>
                 )}
@@ -1462,22 +1389,13 @@ function PostShiftScreen() {
               <Button
                 type="button"
                 size="lg"
-                onClick={() => handlePublishShift("Open")}
+                onClick={handlePublishShift}
                 isLoading={submitting}
                 loadingText="Publishing & Dispatching..."
                 className="w-full rounded-xl h-11 text-sm font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer flex items-center justify-center gap-2"
               >
                 <HiOutlineBolt className="h-4.5 w-4.5" />
-                <span>Publish &amp; Dispatch Shift</span>
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => handlePublishShift("Draft")}
-                className="w-full rounded-xl h-9 text-xs font-semibold border-border/80 hover:bg-muted cursor-pointer"
-              >
-                Save as draft
+                <span>{editingShift ? "Update & Reconcile Shift" : "Publish & Dispatch Shift"}</span>
               </Button>
             </div>
           </div>
@@ -1493,11 +1411,20 @@ function PostShiftScreen() {
 
           <DialogHeader className="text-center space-y-1">
             <DialogTitle className="text-xl font-black text-foreground">
-              Shift Published &amp; Dispatched!
+              {editingShift
+                ? "Shift Updated & Escrow Reconciled!"
+                : publishedStatus === "OPEN"
+                ? "Shift Live & Clinicians Notified!"
+                : "Shift Submitted for Admin Review!"}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground leading-relaxed max-w-sm mx-auto">
-              Your shift has been broadcast to{" "}
-              <strong className="text-foreground">{estimatedTalentCount} verified healthcare professionals</strong> in {city}.
+              {editingShift
+                ? "Your shift details and wallet escrow lock have been updated cleanly."
+                : publishedStatus === "OPEN"
+                ? <>Your shift is live immediately and broadcast to verified clinicians in {city || "your city"}.</>
+                : shiftPolicy && !shiftPolicy.kycVerified && (shiftPolicy.priorApprovedShiftsCount ?? 0) > 0
+                  ? "Compliance Admin will approve this shift shortly. Once your hospital KYC is verified, future shifts will publish immediately."
+                  : "As your facility's first shift, Compliance Admin will verify it shortly. Once hospital KYC is verified, subsequent shifts will publish instantly!"}
             </DialogDescription>
           </DialogHeader>
 

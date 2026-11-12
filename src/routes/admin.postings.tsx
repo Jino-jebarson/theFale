@@ -372,6 +372,7 @@ function JobApprovalsAdmin() {
           totalPayPaise: s.totalPayPaise,
           slotsClaimed: s.slotsClaimed || 0,
           urgent: Boolean(s.urgent || s.isUrgent),
+          autoApproved: Boolean(s.autoApproved),
           dutyNotes: s.description,
           rawShift: s,
         };
@@ -720,6 +721,16 @@ function JobApprovalsAdmin() {
                       )}>
                         {item.type === "shift" ? "Locum Shift" : "Permanent Role"}
                       </span>
+                      {item.type === "shift" && (
+                        <span className={cn(
+                          "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                          (item as any).autoApproved
+                            ? "text-emerald-700 bg-emerald-500/10 border-emerald-500/20 dark:text-emerald-300"
+                            : "text-amber-700 bg-amber-500/10 border-amber-500/20 dark:text-amber-300"
+                        )}>
+                          {(item as any).autoApproved ? "Auto-Live (2nd+)" : "1st-Shift Review"}
+                        </span>
+                      )}
                       {item.internship && (
                         <span className="text-[10px] font-bold text-amber-600 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
                           Internship

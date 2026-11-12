@@ -616,18 +616,18 @@ export interface Course {
   title: string;
   provider: string;
   category:
-    | "Critical Care"
-    | "Emergency & Trauma"
-    | "Infection Control"
-    | "Nursing Essentials"
-    | "Quality & NABH"
-    | "Pharmacology"
-    | "Clinical Pharmacology"
-    | "Dialysis & Renal"
-    | "Physiotherapy & Rehab"
-    | "Radiology & Imaging"
-    | "Student Essentials"
-    | (string & {});
+  | "Critical Care"
+  | "Emergency & Trauma"
+  | "Infection Control"
+  | "Nursing Essentials"
+  | "Quality & NABH"
+  | "Pharmacology"
+  | "Clinical Pharmacology"
+  | "Dialysis & Renal"
+  | "Physiotherapy & Rehab"
+  | "Radiology & Imaging"
+  | "Student Essentials"
+  | (string & {});
   duration: string;
   level: "Beginner" | "Intermediate" | "Advanced";
   cmeCredits: number;
@@ -1278,6 +1278,15 @@ export interface Applicant {
   actualHours?: number;
   scheduledHours?: number;
   hourlyRate?: number;
+  checkInPin?: string;
+  disputeReason?: string;
+  hospitalRating?: number;
+  hospitalReview?: string;
+  ratingTags?: string[];
+  candidateRatingAvg?: number;
+  candidateRatingCount?: number;
+  completedShiftsCount?: number;
+  shiftClaimStatus?: string;
   experienceList: { hospital: string; role: string; duration: string; details: string }[];
   resumeUrl?: string;
   resumeFileName?: string;

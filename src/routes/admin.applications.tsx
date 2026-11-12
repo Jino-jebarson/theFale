@@ -62,9 +62,13 @@ import {
   getPendingPayouts,
   disbursePayout,
 } from "@/lib/adapters/adminAdapter";
-import { type ShiftClaimDto } from "@/lib/adapters/shiftAdapter";
+import {
+  getDisputedShiftClaims,
+  resolveShiftDispute,
+  type ShiftClaimDto,
+} from "@/lib/adapters/shiftAdapter";
 import { HiOutlineBanknotes } from "react-icons/hi2";
-import { BotMessageSquare } from "lucide-react";
+import { BotMessageSquare, AlertTriangle } from "lucide-react";
 import { generateClinicalDocumentBlob } from "@/lib/clinicalDocumentPdf";
 import { screenApplicationWithAi } from "@/lib/adapters/aiAdapter";
 import {
@@ -129,8 +133,14 @@ function formatBytes(bytes?: number) {
 
 function ApplicationsAdmin() {
   const s = useApp();
-  const [filter, setFilter] = useState<"all" | "pending_admin" | "shortlisted" | "rejected" | "payouts">("pending_admin");
+  const [filter, setFilter] = useState<"all" | "pending_admin" | "shortlisted" | "rejected" | "payouts" | "disputes">("pending_admin");
   const [apiPayouts, setApiPayouts] = useState<ShiftClaimDto[]>([]);
+  const [apiDisputes, setApiDisputes] = useState<ShiftClaimDto[]>([]);
+  const [selectedDispute, setSelectedDispute] = useState<ShiftClaimDto | null>(null);
+  const [disputeResolution, setDisputeResolution] = useState<"RELEASE_TO_CANDIDATE" | "PARTIAL_SPLIT" | "REFUND_HOSPITAL">("RELEASE_TO_CANDIDATE");
+  const [disputeApprovedHours, setDisputeApprovedHours] = useState<number>(8);
+  const [disputeNotes, setDisputeNotes] = useState("");
+  const [resolvingDispute, setResolvingDispute] = useState(false);
   const [disburseModalOpen, setDisburseModalOpen] = useState(false);
   const [selectedPayout, setSelectedPayout] = useState<ShiftClaimDto | null>(null);
   const [utrInput, setUtrInput] = useState("");
@@ -229,9 +239,9 @@ function ApplicationsAdmin() {
               : rawStatus.includes("REVIEW") || rawStatus.includes("FLAG") || rawStatus.includes("REJECT")
                 ? false
                 : !lower.includes("not recommended") &&
-                  !lower.includes("reject") &&
-                  !lower.includes("discrepancy") &&
-                  !lower.includes("flagged");
+                !lower.includes("reject") &&
+                !lower.includes("discrepancy") &&
+                !lower.includes("flagged");
 
         const scoreRaw = sData["suitabilityScore"] ?? sData["confidence"] ?? app.matchScore;
         const suitabilityScore = formatConfidencePercent(scoreRaw, !isRecommended);
@@ -343,10 +353,11 @@ function ApplicationsAdmin() {
     if (!isApiEnabled) return;
     try {
       setLoading(true);
-      const [appsRes, shiftClaimsRes, payoutsRes, jobsRes] = await Promise.all([
+      const [appsRes, shiftClaimsRes, payoutsRes, disputesRes, jobsRes] = await Promise.all([
         getAdminApplications("all").catch(() => []),
         getPendingShiftClaims().catch(() => []),
         getPendingPayouts().catch(() => []),
+        getDisputedShiftClaims().catch(() => []),
         getJobs().catch(() => []),
       ]);
 
@@ -515,6 +526,7 @@ function ApplicationsAdmin() {
 
       setApiApps([...mappedApps, ...mappedShiftClaims]);
       setApiPayouts(payoutsRes);
+      setApiDisputes(disputesRes);
     } catch (err: any) {
       toast.error("Failed to load applications & shift claims", { description: err?.message });
     } finally {
@@ -644,6 +656,28 @@ function ApplicationsAdmin() {
       toast.error("Payout disbursement failed", { description: err?.message });
     } finally {
       setDisbursing(false);
+    }
+  };
+
+  const handleResolveDispute = async () => {
+    if (!selectedDispute) return;
+    setResolvingDispute(true);
+    try {
+      await resolveShiftDispute(selectedDispute.id, {
+        resolution: disputeResolution,
+        approvedHours: disputeResolution === "PARTIAL_SPLIT" ? disputeApprovedHours : undefined,
+        notes: disputeNotes.trim() || undefined,
+      });
+      toast.success("Shift Dispute Resolved", {
+        description: `Applied ${disputeResolution.replace(/_/g, " ")} for ${selectedDispute.candidateName || "Clinician"}.`,
+      });
+      setSelectedDispute(null);
+      setDisputeNotes("");
+      fetchApps();
+    } catch (err: any) {
+      toast.error("Failed to resolve dispute", { description: err?.message });
+    } finally {
+      setResolvingDispute(false);
     }
   };
 
@@ -812,6 +846,7 @@ function ApplicationsAdmin() {
               { id: "pending_admin" as const, label: "Pending Screening", count: pendingCount },
               { id: "shortlisted" as const, label: "Shortlisted", count: shortlistedCount },
               { id: "payouts" as const, label: "Escrow Payout Releases", count: apiPayouts.length },
+              { id: "disputes" as const, label: "Disputed Shifts", count: apiDisputes.length },
               { id: "rejected" as const, label: "Ineligible", count: rejectedCount },
               { id: "all" as const, label: "All Applications", count: apps.length },
             ].map((tab) => (
@@ -924,6 +959,72 @@ function ApplicationsAdmin() {
                         >
                           <HiOutlineBanknotes className="h-4 w-4" />
                           <span>Release Payout</span>
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : filter === "disputes" ? (
+          <div className="p-4 sm:p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-border/70">
+              <div>
+                <h2 className="text-base font-bold text-foreground">Shift Dispute Resolution Desk</h2>
+                <p className="text-xs text-muted-foreground">Arbitrate contested shift claims: release full payout, partial pro-rata split, or refund hospital escrow.</p>
+              </div>
+              <span className="w-fit text-xs font-bold px-3 py-1 rounded-full border border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-300">
+                {apiDisputes.length} Active Disputes
+              </span>
+            </div>
+
+            {apiDisputes.length === 0 ? (
+              <div className="py-16 text-center text-sm text-muted-foreground">
+                No disputed shift claims awaiting arbitration.
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {apiDisputes.map((d) => {
+                  const grossRupees = paiseToRupees(d.grossAmountPaise || 0);
+                  return (
+                    <div key={d.id} className="rounded-2xl border border-rose-200/80 dark:border-rose-900/50 bg-card p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-xs">
+                      <div className="space-y-1.5 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold text-sm text-foreground">{d.candidateName || "Clinician"}</span>
+                          <span className="text-xs text-muted-foreground">•</span>
+                          <span className="text-xs font-semibold text-primary">{d.shiftTitle || "Locum Shift"}</span>
+                          <span className="text-xs text-muted-foreground">at {d.facilityName || "Hospital"}</span>
+                          <span className="inline-flex items-center rounded-full px-2 py-0.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/25 text-[10px] font-bold">
+                            DISPUTED
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-3">
+                          <span>Scheduled: <strong>{d.hours || 8} hrs</strong></span>
+                          <span>Reported: <strong>{d.actualHours || d.hours || 8} hrs</strong></span>
+                          <span>Escrow Locked: <strong className="text-foreground">₹{grossRupees.toLocaleString("en-IN")}</strong></span>
+                          {d.disputedBy && <span>Raised by: <strong>{d.disputedBy}</strong></span>}
+                        </div>
+                        {d.disputeReason && (
+                          <p className="text-xs text-rose-700 dark:text-rose-300 bg-rose-50/70 dark:bg-rose-950/30 rounded-xl px-3 py-1.5 border border-rose-200/60 dark:border-rose-900/40">
+                            <AlertTriangle className="h-3.5 w-3.5 inline mr-1.5 -mt-0.5" />
+                            {d.disputeReason}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="shrink-0">
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setSelectedDispute(d);
+                            setDisputeResolution("PARTIAL_SPLIT");
+                            setDisputeApprovedHours(d.actualHours || d.hours || 8);
+                            setDisputeNotes("");
+                          }}
+                          className="h-9 px-4 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
+                        >
+                          Resolve Dispute
                         </Button>
                       </div>
                     </div>
@@ -1851,6 +1952,106 @@ function ApplicationsAdmin() {
             >
               <HiOutlineXMark className="h-4 w-4" />
               <span>Confirm Ineligible</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Resolve Shift Dispute Modal */}
+      <Dialog open={!!selectedDispute} onOpenChange={(open) => { if (!open) setSelectedDispute(null); }}>
+        <DialogContent className="max-w-md rounded-3xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-rose-600" />
+              Arbitrate Shift Dispute
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {selectedDispute?.candidateName || "Clinician"} · {selectedDispute?.shiftTitle || "Locum Shift"} ({selectedDispute?.facilityName || "Hospital"})
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedDispute && (
+            <div className="space-y-4 py-2 text-xs">
+              <div className="rounded-xl border border-border bg-muted/40 p-3 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Scheduled / Reported Hours</span>
+                  <span className="font-bold text-foreground">{selectedDispute.hours || 8}h / {selectedDispute.actualHours || selectedDispute.hours || 8}h</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Dispute Reason</span>
+                  <span className="font-semibold text-rose-600 dark:text-rose-400 text-right max-w-[60%]">{selectedDispute.disputeReason || "Contested duty hours"}</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-foreground block">Arbitration Decision</label>
+                <div className="grid gap-1.5">
+                  {[
+                    { id: "RELEASE_TO_CANDIDATE" as const, label: "Release Full Payout to Clinician" },
+                    { id: "PARTIAL_SPLIT" as const, label: "Partial Pro-Rata Split (Approve Verified Hours)" },
+                    { id: "REFUND_HOSPITAL" as const, label: "Full Refund to Hospital Escrow Wallet" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setDisputeResolution(opt.id)}
+                      className={cn(
+                        "w-full text-left rounded-xl px-3 py-2 font-semibold border transition-all cursor-pointer",
+                        disputeResolution === opt.id
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "border-input bg-card text-muted-foreground hover:border-ring"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {disputeResolution === "PARTIAL_SPLIT" && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-foreground block">Approved Billable Hours</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={(selectedDispute.hours || 8) + 4}
+                    value={disputeApprovedHours}
+                    onChange={(e) => setDisputeApprovedHours(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full h-10 rounded-xl border border-input bg-background px-3 text-sm font-bold"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-foreground block">Arbitration Resolution Notes</label>
+                <textarea
+                  rows={2}
+                  value={disputeNotes}
+                  onChange={(e) => setDisputeNotes(e.target.value)}
+                  placeholder="Document audit evidence or biometric log findings..."
+                  className="w-full rounded-xl border border-border bg-muted/40 p-2.5 text-xs outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={resolvingDispute}
+              onClick={() => setSelectedDispute(null)}
+              className="h-9 rounded-xl text-xs font-bold"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={resolvingDispute}
+              onClick={handleResolveDispute}
+              className="h-9 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-white"
+            >
+              {resolvingDispute ? "Applying..." : "Execute Arbitration"}
             </Button>
           </DialogFooter>
         </DialogContent>

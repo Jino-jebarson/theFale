@@ -540,6 +540,10 @@ export interface CandidateDossierInfo {
   cmeCredits?: number | string | undefined;
   documentsCount?: number | undefined;
   isMentor?: boolean | undefined;
+  shiftRatingAvg?: number | undefined;
+  shiftRatingCount?: number | undefined;
+  completedShiftsCount?: number | undefined;
+  topRated?: boolean | undefined;
   experiences?: CandidateCvExperienceItem[] | undefined;
   documents?: CandidateCvDocumentItem[] | undefined;
 }
@@ -959,6 +963,16 @@ export function generateCandidateDossierBlob(c: CandidateDossierInfo): Blob {
     if (c.isMentor) {
       credBullets.push("FALE Clinical Mentor Accreditation: Accredited Senior Clinical Mentor");
     }
+    if ((c.completedShiftsCount && c.completedShiftsCount > 0) || (c.shiftRatingCount && c.shiftRatingCount > 0)) {
+      const ratingPart =
+        c.shiftRatingAvg && c.shiftRatingCount && c.shiftRatingCount > 0
+          ? `Rated ${Number(c.shiftRatingAvg).toFixed(1)}/5 across ${c.shiftRatingCount} hospital evaluation${c.shiftRatingCount > 1 ? "s" : ""}`
+          : "Verified hospital locum duty";
+      const shiftsPart = c.completedShiftsCount ? `${c.completedShiftsCount} completed locum shift${c.completedShiftsCount > 1 ? "s" : ""}` : "";
+      const priorityPart = c.topRated ? " (Top-Rated Priority Clinician)" : "";
+      const joined = [ratingPart, shiftsPart].filter(Boolean).join(" | ");
+      credBullets.push(`FALE Locum Performance Record: ${joined}${priorityPart}`);
+    }
   }
 
   if (c.documents && c.documents.length > 0) {
@@ -1081,6 +1095,10 @@ export interface RawProfileForCv {
   openToWork?: boolean | undefined;
   kycStatus?: string | undefined;
   isMentor?: boolean | undefined;
+  shiftRatingAvg?: number | undefined;
+  shiftRatingCount?: number | undefined;
+  completedShiftsCount?: number | undefined;
+  topRated?: boolean | undefined;
   verifiedAt?: string | undefined;
   documents?: Array<{
     documentType: string;
@@ -1173,6 +1191,10 @@ export function buildCandidateDossierFromProfile(
     universityRegNo: cleanText(apiProfile?.universityRegNo || storeProfile["universityRegNo"]),
     expectedGraduationYear: apiProfile?.expectedGraduationYear ?? storeProfile["expectedGraduationYear"],
     isMentor: Boolean(apiProfile?.isMentor),
+    shiftRatingAvg: apiProfile?.shiftRatingAvg,
+    shiftRatingCount: apiProfile?.shiftRatingCount,
+    completedShiftsCount: apiProfile?.completedShiftsCount,
+    topRated: apiProfile?.topRated,
     experiences: rawExps,
     documents: docs,
   };

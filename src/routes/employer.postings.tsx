@@ -14,6 +14,8 @@ import {
   HiOutlineArrowPath,
   HiOutlineEye,
   HiOutlineCheckCircle,
+  HiOutlinePencilSquare,
+  HiOutlineTrash,
   HiArrowRight,
   HiXMark,
 } from "react-icons/hi2";
@@ -27,17 +29,19 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { jobs, shifts } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees, formatCurrency } from "@/lib/api";
 import {
+  attachFocusAndPollRefresh,
   getFacilityJobs,
   getFacilityApplicants,
   type JobPostingDto,
 } from "@/lib/adapters/facilityAdapter";
-import { getFacilityShifts, type UiShiftItem } from "@/lib/adapters/shiftAdapter";
+import { getFacilityShifts, cancelShift, type UiShiftItem } from "@/lib/adapters/shiftAdapter";
 
 export const Route = createFileRoute("/employer/postings")({
   head: () => ({
@@ -64,6 +68,8 @@ function EmployerPostings() {
   const [jobFilter, setJobFilter] = useState<"all" | "active" | "pending" | "closed">("all");
   const [shiftFilter, setShiftFilter] = useState<"all" | "open" | "booked" | "pending">("all");
   const [selectedJob, setSelectedJob] = useState<any | null>(null);
+  const [shiftToCancel, setShiftToCancel] = useState<any | null>(null);
+  const [cancellingShift, setCancellingShift] = useState(false);
 
   // Dynamic API state
   const [apiJobs, setApiJobs] = useState<JobPostingDto[]>([]);
@@ -71,27 +77,56 @@ function EmployerPostings() {
   const [apiApplicants, setApiApplicants] = useState<any[]>([]);
   const [loading, setLoading] = useState(isApiEnabled);
 
-  const fetchPostings = () => {
+  const fetchPostings = (silent = false) => {
     if (!isApiEnabled) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     Promise.all([
-      getFacilityJobs().catch(() => []),
-      getFacilityShifts().catch(() => []),
-      getFacilityApplicants().catch(() => []),
+      getFacilityJobs().catch(() => null),
+      getFacilityShifts().catch(() => null),
+      getFacilityApplicants().catch(() => null),
     ])
       .then(([fJobs, fShifts, fApps]) => {
-        setApiJobs(fJobs);
-        setApiShifts(fShifts);
-        setApiApplicants(fApps);
+        if (fJobs) setApiJobs(fJobs);
+        if (fShifts) setApiShifts(fShifts);
+        if (fApps) setApiApplicants(fApps);
       })
       .finally(() => {
-        setLoading(false);
+        if (!silent) setLoading(false);
       });
   };
 
   useEffect(() => {
-    fetchPostings();
+    fetchPostings(false);
+    if (!isApiEnabled) return;
+    const handleAppsUpdated = () => fetchPostings(true);
+    window.addEventListener("fale:applications-updated", handleAppsUpdated);
+    const detachAutoRefresh = attachFocusAndPollRefresh(() => fetchPostings(true), 15000);
+    return () => {
+      window.removeEventListener("fale:applications-updated", handleAppsUpdated);
+      detachAutoRefresh();
+    };
   }, []);
+
+  const handleConfirmCancelShift = async () => {
+    if (!shiftToCancel) return;
+    setCancellingShift(true);
+    try {
+      if (isApiEnabled) {
+        await cancelShift(shiftToCancel.id);
+      }
+      setApiShifts((prev) => prev.map((x) => (x.id === shiftToCancel.id ? { ...x, status: "CANCELLED" } : x)));
+      toast.success("Shift cancelled & escrow refunded", {
+        description: `₹${(shiftToCancel.totalEscrow || shiftToCancel.totalPayout || 0).toLocaleString("en-IN")} returned to your available wallet balance.`,
+      });
+      setShiftToCancel(null);
+    } catch (err: any) {
+      toast.error("Could not cancel shift", {
+        description: err?.message || "Shift has confirmed or active clinician duties.",
+      });
+    } finally {
+      setCancellingShift(false);
+    }
+  };
 
   // Map jobs
   const allJobs = useMemo(() => {
@@ -157,25 +192,34 @@ function EmployerPostings() {
   // Map shifts
   const allShifts = useMemo(() => {
     if (isApiEnabled) {
-      return apiShifts.map((sh) => {
+      return apiShifts.map((sh: any) => {
         let uiStatus = "Live Broadcast";
         if (sh.status === "FILLED" || sh.status === "COMPLETED") uiStatus = "Clinician Assigned";
         else if (sh.status === "PENDING_APPROVAL") uiStatus = "Awaiting Verification";
+        else if (sh.status === "CANCELLED") uiStatus = "Cancelled";
+        else if (sh.status === "REJECTED") uiStatus = "Rejected";
+        else if (sh.status === "EXPIRED") uiStatus = "Expired";
+
+        const perWorkerTotal = sh.totalPayNumber || ((sh.rate || 650) * (sh.hours || 8));
+        const totalEscrow = sh.totalEscrowRequiredPaise ? paiseToRupees(sh.totalEscrowRequiredPaise) : perWorkerTotal * (sh.slots || 1);
 
         return {
           id: sh.id,
           title: sh.title,
           dept: sh.dept || "Emergency & Trauma",
           date: sh.date || "Today",
-          timeSlot: sh.timeSlot || `${sh.startTime || "08:00"} - ${sh.endTime || "16:00"}`,
+          timeSlot: sh.time || sh.timeSlot || `${sh.startTime || "08:00"} - ${sh.endTime || "16:00"}`,
           hours: sh.hours || 8,
           rate: sh.rate || 650,
-          totalPayout: (sh.rate || 650) * (sh.hours || 8),
+          totalPayout: perWorkerTotal,
+          totalEscrow,
+          facilityFeePercent: sh.facilityFeePercent ?? 0,
+          autoApproved: Boolean(sh.autoApproved),
           slots: sh.slots || 1,
           slotsClaimed: sh.slotsClaimed || (sh.status === "FILLED" ? 1 : 0),
           status: uiStatus,
-          rawStatus: sh.status,
-          urgency: sh.urgency || "Standard",
+          rawStatus: (sh.status || "OPEN").toUpperCase(),
+          urgency: sh.urgent ? "Urgent" : (sh.urgency || "Standard"),
         };
       });
     }
@@ -189,6 +233,9 @@ function EmployerPostings() {
       hours: 8,
       rate: sh.rate,
       totalPayout: sh.total,
+      totalEscrow: sh.total * 2,
+      facilityFeePercent: 0,
+      autoApproved: false,
       slots: 2,
       slotsClaimed: 1,
       status: "Live Broadcast",
@@ -216,10 +263,13 @@ function EmployerPostings() {
     });
   }, [allJobs, jobFilter, search]);
 
+  const isShiftBooked = (sh: { status: string; slotsClaimed: number }) =>
+    sh.status === "Clinician Assigned" || sh.slotsClaimed > 0;
+
   const filteredShifts = useMemo(() => {
     return allShifts.filter((sh) => {
       if (shiftFilter === "open" && sh.status !== "Live Broadcast") return false;
-      if (shiftFilter === "booked" && sh.status !== "Clinician Assigned") return false;
+      if (shiftFilter === "booked" && !isShiftBooked(sh)) return false;
       if (shiftFilter === "pending" && sh.status !== "Awaiting Verification") return false;
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -362,7 +412,7 @@ function EmployerPostings() {
                 [
                   { id: "all", label: "All Shifts", count: allShifts.length },
                   { id: "open", label: "Live Broadcast", count: allShifts.filter((s) => s.status === "Live Broadcast").length },
-                  { id: "booked", label: "Clinician Assigned", count: allShifts.filter((s) => s.status === "Clinician Assigned").length },
+                  { id: "booked", label: "Clinician Assigned", count: allShifts.filter(isShiftBooked).length },
                   { id: "pending", label: "In Review", count: allShifts.filter((s) => s.status === "Awaiting Verification").length },
                 ] as const
               ).map((f) => (
@@ -575,18 +625,50 @@ function EmployerPostings() {
                   </div>
 
                   <div className="pt-3 border-t border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                    <span className="text-emerald-600 font-semibold text-[11px] flex items-center gap-1">
-                      <HiOutlineShieldCheck className="h-4 w-4 shrink-0" /> 24h Escrow Locked (Est: ₹{sh.totalPayout?.toLocaleString("en-IN")})
+                    <span className="text-emerald-600 font-semibold text-[11px] flex items-center gap-1 flex-wrap">
+                      <HiOutlineShieldCheck className="h-4 w-4 shrink-0" />
+                      <span>
+                        Escrow Locked: ₹{(sh.totalEscrow || sh.totalPayout)?.toLocaleString("en-IN")}
+                        {sh.facilityFeePercent === 0 ? " (0% 1st-Shift Fee)" : ` (incl. ${sh.facilityFeePercent}% fee)`}
+                      </span>
                     </span>
 
-                    <div className="w-full sm:w-auto">
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+                      {["PENDING_APPROVAL", "OPEN", "FILLED"].includes(sh.rawStatus) && (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              window.location.href = `/employer/post-shift?editId=${sh.id}`;
+                            }}
+                            className="h-8.5 rounded-xl text-xs font-semibold gap-1 border-border hover:bg-muted cursor-pointer"
+                          >
+                            <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                            <span>Edit</span>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setShiftToCancel(sh)}
+                            className="h-8.5 rounded-xl text-xs font-semibold gap-1 border-rose-200 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                          >
+                            <HiOutlineTrash className="h-3.5 w-3.5" />
+                            <span>Delete</span>
+                          </Button>
+                        </>
+                      )}
                       <Button
                         asChild
                         size="sm"
-                        className="h-8.5 rounded-xl text-xs font-bold bg-primary hover:bg-primary/90 text-white cursor-pointer shadow-2xs w-full sm:w-auto justify-center"
+                        className="h-8.5 rounded-xl text-xs font-bold bg-primary hover:bg-primary/90 text-white cursor-pointer shadow-2xs justify-center"
                       >
                         <Link to="/employer/applicants" className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                          <span>View Claimed Clinicians</span>
+                          <span>
+                            {sh.slotsClaimed > 0
+                              ? `Review Claimed (${sh.slotsClaimed})`
+                              : "View Claimed Clinicians"}
+                          </span>
                           <HiArrowRight className="h-3.5 w-3.5 shrink-0" />
                         </Link>
                       </Button>
@@ -677,6 +759,51 @@ function EmployerPostings() {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+        {/* Cancel / Delete Shift & Refund Escrow Confirmation Dialog */}
+        <Dialog open={!!shiftToCancel} onOpenChange={(open) => !open && setShiftToCancel(null)}>
+          <DialogContent className="flex flex-col gap-4 sm:max-w-md rounded-2xl border border-border bg-card p-5 sm:p-6">
+            <DialogHeader className="text-left pr-8 space-y-1.5">
+              <DialogTitle className="text-base font-extrabold text-foreground">
+                Cancel &amp; Delete Shift Posting?
+              </DialogTitle>
+              <DialogDescription className="text-xs leading-relaxed text-muted-foreground">
+                Cancelling <strong className="text-foreground">{shiftToCancel?.title}</strong> will remove it from clinician feeds and automatically refund locked escrow back to your hospital wallet.
+              </DialogDescription>
+            </DialogHeader>
+            {shiftToCancel && (
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-xs">
+                <div className="flex items-center justify-between gap-3 font-semibold">
+                  <span className="text-muted-foreground">Full Escrow Refund to Wallet</span>
+                  <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 shrink-0">
+                    ₹{(shiftToCancel.totalEscrow || shiftToCancel.totalPayout || 0).toLocaleString("en-IN")}
+                  </span>
+                </div>
+              </div>
+            )}
+            <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5 sm:space-x-0 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={cancellingShift}
+                onClick={() => setShiftToCancel(null)}
+                className="h-9 px-4 rounded-xl text-xs font-bold w-full sm:w-auto"
+              >
+                Keep Shift
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={cancellingShift}
+                onClick={handleConfirmCancelShift}
+                className="h-9 px-4 rounded-xl text-xs font-bold w-full sm:w-auto cursor-pointer"
+              >
+                {cancellingShift ? "Refunding Escrow..." : "Confirm Delete & Refund"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

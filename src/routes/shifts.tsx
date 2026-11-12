@@ -22,6 +22,7 @@ import {
   HiOutlineInformationCircle,
 } from "react-icons/hi2";
 import { toast } from "sonner";
+import { Star, KeyRound, AlertTriangle } from "lucide-react";
 import { AppShell, PageHead } from "@/components/fale/AppShell";
 import { StudentLockCard } from "@/components/fale/StudentLockCard";
 import { OrgMark } from "@/components/fale/JobCard";
@@ -47,7 +48,7 @@ import {
 import { shifts } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { isApiEnabled } from "@/lib/api";
+import { isApiEnabled, paiseToRupees } from "@/lib/api";
 import {
   getOpenShifts,
   claimShift,
@@ -55,9 +56,11 @@ import {
   getMyClaims,
   checkInShift,
   completeShift,
+  disputeShift,
   type UiShiftItem,
   type ShiftClaimDto,
 } from "@/lib/adapters/shiftAdapter";
+import { attachFocusAndPollRefresh } from "@/lib/adapters/facilityAdapter";
 import { getCandidateProfile } from "@/lib/adapters/candidateAdapter";
 import { calculateClinicalMatch, type MatchCandidateInput } from "@/lib/clinicalMatchingEngine";
 
@@ -76,11 +79,56 @@ export const Route = createFileRoute("/shifts")({
 });
 
 const timingOpts = [
+  { id: "open", label: "Open Shifts" },
+  { id: "applied", label: "My Applied" },
+  { id: "completed", label: "Completed" },
   { id: "all", label: "All Shifts" },
   { id: "day", label: "Day Shifts" },
   { id: "night", label: "Night Shifts" },
   { id: "urgent", label: "Urgent Surge", withIcon: true },
 ] as const;
+
+function buildFallbackShiftFromClaim(claim: ShiftClaimDto): UiShiftItem {
+  const hours = claim.hours || 8;
+  const grossPaise = claim.grossAmountPaise ?? claim.payoutPaise ?? 0;
+  const totalRupees = paiseToRupees(grossPaise);
+  const rateRupees = hours > 0 && totalRupees > 0 ? Math.round(totalRupees / hours) : 0;
+  const startIso = claim.shiftStartAt || claim.startAt;
+  const endIso = claim.shiftEndAt || claim.endAt;
+  const startDate = startIso ? new Date(startIso) : new Date();
+  const endDate = endIso ? new Date(endIso) : new Date(startDate.getTime() + hours * 60 * 60 * 1000);
+  const startStr = `${startDate.getHours().toString().padStart(2, "0")}:${startDate.getMinutes().toString().padStart(2, "0")}`;
+  const endStr = `${endDate.getHours().toString().padStart(2, "0")}:${endDate.getMinutes().toString().padStart(2, "0")}`;
+  const dateFormatted = startDate.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+  });
+  const claimUpper = (claim.status || "").toUpperCase();
+  return {
+    id: claim.shiftId,
+    title: claim.shiftTitle || "Locum Shift",
+    org: claim.facilityName || "Hospital Partner",
+    dept: claim.shiftDepartment || "Clinical Duty",
+    city: claim.candidateCity || "Chennai",
+    time: `${startStr} – ${endStr}`,
+    date: dateFormatted,
+    startAt: startIso,
+    pay: `₹${totalRupees.toLocaleString("en-IN")}`,
+    rate: rateRupees,
+    rateNumber: rateRupees,
+    totalPayNumber: totalRupees,
+    urgent: false,
+    slots: 1,
+    slotsClaimed: 1,
+    status: claimUpper === "COMPLETED" ? "COMPLETED" : "FILLED",
+    perks: ["Guaranteed 24-hr Payout", "Malpractice Covered"],
+    hours,
+    rawRatePerHourPaise: rateRupees * 100,
+    rawTotalPayoutPaise: grossPaise,
+    hasClaimed: !["CANCELLED", "WITHDRAWN", "REJECTED", "SLOT_FILLED", "NO_SHOW"].includes(claimUpper),
+    endAt: endIso,
+  };
+}
 
 function Shifts() {
   const s = useApp();
@@ -93,7 +141,7 @@ function Shifts() {
 
   const [q, setQ] = useState("");
   const [cityF, setCityF] = useState("All Cities");
-  const [timingF, setTimingF] = useState<"all" | "day" | "night" | "urgent">("all");
+  const [timingF, setTimingF] = useState<"open" | "applied" | "completed" | "all" | "day" | "night" | "urgent">("open");
   const [sort, setSort] = useState<"pay" | "rate" | "earliest">("pay");
 
   // Dynamic API state
@@ -105,36 +153,57 @@ function Shifts() {
 
   useEffect(() => {
     if (!isApiEnabled) return;
-    setLoading(true);
-    Promise.all([
-      getOpenShifts().catch(() => []),
-      getMyClaims().catch(() => []),
-      getCandidateProfile().catch(() => null),
-    ])
-      .then(([fetchedShifts, fetchedClaims, profile]) => {
-        setApiShifts(fetchedShifts);
-        setMyClaims(fetchedClaims);
-        if (profile) {
-          setState((prev) => ({
-            candidateLevel: profile.isStudent ? "student" : (profile.candidateLevel?.toLowerCase() as any),
-            profile: {
-              ...prev.profile,
-              name: profile.name || prev.profile["name"],
-              role: profile.profession || prev.profile["role"],
-              specialty: profile.specialty || prev.profile["specialty"],
-              city: profile.city || prev.profile["city"],
-            },
-          }));
-        }
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+    let mounted = true;
+    const fetchShiftPortal = (silent = false) => {
+      if (!silent) setLoading(true);
+      Promise.all([
+        getOpenShifts().catch(() => []),
+        getMyClaims().catch(() => []),
+        getCandidateProfile().catch(() => null),
+      ])
+        .then(([fetchedShifts, fetchedClaims, profile]) => {
+          if (!mounted) return;
+          setApiShifts(fetchedShifts);
+          setMyClaims(fetchedClaims);
+          if (profile) {
+            setState((prev) => ({
+              candidateLevel: profile.isStudent ? "student" : (profile.candidateLevel?.toLowerCase() as any),
+              profile: {
+                ...prev.profile,
+                name: profile.name || prev.profile["name"],
+                role: profile.profession || prev.profile["role"],
+                specialty: profile.specialty || prev.profile["specialty"],
+                city: profile.city || prev.profile["city"],
+              },
+            }));
+          }
+        })
+        .finally(() => {
+          if (mounted && !silent) setLoading(false);
+        });
+    };
+
+    fetchShiftPortal(false);
+    const detachRefresh = attachFocusAndPollRefresh(() => fetchShiftPortal(true), 15000);
+    return () => {
+      mounted = false;
+      detachRefresh();
+    };
   }, []);
 
   const allShifts = useMemo(() => {
     if (isApiEnabled) {
-      return apiShifts;
+      const seenIds = new Set(apiShifts.map((sh) => sh.id));
+      const missingClaimedShifts: UiShiftItem[] = [];
+      for (const claim of myClaims) {
+        const claimStatus = (claim.status || "").toUpperCase();
+        if (claimStatus === "CANCELLED" || claimStatus === "WITHDRAWN") continue;
+        if (!seenIds.has(claim.shiftId)) {
+          seenIds.add(claim.shiftId);
+          missingClaimedShifts.push(buildFallbackShiftFromClaim(claim));
+        }
+      }
+      return [...apiShifts, ...missingClaimedShifts];
     }
     const userPosted = (s.postedShifts ?? []).map((ps) => ({
       ...ps,
@@ -142,7 +211,7 @@ function Shifts() {
       urgent: ps.urgent ?? false,
     }));
     return [...userPosted, ...shifts];
-  }, [s.postedShifts, apiShifts]);
+  }, [s.postedShifts, apiShifts, myClaims]);
 
   // Dynamic Unique City Options
   const cityOpts = useMemo(() => {
@@ -153,11 +222,34 @@ function Shifts() {
 
   const claimedShiftIds = useMemo(() => {
     const fromClaims = myClaims
-      .filter((c) => !["CANCELLED", "REJECTED", "WITHDRAWN"].includes((c.status || "").toUpperCase()))
+      .filter((c) => !["CANCELLED", "REJECTED", "WITHDRAWN", "SLOT_FILLED", "NO_SHOW"].includes((c.status || "").toUpperCase()))
       .map((c) => c.shiftId);
     const fromApiShifts = apiShifts.filter((sh) => sh.hasClaimed).map((sh) => sh.id);
+    if (isApiEnabled) {
+      return Array.from(new Set([...fromClaims, ...fromApiShifts]));
+    }
     return Array.from(new Set([...fromClaims, ...fromApiShifts, ...(s.shiftApps || [])]));
   }, [myClaims, apiShifts, s.shiftApps]);
+
+  const completedShiftIds = useMemo(() => {
+    return new Set(
+      myClaims
+        .filter((c) => (c.status || "").toUpperCase() === "COMPLETED")
+        .map((c) => c.shiftId)
+    );
+  }, [myClaims]);
+
+  const activeAppliedShiftIds = useMemo(() => {
+    return claimedShiftIds.filter((id) => !completedShiftIds.has(id));
+  }, [claimedShiftIds, completedShiftIds]);
+
+  const isShiftOpenToApply = (sh: UiShiftItem) => {
+    if (claimedShiftIds.includes(sh.id) || completedShiftIds.has(sh.id)) return false;
+    const upper = (sh.status || "").toUpperCase();
+    if (["BOOKED", "FILLED", "COMPLETED", "CANCELLED", "EXPIRED"].includes(upper)) return false;
+    if (sh.slots !== undefined && sh.slotsClaimed !== undefined && sh.slotsClaimed >= sh.slots) return false;
+    return true;
+  };
 
   // Dynamic Shift Counts for Timing Pills
   const timingCounts = useMemo(() => {
@@ -177,12 +269,15 @@ function Shifts() {
     };
 
     return {
+      open: base.filter(isShiftOpenToApply).length,
+      applied: base.filter((sh) => activeAppliedShiftIds.includes(sh.id)).length,
+      completed: base.filter((sh) => completedShiftIds.has(sh.id)).length,
       all: base.length,
-      day: base.filter(isDay).length,
-      night: base.filter(isNight).length,
-      urgent: base.filter((sh) => Boolean(sh.urgent)).length,
+      day: base.filter((sh) => isDay(sh) && isShiftOpenToApply(sh)).length,
+      night: base.filter((sh) => isNight(sh) && isShiftOpenToApply(sh)).length,
+      urgent: base.filter((sh) => Boolean(sh.urgent) && isShiftOpenToApply(sh)).length,
     };
-  }, [allShifts, q, cityF]);
+  }, [allShifts, claimedShiftIds, activeAppliedShiftIds, completedShiftIds, q, cityF]);
 
   // Candidate profile input for Clinical-Grade Matching
   const candidateInput = useMemo<MatchCandidateInput>(() => {
@@ -220,15 +315,29 @@ function Shifts() {
         urgent: Boolean(sh.urgent),
       });
 
+      const canonicalScore =
+        typeof (sh as any).matchScore === "number" && (sh as any).matchScore > 0
+          ? (sh as any).matchScore
+          : matchResult.score;
+
       return {
         ...sh,
-        matchScore: matchResult.score,
-        matchResult,
+        matchScore: canonicalScore,
+        matchResult: {
+          ...matchResult,
+          score: canonicalScore,
+        },
       };
     });
   }, [allShifts, candidateInput]);
 
   const filteredShifts = useMemo(() => {
+    const getBucketRank = (sh: UiShiftItem) => {
+      if (activeAppliedShiftIds.includes(sh.id)) return timingF === "all" ? 1 : 0;
+      if (completedShiftIds.has(sh.id)) return 2;
+      return 0; // Open shifts first in "all"
+    };
+
     return shiftsWithMatch
       .filter((sh) => {
         if (q && !`${sh.title} ${sh.org} ${sh.dept} ${sh.city}`.toLowerCase().includes(q.toLowerCase())) {
@@ -237,20 +346,32 @@ function Shifts() {
         if (cityF !== "All Cities" && sh.city.toLowerCase() !== cityF.toLowerCase()) {
           return false;
         }
-        if (timingF === "urgent" && !sh.urgent) {
+        if (timingF === "open" && !isShiftOpenToApply(sh)) {
+          return false;
+        }
+        if (timingF === "applied" && !activeAppliedShiftIds.includes(sh.id)) {
+          return false;
+        }
+        if (timingF === "completed" && !completedShiftIds.has(sh.id)) {
+          return false;
+        }
+        if (timingF === "urgent" && (!sh.urgent || !isShiftOpenToApply(sh))) {
           return false;
         }
         if (timingF === "day") {
           const startHour = Number.parseInt(sh.time?.split(":")[0] ?? "0", 10);
-          if (startHour >= 18 || startHour < 6) return false;
+          if (startHour >= 18 || startHour < 6 || !isShiftOpenToApply(sh)) return false;
         }
         if (timingF === "night") {
           const startHour = Number.parseInt(sh.time?.split(":")[0] ?? "0", 10);
-          if (startHour < 18 && startHour >= 6) return false;
+          if ((startHour < 18 && startHour >= 6) || !isShiftOpenToApply(sh)) return false;
         }
         return true;
       })
       .sort((a, b) => {
+        const rankDiff = getBucketRank(a) - getBucketRank(b);
+        if (rankDiff !== 0) return rankDiff;
+
         const aRate = typeof a.rate === "number" ? a.rate : (a as any).rateNumber || 0;
         const bRate = typeof b.rate === "number" ? b.rate : (b as any).rateNumber || 0;
         const aHours = a.hours || 8;
@@ -260,7 +381,7 @@ function Shifts() {
         if (sort === "rate") return bRate - aRate;
         return a.date.localeCompare(b.date);
       });
-  }, [shiftsWithMatch, q, cityF, timingF, sort]);
+  }, [shiftsWithMatch, claimedShiftIds, activeAppliedShiftIds, completedShiftIds, q, cityF, timingF, sort]);
 
   const appliedShiftObjects = useMemo(() => {
     return allShifts.filter((sh) => claimedShiftIds.includes(sh.id));
@@ -283,13 +404,23 @@ function Shifts() {
   }, [isApiEnabled, myClaims, s.shiftApps]);
 
   const totalPotentialEarnings = useMemo(() => {
+    if (isApiEnabled && myClaims.length > 0) {
+      return myClaims
+        .filter((c) => !["CANCELLED", "REJECTED", "WITHDRAWN", "SLOT_FILLED", "NO_SHOW"].includes((c.status || "").toUpperCase()))
+        .reduce((acc, c) => {
+          const paise = c.grossAmountPaise ?? c.payoutPaise ?? 0;
+          if (paise > 0) return acc + paiseToRupees(paise);
+          const matched = appliedShiftObjects.find((sh) => sh.id === c.shiftId);
+          return acc + (matched?.totalPayNumber || 0);
+        }, 0);
+    }
     return appliedShiftObjects.reduce((acc, sh) => {
       const r = typeof sh.rate === "number" ? sh.rate : (sh as any).rateNumber || 0;
       const h = sh.hours || 8;
       const pay = sh.totalPayNumber || (r * h);
       return acc + pay;
     }, 0);
-  }, [appliedShiftObjects]);
+  }, [isApiEnabled, myClaims, appliedShiftObjects]);
 
   const handleApply = async (id: string, title: string, org: string) => {
     if (applyingId === id) return;
@@ -323,6 +454,9 @@ function Shifts() {
       setApiShifts((prev) =>
         prev.map((item) => (item.id === id ? { ...item, hasClaimed: true } : item))
       );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("fale:applications-updated"));
+      }
       const hasLinkedPayout = Boolean(s.candidatePayoutMethod && (s.candidatePayoutMethod.upiId || s.candidatePayoutMethod.accountNumber));
       if (!hasLinkedPayout) {
         toast.success("Shift claimed successfully!", {
@@ -335,13 +469,14 @@ function Shifts() {
       }
     } catch (err: any) {
       const msg = err?.message || "";
-      if (msg.toLowerCase().includes("already claimed") || err?.status === 409) {
+      if (msg.toLowerCase().includes("already claimed")) {
         setState((x) => ({
           shiftApps: Array.from(new Set([...(x.shiftApps || []), id])),
         }));
         setApiShifts((prev) =>
           prev.map((item) => (item.id === id ? { ...item, hasClaimed: true } : item))
         );
+        getMyClaims().then(setMyClaims).catch(() => {});
         toast.info("Shift already claimed", {
           description: "You have already claimed a slot for this shift. Check status under review.",
         });
@@ -387,15 +522,77 @@ function Shifts() {
     }
   };
 
-  const handleCheckIn = async (claimId: string, shiftTitle: string) => {
+  const [pinModalData, setPinModalData] = useState<{
+    claimId: string;
+    shiftTitle: string;
+    org: string;
+  } | null>(null);
+  const [checkInPinInput, setCheckInPinInput] = useState("");
+  const [submittingPin, setSubmittingPin] = useState(false);
+
+  const [disputeModalData, setDisputeModalData] = useState<{
+    claimId: string;
+    shiftTitle: string;
+  } | null>(null);
+  const [disputeReasonInput, setDisputeReasonInput] = useState("");
+  const [submittingDispute, setSubmittingDispute] = useState(false);
+
+  const validFeeClaimCount = useMemo(() => {
+    return myClaims.filter(
+      (c) =>
+        !["CANCELLED", "REJECTED", "WITHDRAWN", "SLOT_FILLED", "NO_SHOW"].includes(
+          (c.status || "").toUpperCase()
+        )
+    ).length;
+  }, [myClaims]);
+
+  const handleOpenCheckInModal = (claimId: string, shiftTitle: string, org: string) => {
+    setPinModalData({ claimId, shiftTitle, org });
+    setCheckInPinInput("");
+  };
+
+  const handleConfirmPinCheckIn = async () => {
+    if (!pinModalData) return;
+    const pin = checkInPinInput.trim();
+    if (!/^\d{4}$/.test(pin)) {
+      toast.error("Enter the 4-digit Floor Check-In PIN provided by hospital HR/ward supervisor");
+      return;
+    }
+    setSubmittingPin(true);
     try {
-      const updated = await checkInShift(claimId);
-      setMyClaims((prev) => prev.map((c) => (c.id === claimId ? updated : c)));
+      const updated = await checkInShift(pinModalData.claimId, pin);
+      setMyClaims((prev) => prev.map((c) => (c.id === pinModalData.claimId ? updated : c)));
       toast.success("Checked in on hospital floor!", {
-        description: `Duty started for "${shiftTitle}". Payout escrow is locked.`,
+        description: `Duty started for "${pinModalData.shiftTitle}". Payout escrow is locked.`,
       });
+      setPinModalData(null);
+      setCheckInPinInput("");
     } catch (err: any) {
       toast.error("Check-in failed", { description: err?.message });
+    } finally {
+      setSubmittingPin(false);
+    }
+  };
+
+  const handleSubmitDispute = async () => {
+    if (!disputeModalData) return;
+    if (!disputeReasonInput.trim()) {
+      toast.error("Please enter a dispute reason");
+      return;
+    }
+    setSubmittingDispute(true);
+    try {
+      const updated = await disputeShift(disputeModalData.claimId, disputeReasonInput.trim());
+      setMyClaims((prev) => prev.map((c) => (c.id === disputeModalData.claimId ? updated : c)));
+      toast.warning("Dispute escalated to FALE Clinical Ops", {
+        description: "Escrow remains safely locked until dispute review concludes.",
+      });
+      setDisputeModalData(null);
+      setDisputeReasonInput("");
+    } catch (err: any) {
+      toast.error("Could not escalate dispute", { description: err?.message });
+    } finally {
+      setSubmittingDispute(false);
     }
   };
 
@@ -484,7 +681,11 @@ function Shifts() {
       {/* ================= APPLE-STYLE METRIC STATS ================= */}
       <div className="mb-7 grid gap-4 sm:grid-cols-3">
         {/* Metric 1 */}
-        <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md">
+        <button
+          type="button"
+          onClick={() => setTimingF(activeAppliedShiftIds.length > 0 ? "applied" : completedShiftIds.size > 0 ? "completed" : "open")}
+          className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md hover:border-primary/40 text-left cursor-pointer w-full"
+        >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               Applied shifts
@@ -503,7 +704,7 @@ function Shifts() {
               <span>Ready to claim your next shift</span>
             )}
           </p>
-        </div>
+        </button>
 
         {/* Metric 2 */}
         <div className="surface group relative overflow-hidden rounded-3xl border border-border/80 bg-card p-5 shadow-xs transition-all hover:shadow-md">
@@ -678,13 +879,13 @@ function Shifts() {
                   <p className="text-xs font-bold text-muted-foreground">
                     Showing <span className="text-foreground">{filteredShifts.length}</span> verified shifts
                   </p>
-                  {(q || cityF !== "All Cities" || timingF !== "all") && (
+                  {(q || cityF !== "All Cities" || timingF !== "open") && (
                     <button
                       type="button"
                       onClick={() => {
                         setQ("");
                         setCityF("All Cities");
-                        setTimingF("all");
+                        setTimingF("open");
                       }}
                       className="text-xs font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
                     >
@@ -723,13 +924,20 @@ function Shifts() {
                   <div className="grid gap-5 md:grid-cols-2">
                     {filteredShifts.map((sh) => {
                       const activeClaim = myClaims.find(
-                        (c) => c.shiftId === sh.id && !["CANCELLED", "REJECTED", "WITHDRAWN", "SLOT_FILLED"].includes((c.status || "").toUpperCase())
+                        (c) =>
+                          c.shiftId === sh.id &&
+                          !["CANCELLED", "REJECTED", "WITHDRAWN", "SLOT_FILLED", "NO_SHOW"].includes(
+                            (c.status || "").toUpperCase()
+                          )
                       );
                       const isClaimCancelled = myClaims.some(
                         (c) => c.shiftId === sh.id && ["CANCELLED", "WITHDRAWN"].includes((c.status || "").toUpperCase())
                       );
                       const isClaimRejected = myClaims.some(
                         (c) => c.shiftId === sh.id && (c.status || "").toUpperCase() === "REJECTED"
+                      );
+                      const isClaimNoShow = myClaims.some(
+                        (c) => c.shiftId === sh.id && (c.status || "").toUpperCase() === "NO_SHOW"
                       );
                       const isSlotFilled = myClaims.some(
                         (c) => c.shiftId === sh.id && (c.status || "").toUpperCase() === "SLOT_FILLED"
@@ -740,7 +948,8 @@ function Shifts() {
                         sh.slotsClaimed >= sh.slots &&
                         !activeClaim
                       ) || ["BOOKED", "FILLED"].includes((sh.status || "").toUpperCase());
-                      const applied = Boolean(activeClaim) || ((Boolean(sh.hasClaimed) || claimedShiftIds.includes(sh.id)) && !isClaimCancelled && !isClaimRejected && !isSlotFilled);
+                      const applied = Boolean(activeClaim) || ((Boolean(sh.hasClaimed) || claimedShiftIds.includes(sh.id)) && !isClaimCancelled && !isClaimRejected && !isSlotFilled && !isClaimNoShow);
+                      const feePercent = activeClaim?.platformFeePercent ?? (validFeeClaimCount === 0 ? 0 : 5);
                       const rateNumber = typeof sh.rate === "number"
                         ? sh.rate
                         : (sh.rateNumber || parseFloat(String(sh.rate).replace(/[^0-9.]/g, "")) || 0);
@@ -800,6 +1009,16 @@ function Shifts() {
                                   Urgent Cover
                                 </span>
                               )}
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] sm:text-[11px] font-bold border",
+                                  feePercent === 0
+                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25"
+                                    : "bg-muted/70 text-muted-foreground border-border"
+                                )}
+                              >
+                                {feePercent === 0 ? "0% Fee (1st Shift Waiver)" : `${feePercent}% Platform Fee`}
+                              </span>
                             </div>
 
                             {/* Schedule & Location Grid - responsive so time/dept never truncate */}
@@ -843,57 +1062,154 @@ function Shifts() {
                           </div>
 
                           {/* Bottom Earnings & Action Dock */}
-                          <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl bg-muted/30 p-3.5 border border-border/60">
-                            <div>
-                              <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
-                                Guaranteed Shift Pay • ₹{rateNumber.toLocaleString("en-IN")}/hr
-                              </p>
-                              <div className="flex items-baseline gap-1.5 mt-0.5">
-                                <span className="text-xl font-black text-foreground">
-                                  ₹{totalPay.toLocaleString("en-IN")}
-                                </span>
-                                <span className="text-xs font-semibold text-muted-foreground">
-                                  (₹{rateNumber.toLocaleString("en-IN")}/hr × {hoursNumber} hrs)
-                                </span>
+                          <div className="mt-5 flex flex-col gap-3 rounded-2xl bg-muted/30 p-3.5 sm:p-4 border border-border/60">
+                            <div className="flex flex-wrap items-center justify-between gap-2.5">
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+                                  Guaranteed Shift Pay • ₹{rateNumber.toLocaleString("en-IN")}/hr
+                                </p>
+                                <div className="flex flex-wrap items-baseline gap-1.5 mt-0.5">
+                                  <span className="text-xl font-black text-foreground whitespace-nowrap">
+                                    ₹{totalPay.toLocaleString("en-IN")}
+                                  </span>
+                                  <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                                    (₹{rateNumber.toLocaleString("en-IN")}/hr × {hoursNumber} hrs)
+                                  </span>
+                                </div>
                               </div>
+
+                              {applied ? (
+                                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                  {(() => {
+                                    const claim = activeClaim;
+                                    if (claim?.status === "CONFIRMED") {
+                                      return (
+                                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/20 px-3 py-1.5 text-xs font-bold shadow-2xs whitespace-nowrap">
+                                          <HiCheckBadge className="h-4 w-4 text-primary shrink-0" />
+                                          Confirmed
+                                        </span>
+                                      );
+                                    }
+                                    if (claim?.status === "CHECKED_IN") {
+                                      return (
+                                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/20 px-3 py-1.5 text-xs font-bold shadow-2xs whitespace-nowrap">
+                                          <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
+                                          On Floor
+                                        </span>
+                                      );
+                                    }
+                                    if (claim?.status === "TIMESHEET_SUBMITTED") {
+                                      return (
+                                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/20 px-3 py-1.5 text-xs font-bold shadow-2xs whitespace-nowrap">
+                                          <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
+                                          Timesheet ({claim.actualHours || hoursNumber}h)
+                                        </span>
+                                      );
+                                    }
+                                    if (claim?.status === "DISPUTED") {
+                                      return (
+                                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 px-3 py-1.5 text-xs font-bold shadow-2xs whitespace-nowrap">
+                                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                          Disputed · Ops Review
+                                        </span>
+                                      );
+                                    }
+                                    if (claim?.status === "COMPLETED") {
+                                      return (
+                                        <>
+                                          <span className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/20 px-3 py-1.5 text-xs font-bold shadow-2xs whitespace-nowrap">
+                                            <HiCheckBadge className="h-4 w-4 text-primary shrink-0" />
+                                            {claim.payoutStatus === "DISBURSED" ? "Paid" : "Completed"}
+                                          </span>
+                                          {claim.hospitalRating && (
+                                            <span className="inline-flex items-center gap-1 rounded-xl bg-amber-500/10 border border-amber-500/25 px-2.5 py-1 text-xs font-bold text-amber-700 dark:text-amber-300 whitespace-nowrap">
+                                              <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500 shrink-0" />
+                                              {claim.hospitalRating}/5
+                                            </span>
+                                          )}
+                                        </>
+                                      );
+                                    }
+                                    return (
+                                      <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold bg-primary-soft text-primary border border-primary/25 whitespace-nowrap">
+                                        <HiCheck className="h-4 w-4 stroke-[3] shrink-0" />
+                                        <span>Applied</span>
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
+                              ) : isClaimRejected ? (
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-900/40 whitespace-nowrap">
+                                    <HiXMark className="h-4 w-4 stroke-[3] shrink-0" />
+                                    <span>Claim Declined</span>
+                                  </span>
+                                </div>
+                              ) : isSlotFilled ? (
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold bg-muted text-muted-foreground border border-border whitespace-nowrap">
+                                    Capacity Filled
+                                  </span>
+                                </div>
+                              ) : isShiftFull ? (
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold bg-muted text-muted-foreground border border-border whitespace-nowrap">
+                                    Shift Full
+                                  </span>
+                                </div>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  disabled={applyingId === sh.id}
+                                  onClick={() => handleApply(sh.id, sh.title, sh.org)}
+                                  className="w-full sm:w-auto rounded-xl px-5 font-bold shadow-md h-10 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed shrink-0"
+                                >
+                                  {applyingId === sh.id ? (
+                                    <span className="flex items-center gap-2">
+                                      <span className="h-3.5 w-3.5 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+                                      <span>Applying...</span>
+                                    </span>
+                                  ) : (
+                                    "Pick up shift"
+                                  )}
+                                </Button>
+                              )}
                             </div>
 
-                            {applied ? (
-                              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end sm:justify-start pt-2 sm:pt-0 border-t border-border/40 sm:border-0">
+                            {applied && activeClaim?.status !== "DISPUTED" && (
+                              <div className="pt-2.5 border-t border-border/50 flex flex-wrap items-center justify-between gap-2">
                                 {(() => {
                                   const claim = activeClaim;
                                   if (claim?.status === "CONFIRMED") {
                                     return (
-                                      <div className="flex items-center gap-2">
-                                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/20 px-3 py-1.5 text-xs font-bold shadow-2xs">
-                                          <HiCheckBadge className="h-4 w-4 text-primary" />
-                                          Confirmed
-                                        </span>
+                                      <>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <Button
+                                            size="sm"
+                                            onClick={() => handleOpenCheckInModal(claim.id, sh.title, sh.org)}
+                                            className="rounded-xl px-3 h-8 font-bold text-xs bg-primary hover:bg-primary-hover text-white shadow-2xs cursor-pointer gap-1.5"
+                                          >
+                                            <KeyRound className="h-3.5 w-3.5" />
+                                            Check In (PIN)
+                                          </Button>
+                                        </div>
                                         <Button
                                           size="sm"
-                                          onClick={() => handleCheckIn(claim.id, sh.title)}
-                                          className="rounded-xl px-3 h-8 font-bold text-xs bg-primary hover:bg-primary-hover text-white shadow-2xs cursor-pointer"
+                                          variant="ghost"
+                                          onClick={() => {
+                                            setDisputeModalData({ claimId: claim.id, shiftTitle: sh.title });
+                                            setDisputeReasonInput("");
+                                          }}
+                                          className="rounded-xl px-2.5 h-8 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer ml-auto"
                                         >
-                                          Check In
+                                          Dispute
                                         </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={() => openSignOffModal(claim.id, sh)}
-                                          className="rounded-xl px-3 h-8 font-bold text-xs border-border hover:bg-muted text-foreground cursor-pointer"
-                                        >
-                                          Sign Off Duty
-                                        </Button>
-                                      </div>
+                                      </>
                                     );
                                   }
                                   if (claim?.status === "CHECKED_IN") {
                                     return (
-                                      <div className="flex items-center gap-2">
-                                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/20 px-3 py-1.5 text-xs font-bold shadow-2xs">
-                                          <HiOutlineClock className="h-4 w-4 text-primary" />
-                                          On Floor
-                                        </span>
+                                      <>
                                         <Button
                                           size="sm"
                                           onClick={() => openSignOffModal(claim.id, sh)}
@@ -901,122 +1217,107 @@ function Shifts() {
                                         >
                                           Sign Off Duty
                                         </Button>
-                                      </div>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => {
+                                            setDisputeModalData({ claimId: claim.id, shiftTitle: sh.title });
+                                            setDisputeReasonInput("");
+                                          }}
+                                          className="rounded-xl px-2.5 h-8 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer ml-auto"
+                                        >
+                                          Dispute
+                                        </Button>
+                                      </>
                                     );
                                   }
                                   if (claim?.status === "TIMESHEET_SUBMITTED") {
                                     return (
-                                      <div className="flex items-center gap-2">
-                                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/20 px-3 py-1.5 text-xs font-bold shadow-2xs">
-                                          <HiOutlineClock className="h-4 w-4 text-primary" />
-                                          Timesheet Submitted ({claim.actualHours || hoursNumber}h)
+                                      <>
+                                        <span className="text-xs font-semibold text-muted-foreground">
+                                          Awaiting hospital supervisor sign-off
                                         </span>
                                         <Button
                                           size="sm"
-                                          disabled
-                                          variant="outline"
-                                          className="rounded-xl px-2.5 h-8 font-bold text-xs opacity-75 cursor-not-allowed text-muted-foreground"
+                                          variant="ghost"
+                                          onClick={() => {
+                                            setDisputeModalData({ claimId: claim.id, shiftTitle: sh.title });
+                                            setDisputeReasonInput("");
+                                          }}
+                                          className="rounded-xl px-2.5 h-8 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer ml-auto"
                                         >
-                                          Pending Hospital Sign-Off
+                                          Dispute
                                         </Button>
-                                      </div>
+                                      </>
                                     );
                                   }
                                   if (claim?.status === "COMPLETED") {
                                     return (
-                                      <div className="flex items-center gap-2">
-                                        <span className="inline-flex items-center gap-1.5 rounded-xl bg-primary-soft text-primary border border-primary/20 px-3 py-1.5 text-xs font-bold shadow-2xs">
-                                          <HiCheckBadge className="h-4 w-4 text-primary" />
-                                          {claim.payoutStatus === "DISBURSED" ? "Paid" : "Completed"}
-                                        </span>
-                                        <Button asChild size="sm" variant="outline" className="rounded-xl px-2.5 h-8 font-semibold text-xs border-border/80 hover:bg-muted text-muted-foreground hover:text-foreground">
-                                          <Link to="/earnings">Earnings</Link>
+                                      <>
+                                        <Button asChild size="sm" variant="outline" className="rounded-xl px-3 h-8 font-semibold text-xs border-border/80 hover:bg-muted text-foreground">
+                                          <Link to="/earnings">View Earnings</Link>
                                         </Button>
-                                      </div>
+                                        {claim.payoutStatus !== "DISBURSED" && (
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            onClick={() => {
+                                              setDisputeModalData({ claimId: claim.id, shiftTitle: sh.title });
+                                              setDisputeReasonInput("");
+                                            }}
+                                            className="rounded-xl px-2.5 h-8 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer ml-auto"
+                                          >
+                                            Dispute
+                                          </Button>
+                                        )}
+                                      </>
                                     );
                                   }
                                   return (
-                                    <div className="flex items-center gap-2">
-                                      <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold bg-primary-soft text-primary border border-primary/25">
-                                        <HiCheck className="h-4 w-4 stroke-[3]" />
-                                        <span>Applied</span>
+                                    <>
+                                      <span className="text-xs font-medium text-muted-foreground">
+                                        Waiting for hospital confirmation
                                       </span>
                                       <Button
                                         size="sm"
                                         variant="ghost"
                                         disabled={withdrawingId === sh.id}
                                         onClick={() => handleWithdraw(sh.id, sh.title)}
-                                        className="rounded-xl px-2.5 h-8 text-xs font-bold text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer transition-colors"
+                                        className="rounded-xl px-2.5 h-8 text-xs font-bold text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer transition-colors ml-auto"
                                       >
                                         {withdrawingId === sh.id ? "Withdrawing..." : "Withdraw"}
                                       </Button>
-                                    </div>
+                                    </>
                                   );
                                 })()}
                               </div>
-                            ) : isClaimRejected ? (
-                              <div className="flex items-center gap-2 w-full sm:w-auto justify-end sm:justify-start pt-2 sm:pt-0 border-t border-primary/10 sm:border-0">
-                                <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-900/40">
-                                  <HiXMark className="h-4 w-4 stroke-[3]" />
-                                  <span>Claim Declined</span>
-                                </span>
-                                <Button
-                                  size="sm"
-                                  disabled
-                                  variant="outline"
-                                  className="rounded-xl px-3 h-8 font-bold text-xs opacity-60 cursor-not-allowed text-muted-foreground"
-                                >
-                                  Not Selected
-                                </Button>
-                              </div>
-                            ) : isSlotFilled ? (
-                              <div className="flex items-center gap-2 w-full sm:w-auto justify-end sm:justify-start pt-2 sm:pt-0 border-t border-primary/10 sm:border-0">
-                                <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold bg-muted text-muted-foreground border border-border">
-                                  Capacity Filled
-                                </span>
-                                <Button
-                                  size="sm"
-                                  disabled
-                                  variant="outline"
-                                  className="rounded-xl px-3 h-8 font-bold text-xs opacity-60 cursor-not-allowed text-muted-foreground"
-                                >
-                                  Released
-                                </Button>
-                              </div>
-                            ) : isShiftFull ? (
-                              <div className="flex items-center gap-2 w-full sm:w-auto justify-end sm:justify-start pt-2 sm:pt-0 border-t border-primary/10 sm:border-0">
-                                <span className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold bg-muted text-muted-foreground border border-border">
-                                  Shift Full
-                                </span>
-                                <Button
-                                  size="sm"
-                                  disabled
-                                  variant="outline"
-                                  className="rounded-xl px-3 h-8 font-bold text-xs opacity-60 cursor-not-allowed text-muted-foreground"
-                                >
-                                  Capacity Reached
-                                </Button>
-                              </div>
-                            ) : (
-                              <Button
-                                size="sm"
-                                disabled={applyingId === sh.id}
-                                onClick={() => handleApply(sh.id, sh.title, sh.org)}
-                                className="w-full sm:w-auto rounded-xl px-5 font-bold shadow-md h-10 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
-                              >
-                                {applyingId === sh.id ? (
-                                  <span className="flex items-center gap-2">
-                                    <span className="h-3.5 w-3.5 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
-                                    <span>Applying...</span>
-                                  </span>
-                                ) : (
-                                  "Pick up shift"
-                                )}
-                              </Button>
                             )}
                           </div>
 
                           {/* Status Guidance Notes */}
+                          {isClaimNoShow && (
+                            <p className="mt-2 text-[11px] font-semibold text-rose-600/90 dark:text-rose-400 flex items-center gap-1.5">
+                              <HiXMark className="h-3.5 w-3.5 shrink-0" />
+                              <span>Hospital marked this shift as No-Show. Repeated no-shows impact clinical match visibility.</span>
+                            </p>
+                          )}
+                          {activeClaim?.status === "DISPUTED" && activeClaim.disputeReason && (
+                            <p className="mt-2 text-[11px] font-semibold text-rose-600/90 dark:text-rose-400 flex items-center gap-1.5">
+                              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                              <span>Dispute Note: {activeClaim.disputeReason}</span>
+                            </p>
+                          )}
+                          {activeClaim?.hospitalRating && (
+                            <div className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-foreground flex flex-wrap items-center gap-2">
+                              <span className="inline-flex items-center gap-1 font-bold text-amber-700 dark:text-amber-300">
+                                <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
+                                Hospital Rated {activeClaim.hospitalRating}/5
+                              </span>
+                              {activeClaim.hospitalReview && (
+                                <span className="text-muted-foreground italic">"{activeClaim.hospitalReview}"</span>
+                              )}
+                            </div>
+                          )}
                           {isClaimRejected && (
                             <p className="mt-2 text-[11px] font-semibold text-rose-600/90 dark:text-rose-400 flex items-center gap-1.5">
                               <HiXMark className="h-3.5 w-3.5 shrink-0" />
@@ -1091,24 +1392,24 @@ function Shifts() {
               {/* ================= TIMESHEET & DUTY SIGN-OFF MODAL ================= */}
               {signOffModalData && (
                 <Dialog open={true} onOpenChange={(open) => { if (!open) setSignOffModalData(null); }}>
-                  <DialogContent className="max-w-md rounded-3xl p-6 sm:p-7">
-                    <DialogHeader>
-                      <div className="flex items-center gap-3 mb-1">
-                        <div className="grid h-10 w-10 place-items-center rounded-2xl bg-primary-soft text-primary">
+                  <DialogContent className="flex flex-col gap-4 sm:max-w-md rounded-2xl border border-border bg-card p-5 sm:p-6">
+                    <DialogHeader className="text-left pr-8">
+                      <div className="flex items-center gap-3">
+                        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary-soft text-primary">
                           <HiOutlineClock className="h-5 w-5" />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <DialogTitle className="text-base font-black text-foreground">
                             Submit Shift Timesheet
                           </DialogTitle>
-                          <DialogDescription className="text-xs text-muted-foreground">
+                          <DialogDescription className="text-xs text-muted-foreground truncate">
                             {signOffModalData.shiftTitle} • {signOffModalData.facilityName}
                           </DialogDescription>
                         </div>
                       </div>
                     </DialogHeader>
 
-                    <div className="space-y-4 py-2 text-sm">
+                    <div className="w-full space-y-4 text-sm">
                       <div className="rounded-2xl border border-border bg-muted/40 p-3.5 space-y-2 text-xs">
                         <div className="flex justify-between items-center">
                           <span className="text-muted-foreground font-medium">Scheduled Duration</span>
@@ -1139,7 +1440,7 @@ function Shifts() {
                             step={1}
                             value={actualHoursWorked}
                             onChange={(e) => setActualHoursWorked(Math.max(1, parseInt(e.target.value) || 1))}
-                            className="h-11 rounded-2xl font-bold text-foreground pr-14"
+                            className="w-full h-11 rounded-2xl font-bold text-foreground pr-14"
                           />
                           <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">
                             hours
@@ -1170,6 +1471,16 @@ function Shifts() {
                             </span>
                           </div>
                         </div>
+                      ) : actualHoursWorked > signOffModalData.scheduledHours ? (
+                        <div className="rounded-2xl border border-amber-300/60 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs space-y-1.5">
+                          <p className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                            <HiOutlineClock className="h-4 w-4 shrink-0 text-amber-600" />
+                            Overtime Claim ({actualHoursWorked - signOffModalData.scheduledHours} extra hrs)
+                          </p>
+                          <p className="text-muted-foreground leading-relaxed text-[11px]">
+                            Reporting <strong>{actualHoursWorked} hrs</strong> instead of {signOffModalData.scheduledHours} hrs requires hospital supervisor sign-off and sufficient facility wallet balance to cover ₹{(signOffModalData.ratePerHour * (actualHoursWorked - signOffModalData.scheduledHours)).toLocaleString("en-IN")} overtime.
+                          </p>
+                        </div>
                       ) : (
                         <div className="rounded-2xl border border-primary/20 bg-primary-soft/30 p-3 text-xs text-foreground flex items-center gap-2">
                           <HiOutlineShieldCheck className="h-4 w-4 shrink-0 text-primary" />
@@ -1182,21 +1493,143 @@ function Shifts() {
                       </p>
                     </div>
 
-                    <DialogFooter className="gap-2 sm:gap-0 mt-2">
+                    <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5 sm:space-x-0 pt-1">
                       <Button
                         variant="outline"
                         disabled={submittingSignOff}
                         onClick={() => setSignOffModalData(null)}
-                        className="rounded-xl font-bold text-xs"
+                        className="h-9 px-4 rounded-xl font-bold text-xs w-full sm:w-auto"
                       >
                         Cancel
                       </Button>
                       <Button
                         disabled={submittingSignOff}
                         onClick={handleConfirmDutySignOff}
-                        className="rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer"
+                        className="h-9 px-4 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer w-full sm:w-auto"
                       >
                         {submittingSignOff ? "Submitting..." : "Submit Timesheet for Verification"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
+
+              {/* ================= 4-DIGIT FLOOR PIN CHECK-IN MODAL ================= */}
+              {pinModalData && (
+                <Dialog open={true} onOpenChange={(open) => { if (!open) setPinModalData(null); }}>
+                  <DialogContent className="flex flex-col gap-4 sm:max-w-md rounded-2xl border border-border bg-card p-5 sm:p-6">
+                    <DialogHeader className="text-left pr-8">
+                      <div className="flex items-center gap-3">
+                        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-primary-soft text-primary">
+                          <KeyRound className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <DialogTitle className="text-base font-black text-foreground">
+                            Ward Floor Check-In
+                          </DialogTitle>
+                          <DialogDescription className="text-xs text-muted-foreground truncate">
+                            {pinModalData.shiftTitle} · {pinModalData.org}
+                          </DialogDescription>
+                        </div>
+                      </div>
+                    </DialogHeader>
+
+                    <div className="w-full space-y-3">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Ask the hospital duty supervisor or HR desk for the 4-digit check-in PIN to verify on-floor arrival.
+                      </p>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="shift-checkin-pin" className="text-xs font-bold text-foreground">
+                          4-Digit Hospital PIN
+                        </Label>
+                        <Input
+                          id="shift-checkin-pin"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={4}
+                          value={checkInPinInput}
+                          onChange={(e) => setCheckInPinInput(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                          placeholder="e.g. 4829"
+                          className="w-full h-12 text-center text-xl font-black tracking-[0.4em] rounded-xl"
+                        />
+                      </div>
+                    </div>
+
+                    <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5 sm:space-x-0 pt-1">
+                      <Button
+                        variant="outline"
+                        disabled={submittingPin}
+                        onClick={() => setPinModalData(null)}
+                        className="h-9 px-4 rounded-xl font-bold text-xs w-full sm:w-auto"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        disabled={submittingPin || checkInPinInput.trim().length !== 4}
+                        onClick={handleConfirmPinCheckIn}
+                        className="h-9 px-4 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer w-full sm:w-auto"
+                      >
+                        {submittingPin ? "Verifying PIN..." : "Verify & Clock In"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
+
+              {/* ================= RAISE SHIFT DISPUTE MODAL ================= */}
+              {disputeModalData && (
+                <Dialog open={true} onOpenChange={(open) => { if (!open) setDisputeModalData(null); }}>
+                  <DialogContent className="flex flex-col gap-4 sm:max-w-md rounded-2xl border border-border bg-card p-5 sm:p-6">
+                    <DialogHeader className="text-left pr-8">
+                      <div className="flex items-center gap-3">
+                        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300">
+                          <AlertTriangle className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <DialogTitle className="text-base font-black text-foreground">
+                            Raise Shift Dispute
+                          </DialogTitle>
+                          <DialogDescription className="text-xs text-muted-foreground truncate">
+                            {disputeModalData.shiftTitle}
+                          </DialogDescription>
+                        </div>
+                      </div>
+                    </DialogHeader>
+
+                    <div className="w-full space-y-3">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Escrow remains protected while FALE Ops reviews your claim against hospital attendance and handover records.
+                      </p>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="shift-dispute-reason" className="text-xs font-bold text-foreground">
+                          Dispute Reason
+                        </Label>
+                        <textarea
+                          id="shift-dispute-reason"
+                          rows={3}
+                          value={disputeReasonInput}
+                          onChange={(e) => setDisputeReasonInput(e.target.value)}
+                          placeholder="Describe hours worked discrepancy, ward issue, or missing supervisor sign-off..."
+                          className="w-full rounded-xl border border-input bg-background p-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                        />
+                      </div>
+                    </div>
+
+                    <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5 sm:space-x-0 pt-1">
+                      <Button
+                        variant="outline"
+                        disabled={submittingDispute}
+                        onClick={() => setDisputeModalData(null)}
+                        className="h-9 px-4 rounded-xl font-bold text-xs w-full sm:w-auto"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        disabled={submittingDispute}
+                        onClick={handleSubmitDispute}
+                        className="h-9 px-4 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white cursor-pointer w-full sm:w-auto"
+                      >
+                        {submittingDispute ? "Submitting..." : "Escalate to FALE Ops"}
                       </Button>
                     </DialogFooter>
                   </DialogContent>

@@ -335,3 +335,83 @@ export async function deleteFacilityDocument(id: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+export function formatApplicationStatus(status?: string): string {
+  switch (status?.toUpperCase()) {
+    case "INTERVIEW":
+    case "INTERVIEW_SCHEDULED":
+      return "Interview";
+    case "OFFER":
+    case "OFFERED":
+      return "Offer";
+    case "CONFIRMED":
+      return "Confirmed";
+    case "CHECKED_IN":
+      return "Checked In";
+    case "COMPLETED":
+      return "Completed";
+    case "DISPUTED":
+      return "Disputed";
+    case "NO_SHOW":
+      return "No-Show";
+    case "HIRED":
+    case "ACCEPTED":
+    case "PLACED":
+      return "Hired";
+    case "REJECTED":
+    case "DECLINED":
+    case "NOT_SELECTED":
+      return "Rejected";
+    case "POSITION_FILLED":
+      return "Position Filled";
+    case "TIMESHEET_SUBMITTED":
+      return "Timesheet Submitted";
+    case "CLAIMED":
+    case "CLAIM_PENDING_ADMIN":
+      return "Claimed";
+    case "SLOT_FILLED":
+    case "CAPACITY_REACHED":
+      return "Slot Filled";
+    case "NEW":
+    case "APPLIED":
+    case "PENDING":
+    case "PENDING_SCREENING":
+    case "UNDER_REVIEW":
+    case "UNDER_SCREENING":
+      return "New";
+    case "SHORTLISTED":
+    default:
+      return "Shortlisted";
+  }
+}
+
+export function attachFocusAndPollRefresh(onRefresh: () => void, intervalMs = 15000): () => void {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const handleFocus = () => {
+    onRefresh();
+  };
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") {
+      onRefresh();
+    }
+  };
+
+  window.addEventListener("focus", handleFocus);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
+  const timerId = window.setInterval(() => {
+    if (document.visibilityState === "visible") {
+      onRefresh();
+    }
+  }, intervalMs);
+
+  return () => {
+    window.removeEventListener("focus", handleFocus);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.clearInterval(timerId);
+  };
+}

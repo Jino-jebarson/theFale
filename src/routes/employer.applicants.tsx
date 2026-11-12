@@ -21,7 +21,7 @@ import {
   HiOutlineArrowPath,
 } from "react-icons/hi2";
 import { toast } from "sonner";
-import { BotMessageSquare, RotateCcw, Copy, Check } from "lucide-react";
+import { BotMessageSquare, RotateCcw, Copy, Check, Star, KeyRound, AlertTriangle } from "lucide-react";
 import { AppShell, StatusBadge, initials } from "@/components/fale/AppShell";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,7 +47,13 @@ import { LottieAnimation } from "@/components/fale/LottieAnimation";
 import lottieEmptyAnimation from "@/assets/lottie-error.json";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
-import { getFacilityApplicants, updateApplicantStatus } from "@/lib/adapters/facilityAdapter";
+import {
+  attachFocusAndPollRefresh,
+  formatApplicationStatus,
+  getFacilityApplicants,
+  updateApplicantStatus,
+} from "@/lib/adapters/facilityAdapter";
+import { rateShiftClaim } from "@/lib/adapters/shiftAdapter";
 import {
   generateInterviewQuestionsWithAi,
   summarizeCandidateWithAi,
@@ -74,49 +80,6 @@ export const Route = createFileRoute("/employer/applicants")({
   component: Applicants,
 });
 
-function mapBackendStatusToUi(s?: string): string {
-  switch (s?.toUpperCase()) {
-    case "INTERVIEW":
-    case "INTERVIEW_SCHEDULED":
-      return "Interview";
-    case "OFFER":
-    case "OFFERED":
-      return "Offer";
-    case "CONFIRMED":
-      return "Confirmed";
-    case "COMPLETED":
-      return "Completed";
-    case "HIRED":
-    case "ACCEPTED":
-    case "PLACED":
-      return "Hired";
-    case "REJECTED":
-    case "DECLINED":
-    case "NOT_SELECTED":
-      return "Rejected";
-    case "POSITION_FILLED":
-      return "Position Filled";
-    case "TIMESHEET_SUBMITTED":
-      return "Timesheet Submitted";
-    case "CLAIMED":
-    case "CLAIM_PENDING_ADMIN":
-      return "Claimed";
-    case "SLOT_FILLED":
-    case "CAPACITY_REACHED":
-      return "Slot Filled";
-    case "NEW":
-    case "APPLIED":
-    case "PENDING":
-    case "PENDING_SCREENING":
-    case "UNDER_REVIEW":
-    case "UNDER_SCREENING":
-      return "New";
-    case "SHORTLISTED":
-    default:
-      return "Shortlisted";
-  }
-}
-
 const REJECTION_PRESETS = [
   "Interview performance",
   "Lacks required clinical / ICU experience",
@@ -126,10 +89,54 @@ const REJECTION_PRESETS = [
   "Other",
 ] as const;
 
+const ACTION_NEEDED_STATUSES = new Set([
+  "New",
+  "Claimed",
+  "Timesheet Submitted",
+  "Shortlisted",
+  "Disputed",
+]);
+
+const IN_PROGRESS_STATUSES = new Set([
+  "Confirmed",
+  "Checked In",
+  "Interview",
+  "Offer",
+]);
+
+function getStatusSortRank(status: string): number {
+  if (status === "New" || status === "Claimed") return 0;
+  if (status === "Timesheet Submitted" || status === "Disputed") return 1;
+  if (status === "Shortlisted") return 2;
+  if (IN_PROGRESS_STATUSES.has(status)) return 3;
+  return 4;
+}
+
+function formatAppliedTimestamp(raw?: string): string {
+  if (!raw) return "Recent";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return "Recent";
+  const diffMins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (diffMins >= 0 && diffMins < 60) {
+    return diffMins <= 1 ? "Just now" : `${diffMins}m ago`;
+  }
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours >= 1 && diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function Applicants() {
   const s = useApp();
   const [roleTypeTab, setRoleTypeTab] = useState<"all" | "jobs" | "shifts">("all");
   const [filter, setFilter] = useState("All");
+  const [hasInitializedFilter, setHasInitializedFilter] = useState(false);
   const [selectedRole, setSelectedRole] = useState("All");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<Record<string, string>>({});
@@ -145,36 +152,40 @@ function Applicants() {
   const [apiApplicants, setApiApplicants] = useState<any[]>([]);
   const [loading, setLoading] = useState(isApiEnabled);
 
-  const fetchApplicants = () => {
+  const fetchApplicants = (silent = false) => {
     if (!isApiEnabled) return;
+    if (!silent) setLoading(true);
     getFacilityApplicants()
       .then((data) => {
         setApiApplicants(data);
         if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("fale:applications-updated"));
+          let unreadCount = 0;
+          try {
+            const stored = localStorage.getItem("fale_seen_applicant_ids");
+            const seen = stored ? new Set(JSON.parse(stored).map(String)) : new Set<string>();
+            unreadCount = Array.isArray(data) ? data.filter((a: any) => !seen.has(String(a.id))).length : 0;
+          } catch {
+            unreadCount = 0;
+          }
+          window.dispatchEvent(new CustomEvent("fale:applications-updated", { detail: { unreadCount } }));
         }
       })
-      .catch(() => {
-        setApiApplicants([]);
+      .catch((err: any) => {
+        if (!silent) {
+          toast.error("Failed to load applicants", {
+            description: err?.message || "Please check your session and try again.",
+          });
+        }
+      })
+      .finally(() => {
+        if (!silent) setLoading(false);
       });
   };
 
   useEffect(() => {
     if (!isApiEnabled) return;
-    setLoading(true);
-    getFacilityApplicants()
-      .then((data) => {
-        setApiApplicants(data);
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("fale:applications-updated"));
-        }
-      })
-      .catch(() => {
-        setApiApplicants([]);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+    fetchApplicants(false);
+    return attachFocusAndPollRefresh(() => fetchApplicants(true), 60000);
   }, []);
 
   // Merge live status overrides with applicant records + admin shortlisted applications
@@ -199,8 +210,8 @@ function Applicants() {
           (candidateRole.toLowerCase().includes("doctor")
             ? "MBBS"
             : candidateRole.toLowerCase().includes("nurse")
-            ? "B.Sc Nursing"
-            : "Certified Clinician");
+              ? "B.Sc Nursing"
+              : "Certified Clinician");
 
         const councilName = a.candidateCouncil || "State Medical Council";
         const regNum =
@@ -227,7 +238,7 @@ function Applicants() {
           a.candidateBio ||
           `${candidateExp} experienced ${candidateRole} registered with ${councilName}. Proven track record in patient safety, clinical protocol adherence, and emergency intervention.`;
 
-        const uiStatus = status[a.id] ?? mapBackendStatusToUi(a.status);
+        const uiStatus = status[a.id] ?? formatApplicationStatus(a.status);
 
         const targetJob = jobs.find(
           (j) => j.id === a.jobId || j.title.toLowerCase() === (a.jobTitle || "").toLowerCase()
@@ -261,10 +272,10 @@ function Applicants() {
           isApiEnabled && typeof a.matchScore === "number" && a.matchScore > 0
             ? a.matchScore
             : clinicalMatch?.score ||
-              (s.adminApplications || []).find(
-                (adm) => adm.id === a.id || (adm.candidateName && adm.candidateName === a.candidateName)
-              )?.matchScore ||
-              50;
+            (s.adminApplications || []).find(
+              (adm) => adm.id === a.id || (adm.candidateName && adm.candidateName === a.candidateName)
+            )?.matchScore ||
+            50;
 
         return {
           id: a.id,
@@ -276,13 +287,8 @@ function Applicants() {
           status: uiStatus,
           verified: a.councilVerified !== false,
           match: derivedMatch,
-          appliedDate: a.appliedAt
-            ? new Date(a.appliedAt).toLocaleDateString("en-IN", {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-              })
-            : "Recent",
+          appliedDate: formatAppliedTimestamp(a.appliedAt),
+          appliedAtMs: a.appliedAt ? new Date(a.appliedAt).getTime() : 0,
           currentOrg: a.currentOrg || "Clinical Healthcare Partner",
           qualification: candidateQual,
           regNumber: regNum,
@@ -313,6 +319,15 @@ function Applicants() {
           actualHours: a.actualHours || undefined,
           scheduledHours: a.scheduledHours || 8,
           hourlyRate: a.hourlyRatePaise ? Math.round(a.hourlyRatePaise / 100) : (a.hourlyRate || 500),
+          checkInPin: a.checkInPin || undefined,
+          disputeReason: a.disputeReason || undefined,
+          hospitalRating: a.hospitalRating || undefined,
+          hospitalReview: a.hospitalReview || undefined,
+          ratingTags: a.ratingTags || undefined,
+          candidateRatingAvg: a.candidateRatingAvg ?? undefined,
+          candidateRatingCount: a.candidateRatingCount ?? undefined,
+          completedShiftsCount: a.completedShiftsCount ?? undefined,
+          shiftClaimStatus: a.status || undefined,
           candidateDocuments: a.candidateDocuments || [],
         };
       });
@@ -334,6 +349,7 @@ function Applicants() {
           verified: a.councilVerified,
           match: a.matchScore || 76,
           appliedDate: a.appliedDate,
+          appliedAtMs: 0,
           qualification: "MBBS / MD / Certified Clinician",
           regNumber: a.regNumber || "Council Verified",
           skills: ["Clinical Care", "ICU / Emergency Protocols", "Patient Safety"],
@@ -387,7 +403,7 @@ function Applicants() {
         });
         if (changed) {
           localStorage.setItem("fale_seen_applicant_ids", JSON.stringify([...seenSet]));
-          window.dispatchEvent(new CustomEvent("fale:applications-updated"));
+          window.dispatchEvent(new CustomEvent("fale:applications-updated", { detail: { unreadCount: 0 } }));
         }
       } catch (err) {
         console.error("Failed to mark applicants as seen", err);
@@ -413,12 +429,20 @@ function Applicants() {
 
   // Counts by stage scoped to active view
   const counts = useMemo(() => {
+    const needsActionCount = applicantsInRoleType.filter((a) =>
+      ACTION_NEEDED_STATUSES.has(a.status)
+    ).length;
     return {
+      "Needs Action": needsActionCount,
       All: applicantsInRoleType.length,
       New: applicantsInRoleType.filter((a) => a.status === "New").length,
       Shortlisted: applicantsInRoleType.filter((a) => a.status === "Shortlisted").length,
       Claimed: applicantsInRoleType.filter((a) => a.status === "Claimed").length,
       Confirmed: applicantsInRoleType.filter((a) => a.status === "Confirmed").length,
+      CheckedIn: applicantsInRoleType.filter((a) => a.status === "Checked In").length,
+      Completed: applicantsInRoleType.filter((a) => a.status === "Completed").length,
+      Disputed: applicantsInRoleType.filter((a) => a.status === "Disputed").length,
+      NoShow: applicantsInRoleType.filter((a) => a.status === "No-Show").length,
       Interview: applicantsInRoleType.filter((a) => a.status === "Interview").length,
       Offer: applicantsInRoleType.filter((a) => a.status === "Offer").length,
       Hired: applicantsInRoleType.filter((a) => a.status === "Hired").length,
@@ -429,23 +453,42 @@ function Applicants() {
     };
   }, [applicantsInRoleType]);
 
+  // Smart default: land on "Needs Action" whenever newly applied / pending candidates exist
+  useEffect(() => {
+    if (loading || hasInitializedFilter) return;
+    if (allApplicants.length > 0) {
+      if (counts["Needs Action"] > 0) {
+        setFilter("Needs Action");
+      }
+      setHasInitializedFilter(true);
+    }
+  }, [loading, hasInitializedFilter, allApplicants.length, counts]);
+
   // Dynamic filter tabs based on role type
   const filterTabs = useMemo(() => {
     if (roleTypeTab === "shifts") {
-      const list = ["All"];
+      const list = ["Needs Action", "All"];
       if (counts.Claimed > 0) list.push("Claimed");
       if (counts.Shortlisted > 0) list.push("Shortlisted");
       if (counts.Confirmed > 0) list.push("Confirmed");
+      if (counts.CheckedIn > 0) list.push("Checked In");
       if (counts.TimesheetSubmitted > 0) list.push("Timesheet Submitted");
+      if (counts.Completed > 0) list.push("Completed");
+      if (counts.Disputed > 0) list.push("Disputed");
+      if (counts.NoShow > 0) list.push("No-Show");
       if (counts.Hired > 0) list.push("Hired");
       if (counts.Rejected > 0) list.push("Rejected");
       if (counts.SlotFilled > 0) list.push("Slot Filled");
       return list;
     }
-    const list = ["All", "New", "Shortlisted"];
+    const list = ["Needs Action", "All", "New", "Shortlisted"];
     if (counts.Claimed > 0) list.push("Claimed");
     if (counts.Confirmed > 0) list.push("Confirmed");
+    if (counts.CheckedIn > 0) list.push("Checked In");
     if (counts.TimesheetSubmitted > 0) list.push("Timesheet Submitted");
+    if (counts.Completed > 0) list.push("Completed");
+    if (counts.Disputed > 0) list.push("Disputed");
+    if (counts.NoShow > 0) list.push("No-Show");
     list.push("Interview");
     if (counts.Offer > 0) list.push("Offer");
     if (counts.Hired > 0) list.push("Hired");
@@ -455,10 +498,14 @@ function Applicants() {
     return list;
   }, [counts, roleTypeTab]);
 
-  // Filtered candidate list
+  // Filtered & priority-sorted candidate list (newly applied & action-needed first, newest first)
   const filteredList = useMemo(() => {
-    return applicantsInRoleType.filter((a) => {
-      if (filter !== "All" && a.status !== filter) return false;
+    const matched = applicantsInRoleType.filter((a) => {
+      if (filter === "Needs Action") {
+        if (!ACTION_NEEDED_STATUSES.has(a.status)) return false;
+      } else if (filter !== "All" && a.status !== filter) {
+        return false;
+      }
       if (selectedRole !== "All" && a.role !== selectedRole) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -472,6 +519,14 @@ function Applicants() {
         }
       }
       return true;
+    });
+
+    return [...matched].sort((a, b) => {
+      const rankDiff = getStatusSortRank(a.status) - getStatusSortRank(b.status);
+      if (rankDiff !== 0) return rankDiff;
+      const timeA = (a as { appliedAtMs?: number }).appliedAtMs || 0;
+      const timeB = (b as { appliedAtMs?: number }).appliedAtMs || 0;
+      return timeB - timeA;
     });
   }, [applicantsInRoleType, filter, selectedRole, search]);
 
@@ -540,6 +595,103 @@ function Applicants() {
       toast.error(e?.message || "Verification failed");
     } finally {
       setSubmittingVerifyTimesheet(false);
+    }
+  };
+
+  // --- Shift Hardening: No-Show, Dispute & Clinician Star Rating ---
+  const [disputeModalApp, setDisputeModalApp] = useState<Applicant | null>(null);
+  const [disputeReasonInput, setDisputeReasonInput] = useState("");
+  const [submittingDispute, setSubmittingDispute] = useState(false);
+
+  const [rateModalApp, setRateModalApp] = useState<Applicant | null>(null);
+  const [ratingScore, setRatingScore] = useState<number>(5);
+  const [ratingTagsSelected, setRatingTagsSelected] = useState<string[]>(["Punctual", "Clinical Excellence"]);
+  const [ratingReviewInput, setRatingReviewInput] = useState("");
+  const [submittingRating, setSubmittingRating] = useState(false);
+
+  const CLINICAL_RATING_TAGS = [
+    "Punctual",
+    "Clinical Excellence",
+    "ICU/Emergency Ready",
+    "Clear Handover",
+    "Team Player",
+    "Protocol Compliant",
+  ];
+
+  const handleMarkNoShow = async (app: Applicant) => {
+    if (isApiEnabled) {
+      try {
+        await updateApplicantStatus(app.id, "NO_SHOW", "Clinician did not report on shift duty");
+      } catch (e: any) {
+        toast.error(e?.message || "Could not mark no-show");
+        return;
+      }
+    }
+    setStatus((prev) => ({ ...prev, [app.id]: "No-Show" }));
+    toast.warning(`${app.name} marked as No-Show`, {
+      description: "Shift slot reopened so another verified clinician can claim.",
+    });
+    fetchApplicants();
+  };
+
+  const handleConfirmDispute = async () => {
+    if (!disputeModalApp) return;
+    if (!disputeReasonInput.trim()) {
+      toast.error("Please describe the shift dispute reason");
+      return;
+    }
+    setSubmittingDispute(true);
+    try {
+      if (isApiEnabled) {
+        await updateApplicantStatus(disputeModalApp.id, "DISPUTED", disputeReasonInput.trim());
+      }
+      setStatus((prev) => ({ ...prev, [disputeModalApp.id]: "Disputed" }));
+      toast.warning("Shift Escalated to FALE Dispute Desk", {
+        description: "Escrow is safely frozen while FALE Ops resolves the claim.",
+      });
+      setDisputeModalApp(null);
+      setDisputeReasonInput("");
+      fetchApplicants();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to raise dispute");
+    } finally {
+      setSubmittingDispute(false);
+    }
+  };
+
+  const openRateModal = (app: Applicant) => {
+    setRateModalApp(app);
+    setRatingScore(5);
+    setRatingTagsSelected(["Punctual", "Clinical Excellence"]);
+    setRatingReviewInput("");
+  };
+
+  const toggleRatingTag = (tag: string) => {
+    setRatingTagsSelected((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const handleSubmitRating = async () => {
+    if (!rateModalApp) return;
+    setSubmittingRating(true);
+    try {
+      if (isApiEnabled) {
+        await rateShiftClaim(rateModalApp.id, {
+          rating: ratingScore,
+          review: ratingReviewInput.trim() || undefined,
+          tags: ratingTagsSelected,
+        });
+      }
+      toast.success(`Rated ${rateModalApp.name} ${ratingScore} ★`, {
+        description: "Verified hospital rating now boosts their profile & clinical match score.",
+      });
+      setRateModalApp(null);
+      fetchApplicants();
+    } catch (e: any) {
+      toast.error(e?.message || "Could not submit rating");
+    } finally {
+      setSubmittingRating(false);
     }
   };
 
@@ -719,13 +871,30 @@ function Applicants() {
     <AppShell>
       <div className="w-full min-w-0 space-y-6">
         {/* Clean Executive Header */}
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            Shortlisted Candidates
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Council-cleared clinical talent delivered to your desk for interview.
-          </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+              Shortlisted Candidates
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Newly applied &amp; action-needed clinicians appear first, followed by completed shift history.
+            </p>
+          </div>
+          {counts["Needs Action"] > 0 ? (
+            <button
+              type="button"
+              onClick={() => setFilter("Needs Action")}
+              className="inline-flex items-center gap-2 self-start sm:self-auto rounded-full bg-primary-soft border border-primary/25 px-3.5 py-1.5 text-xs font-bold text-primary hover:bg-primary/15 transition-colors cursor-pointer"
+            >
+              <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+              <span>{counts["Needs Action"]} awaiting your review</span>
+            </button>
+          ) : allApplicants.length > 0 ? (
+            <span className="inline-flex items-center gap-1.5 self-start sm:self-auto rounded-full bg-success-soft border border-success/20 px-3 py-1 text-xs font-semibold text-success">
+              <HiCheck className="h-3.5 w-3.5 stroke-[2.5]" />
+              All caught up · {counts.Completed + counts.Hired} completed
+            </span>
+          ) : null}
         </div>
 
         {/* Role Type Switcher: All Candidates vs Permanent Roles vs Locum Shifts */}
@@ -884,16 +1053,26 @@ function Applicants() {
 
         {/* Candidate Cards Grid */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {filteredList.map((a) => (
+          {filteredList.map((a) => {
+            const isActionNeeded = ACTION_NEEDED_STATUSES.has(a.status);
+            const isCompletedOrClosed = ["Completed", "Hired", "Rejected", "No-Show", "Slot Filled", "Position Filled"].includes(a.status);
+            return (
             <div
               key={a.id}
-              className="flex flex-col justify-between rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-xs hover:border-border/80 transition-shadow"
+              className={cn(
+                "flex flex-col justify-between rounded-2xl border bg-card p-5 sm:p-6 shadow-2xs transition-all",
+                isActionNeeded
+                  ? "border-primary/40 ring-1 ring-primary/10 hover:border-primary/60"
+                  : isCompletedOrClosed
+                    ? "border-border/80 bg-card/90 hover:border-border"
+                    : "border-border hover:border-primary/30"
+              )}
             >
               <div>
                 {/* Top Row: Avatar, Clinician Name & Details, and Status Badge */}
                 <div className="flex items-start justify-between gap-2.5 sm:gap-3">
                   <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
-                    <span className="grid h-10 w-10 sm:h-12 sm:w-12 shrink-0 place-items-center rounded-full bg-gradient-brand text-xs font-bold text-primary-foreground shadow-2xs">
+                    <span className="grid h-10 w-10 sm:h-11 sm:w-11 shrink-0 place-items-center rounded-full bg-gradient-brand text-xs font-bold text-primary-foreground shadow-2xs">
                       {initials(a.name)}
                     </span>
 
@@ -908,73 +1087,115 @@ function Applicants() {
                             title="Verified profile"
                           />
                         )}
+                        {isActionNeeded && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-bold text-primary">
+                            Action Needed
+                          </span>
+                        )}
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground font-medium flex items-center gap-1.5 flex-wrap">
                         <span>{a.role}</span>
                         {a.exp && (
                           <>
-                            <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                            <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/40 shrink-0" />
                             <span>{a.exp}</span>
                           </>
                         )}
-                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/40 shrink-0" />
                         <span className="flex items-center gap-1">
                           <HiOutlineMapPin className="h-3.5 w-3.5 text-primary shrink-0" />
                           <span>{a.city}</span>
                         </span>
                       </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Applied for <span className="font-medium text-foreground/85">{a.for}</span>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Applied for <span className="font-semibold text-foreground">{a.for}</span>
                       </p>
                     </div>
                   </div>
 
-                  {/* Status Badge anchored top-right */}
-                  <div className="shrink-0 pt-0.5">
+                  {/* Status Badge + Applied Timestamp anchored top-right */}
+                  <div className="shrink-0 flex flex-col items-end gap-1 pt-0.5">
                     <StatusBadge status={a.status} />
+                    {a.appliedDate && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                        <HiOutlineClock className="h-3 w-3 shrink-0" />
+                        {a.appliedDate}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {/* Sub-header Badges Strip (Role type, Match Score) */}
+                {/* Sub-header Badges Strip (Role type, Match Score, Rating, Check-In PIN) */}
                 <div className="mt-3 flex flex-wrap items-center gap-1.5">
                   {a.isShiftClaim || a.for.toLowerCase().includes("shift") ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
-                      <HiOutlineBolt className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft border border-primary/20 px-2.5 py-0.5 text-[10.5px] font-bold text-primary">
+                      <HiOutlineBolt className="h-3 w-3 text-primary" />
                       Locum Shift
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:text-blue-300">
-                      <HiOutlineBriefcase className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                    <span className="inline-flex items-center gap-1 rounded-full bg-muted border border-border px-2.5 py-0.5 text-[10.5px] font-bold text-foreground">
+                      <HiOutlineBriefcase className="h-3 w-3 text-muted-foreground" />
                       Permanent Role
                     </span>
                   )}
 
-
-
                   {a.match !== undefined && (
                     <span
                       className={cn(
-                        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-bold shadow-2xs",
+                        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-bold",
                         (a.match ?? 0) >= 70
-                          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                          ? "bg-success-soft border-success/25 text-success"
                           : (a.match ?? 0) >= 40
-                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
-                          : "bg-muted border-border text-muted-foreground"
+                            ? "bg-primary-soft/70 border-primary/20 text-primary"
+                            : "bg-muted border-border text-muted-foreground"
                       )}
                     >
-                      <BotMessageSquare className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <BotMessageSquare
+                        className={cn(
+                          "h-3.5 w-3.5 shrink-0",
+                          (a.match ?? 0) >= 70
+                            ? "text-success"
+                            : (a.match ?? 0) >= 40
+                              ? "text-primary"
+                              : "text-muted-foreground"
+                        )}
+                      />
                       <span>{(a.match ?? 0) >= 90 ? `Exact Match (${a.match}%)` : `${a.match}% Match`}</span>
                     </span>
                   )}
+
+                  {a.candidateRatingAvg && a.candidateRatingCount && a.candidateRatingCount > 0 ? (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-muted border border-border px-2.5 py-0.5 text-[11px] font-bold text-foreground"
+                      title={`${a.completedShiftsCount || a.candidateRatingCount} verified hospital shifts completed`}
+                    >
+                      <Star className="h-3 w-3 fill-primary text-primary shrink-0" />
+                      <span>
+                        {Number(a.candidateRatingAvg).toFixed(1)} ({a.candidateRatingCount})
+                      </span>
+                    </span>
+                  ) : null}
+
+                  {(a.isShiftClaim || a.for?.toLowerCase().includes("shift")) &&
+                    a.status === "Confirmed" &&
+                    a.checkInPin && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-primary-soft border border-primary/25 px-2.5 py-0.5 text-[11px] font-bold text-primary"
+                        title="Share this 4-digit Floor Check-In PIN with the clinician upon ward arrival"
+                      >
+                        <KeyRound className="h-3 w-3 shrink-0" />
+                        <span>Check-In PIN: {a.checkInPin}</span>
+                      </span>
+                    )}
                 </div>
 
                 {/* Key Skill Chips */}
                 {a.skills && a.skills.length > 0 && (
-                  <div className="mt-3.5 flex flex-wrap gap-1.5">
+                  <div className="mt-3 flex flex-wrap gap-1.5">
                     {a.skills.slice(0, 3).map((s) => (
                       <span
                         key={s}
-                        className="rounded-lg bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                        className="rounded-lg bg-muted border border-border/70 px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground"
                       >
                         {s}
                       </span>
@@ -982,16 +1203,27 @@ function Applicants() {
                   </div>
                 )}
 
-                {/* Clinical Candidate Summary (#11) */}
-                <div className="mt-3.5 rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/[0.04] via-primary/[0.01] to-card/40 p-3 sm:p-3.5 space-y-2.5 shadow-2xs">
+                {/* Clinical Profile Summary (#11) */}
+                <div className="mt-3.5 rounded-2xl border border-border bg-muted/50 p-3 sm:p-3.5 space-y-2.5">
                   {/* Top Bar: Header & Action Pill */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <div className="w-5 h-5 rounded-md bg-primary/15 text-primary flex items-center justify-center shrink-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-5 h-5 rounded-md bg-primary-soft text-primary flex items-center justify-center shrink-0">
                         <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
                       </div>
-                      <span className="text-[10px] sm:text-[10.5px] font-bold text-primary tracking-wider uppercase whitespace-nowrap">
-                        Clinical Profile Summary
+                      <span className="text-[10.5px] font-bold text-foreground tracking-wider uppercase whitespace-nowrap">
+                        Clinical Appraisal
+                      </span>
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap",
+                          a.verified
+                            ? "bg-success-soft text-success"
+                            : "bg-muted text-muted-foreground border border-border"
+                        )}
+                      >
+                        <HiOutlineShieldCheck className="h-3 w-3 shrink-0" />
+                        {a.verified ? "Council Verified" : "Pending KYC"}
                       </span>
                     </div>
 
@@ -1000,25 +1232,25 @@ function Applicants() {
                       disabled={loadingSummaryId === a.id}
                       onClick={() => handleGenerateSummary(a)}
                       className={cn(
-                        "inline-flex items-center justify-center gap-1.5 px-3 py-1.5 sm:py-1 rounded-lg text-[10.5px] font-bold transition-all w-full sm:w-auto shrink-0 cursor-pointer shadow-2xs border",
+                        "inline-flex items-center justify-center gap-1.5 px-3 py-1.5 sm:py-1 rounded-xl text-[11px] font-bold transition-all w-full sm:w-auto shrink-0 cursor-pointer border",
                         loadingSummaryId === a.id
-                          ? "bg-primary/10 text-primary border-primary/20 cursor-wait"
-                          : "bg-primary/10 hover:bg-primary/20 text-primary border-primary/25 active:scale-98"
+                          ? "bg-primary-soft text-primary border-primary/20 cursor-wait"
+                          : "bg-card hover:bg-primary hover:text-primary-foreground text-primary border-primary/30"
                       )}
                     >
                       {loadingSummaryId === a.id ? (
                         <>
-                          <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin text-primary" />
+                          <HiOutlineArrowPath className="h-3.5 w-3.5 animate-spin" />
                           <span>{aiSummaries[a.id] ? "Regenerating..." : "Analyzing..."}</span>
                         </>
                       ) : aiSummaries[a.id] ? (
                         <>
-                          <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
+                          <BotMessageSquare className="h-3.5 w-3.5" />
                           <span>Regenerate with Ally</span>
                         </>
                       ) : (
                         <>
-                          <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
+                          <BotMessageSquare className="h-3.5 w-3.5" />
                           <span>Summarize with Ally</span>
                         </>
                       )}
@@ -1026,7 +1258,7 @@ function Applicants() {
                   </div>
 
                   {loadingSummaryId === a.id ? (
-                    <div className="py-5 sm:py-6 flex flex-col items-center justify-center gap-2 text-center rounded-xl border border-primary/20 bg-primary/[0.03] animate-pulse">
+                    <div className="py-5 sm:py-6 flex flex-col items-center justify-center gap-2 text-center rounded-xl border border-primary/20 bg-primary-soft/30 animate-pulse">
                       <div className="relative flex items-center justify-center">
                         <HiOutlineArrowPath className="h-6 w-6 animate-spin text-primary" />
                         <BotMessageSquare className="h-3 w-3 text-primary absolute" />
@@ -1046,7 +1278,7 @@ function Applicants() {
                         <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-primary">
                           <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
                           <span>Ally Live Assessment</span>
-                          <span className="rounded-full bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 text-[8.5px] font-bold lowercase tracking-normal">
+                          <span className="rounded-full bg-primary-soft text-primary border border-primary/20 px-1.5 py-0.5 text-[8.5px] font-bold lowercase tracking-normal">
                             verified
                           </span>
                         </div>
@@ -1061,7 +1293,7 @@ function Applicants() {
                               setTimeout(() => setCopiedSummaryId(null), 2000);
                             }
                           }}
-                          className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded-md hover:bg-muted border border-transparent hover:border-border"
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer px-1.5 py-0.5 rounded-md hover:bg-card border border-transparent hover:border-border"
                           title="Copy clinical appraisal"
                         >
                           {copiedSummaryId === a.id ? (
@@ -1100,32 +1332,32 @@ function Applicants() {
                               className={cn(
                                 "rounded-xl border p-2 sm:p-2.5 text-[11px] leading-relaxed transition-all shadow-2xs",
                                 isMatch && (a.match ?? 0) < 70
-                                  ? "bg-warning-soft/60 border-warning/40 text-amber-950 dark:bg-amber-500/10 dark:text-amber-200 dark:border-amber-500/20"
+                                  ? "bg-primary-soft/50 border-primary/25 text-foreground"
                                   : isMatch && (a.match ?? 0) >= 70
-                                    ? "bg-success-soft/60 border-success/30 text-success-deep dark:bg-emerald-500/10 dark:text-emerald-200 dark:border-emerald-500/20"
-                                    : "bg-background/90 border-border/80 text-foreground/90"
+                                    ? "bg-success-soft/70 border-success/25 text-foreground"
+                                    : "bg-card border-border text-foreground/90"
                               )}
                             >
                               <div className="flex items-center gap-1.5 mb-1">
                                 {isMatch ? (
                                   (a.match ?? 0) >= 70 ? (
-                                    <HiCheck className="h-3.5 w-3.5 text-success dark:text-emerald-400 shrink-0" />
+                                    <HiCheck className="h-3.5 w-3.5 text-success shrink-0" />
                                   ) : (
-                                    <HiOutlineBolt className="h-3.5 w-3.5 text-warning shrink-0" />
+                                    <HiOutlineBolt className="h-3.5 w-3.5 text-primary shrink-0" />
                                   )
                                 ) : isReg ? (
-                                  <HiOutlineShieldCheck className="h-3.5 w-3.5 text-success dark:text-emerald-400 shrink-0" />
+                                  <HiOutlineShieldCheck className="h-3.5 w-3.5 text-success shrink-0" />
                                 ) : (
                                   <HiOutlineBriefcase className="h-3.5 w-3.5 text-primary shrink-0" />
                                 )}
                                 <span className={cn(
                                   "text-[9.5px] font-bold uppercase tracking-wider",
                                   isMatch && (a.match ?? 0) < 70
-                                    ? "text-amber-800 dark:text-amber-300"
+                                    ? "text-primary"
                                     : isMatch && (a.match ?? 0) >= 70
-                                      ? "text-success dark:text-emerald-400"
+                                      ? "text-success"
                                       : isReg
-                                        ? "text-success dark:text-emerald-400"
+                                        ? "text-success"
                                         : "text-primary"
                                 )}>
                                   {label}
@@ -1140,106 +1372,65 @@ function Applicants() {
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-2 pt-0.5">
-                      {/* Clinician Tags Row: Verification + Experience */}
-                      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                        <span className="font-semibold text-foreground whitespace-nowrap">{a.name}</span>
-                        <span className="hidden sm:inline text-muted-foreground/40">·</span>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-muted-foreground text-[10px] sm:text-[10.5px] font-medium border border-border whitespace-nowrap">
-                          <HiOutlineBriefcase className="h-3 w-3 text-muted-foreground shrink-0" />
-                          {a.exp || "Verified Clinician"}
-                        </span>
-                        <span className={cn(
-                          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] sm:text-[10.5px] font-medium border whitespace-nowrap",
-                          a.verified
-                            ? "bg-success-soft text-success border-success/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20"
-                            : "bg-muted text-muted-foreground border-border"
-                        )}>
-                          <HiOutlineShieldCheck className="h-3.5 w-3.5 shrink-0" />
-                          {a.verified ? "State Council Verified" : "MCI/KMC Registered"}
-                        </span>
-                      </div>
-
-                      {/* Applied Role & Key Skills with Zero Misalignment */}
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-[11px] leading-snug">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-muted-foreground shrink-0">Applied for:</span>
-                          <span className="font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md text-[10.5px] break-words">
-                            {a.for}
-                          </span>
-                        </div>
-                        {a.skills && a.skills.length > 0 && (
-                          <div className="flex items-center gap-1.5 min-w-0 text-muted-foreground flex-wrap sm:flex-nowrap">
-                            <span className="hidden sm:inline text-muted-foreground/40">·</span>
-                            <span className="text-muted-foreground shrink-0">Skills:</span>
-                            <span className="text-foreground/85 font-medium truncate" title={a.skills.join(", ")}>
-                              {a.skills.slice(0, 3).join(", ")}
-                            </span>
+                    <div
+                      className={cn(
+                        "rounded-xl border px-3 py-2.5 flex items-center justify-between gap-2.5",
+                        (a.match ?? 0) >= 70
+                          ? "bg-success-soft/60 border-success/25 text-foreground"
+                          : "bg-card border-border text-foreground"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {(a.match ?? 0) >= 70 ? (
+                          <div className="w-5 h-5 rounded-full bg-success/15 text-success flex items-center justify-center shrink-0">
+                            <HiCheck className="h-3.5 w-3.5 stroke-2" />
+                          </div>
+                        ) : (
+                          <div className="w-5 h-5 rounded-full bg-primary-soft text-primary flex items-center justify-center shrink-0">
+                            <HiOutlineBolt className="h-3.5 w-3.5" />
                           </div>
                         )}
+                        <span className="text-[11px] font-medium text-muted-foreground leading-snug">
+                          {isCompletedOrClosed
+                            ? `Shift ${a.status.toLowerCase()} · ${a.regNumber || "Council Verified"}`
+                            : (a.match ?? 0) >= 70
+                              ? "High clinical suitability for immediate roster allocation."
+                              : "Different specialty/cadre than shift title — review credentials before confirming."}
+                        </span>
                       </div>
 
-                      {/* Dynamic Suitability & Match Score Banner */}
-                      <div
+                      <span
                         className={cn(
-                          "rounded-xl border p-2.5 flex items-start sm:items-center justify-between gap-2.5 transition-all",
+                          "px-2.5 py-0.5 rounded-lg text-[10.5px] font-bold shrink-0 whitespace-nowrap border",
                           (a.match ?? 0) >= 70
-                            ? "bg-success-soft border-success/30 text-success-deep dark:bg-emerald-500/10 dark:border-emerald-500/25 dark:text-emerald-300"
-                            : "bg-warning-soft border-warning/40 text-amber-950 dark:bg-amber-500/10 dark:border-amber-500/25 dark:text-amber-200"
+                            ? "bg-success text-white border-success"
+                            : "bg-muted text-foreground border-border"
                         )}
                       >
-                        <div className="flex items-start sm:items-center gap-2 min-w-0">
-                          {(a.match ?? 0) >= 70 ? (
-                            <div className="w-5 h-5 rounded-full bg-success/15 text-success dark:bg-emerald-500/20 dark:text-emerald-300 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
-                              <HiCheck className="h-3.5 w-3.5 stroke-2" />
-                            </div>
-                          ) : (
-                            <div className="w-5 h-5 rounded-full bg-warning/20 text-warning dark:bg-amber-500/20 dark:text-amber-300 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
-                              <HiOutlineBolt className="h-3.5 w-3.5" />
-                            </div>
-                          )}
-                          <span className="text-[11px] font-medium leading-snug">
-                            {(a.match ?? 0) >= 70
-                              ? "High clinical suitability for immediate roster allocation."
-                              : "Discrepancy detected with shift requirements; supervisory review recommended."}
-                          </span>
-                        </div>
-
-                        <div
-                          className={cn(
-                            "px-2.5 py-0.5 rounded-lg text-[10.5px] font-bold shrink-0 whitespace-nowrap shadow-2xs border self-center",
-                            (a.match ?? 0) >= 70
-                              ? "bg-success text-white dark:bg-emerald-500/25 dark:text-emerald-200 border-success/30"
-                              : "bg-warning text-white dark:bg-amber-500/25 dark:text-amber-200 border-warning/40"
-                          )}
-                        >
-                          {(a.match ?? 0) >= 70 ? "Match" : "Score"}: {a.match ?? 78}%
-                        </div>
-                      </div>
+                        {a.match ?? 78}% Fit
+                      </span>
                     </div>
                   )}
                 </div>
               </div>
 
               {/* Action Buttons: View Resume + Stage Actions */}
-              <div className="mt-5 pt-3.5 border-t border-border/70 flex flex-wrap items-center justify-between gap-2">
+              <div className="mt-5 pt-3.5 border-t border-border/80 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  {/* Option to see the resume */}
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => setSelectedResume(a)}
-                    className="rounded-xl text-xs font-semibold gap-1.5 border-input hover:border-ring text-foreground shadow-2xs cursor-pointer"
+                    className="rounded-xl text-xs font-semibold gap-1.5 border-input hover:border-primary/40 text-foreground cursor-pointer"
                   >
                     <HiOutlineDocumentText className="h-4 w-4 text-primary" /> View resume
                   </Button>
 
-                  {/* Clinical Interview Questions */}
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => handleOpenInterviewQuestions(a)}
-                    className="rounded-xl text-xs font-semibold gap-1.5 border-primary/30 hover:border-primary text-primary hover:bg-primary/10 shadow-2xs cursor-pointer"
+                    className="rounded-xl text-xs font-semibold gap-1.5 border-input hover:border-primary/40 text-foreground hover:text-primary cursor-pointer"
                   >
                     <BotMessageSquare className="h-3.5 w-3.5 text-primary" /> Interview Questions
                   </Button>
@@ -1249,31 +1440,109 @@ function Applicants() {
                   {(a.isShiftClaim || a.for?.toLowerCase().includes("shift")) ? (
                     <>
                       {a.status === "Timesheet Submitted" ? (
-                        <>
-                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl">
-                            <HiOutlineClock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-                            Timesheet: {a.actualHours || a.scheduledHours || 8}h reported
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-primary bg-primary-soft border border-primary/20 px-2.5 py-1 rounded-xl">
+                            <HiOutlineClock className="h-3.5 w-3.5 text-primary" />
+                            Timesheet: {a.actualHours || a.scheduledHours || 8}h
                           </span>
                           <Button
                             size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setDisputeModalApp(a);
+                              setDisputeReasonInput("");
+                            }}
+                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
+                          >
+                            Raise Dispute
+                          </Button>
+                          <Button
+                            size="sm"
                             onClick={() => openVerifyTimesheetModal(a)}
-                            className="rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+                            className="rounded-xl text-xs font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             Verify Timesheet
                           </Button>
-                        </>
+                        </div>
                       ) : a.status === "Confirmed" ? (
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 px-1.5">
-                            <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Shift Confirmed · Awaiting Duty Sign-Off
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success px-1.5">
+                            <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Confirmed
+                            {a.checkInPin ? ` · PIN ${a.checkInPin}` : ""}
                           </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleMarkNoShow(a)}
+                            className="rounded-xl text-xs font-semibold text-foreground border-input hover:border-primary/40 cursor-pointer"
+                          >
+                            Mark No-Show
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setDisputeModalApp(a);
+                              setDisputeReasonInput("");
+                            }}
+                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
+                          >
+                            Dispute
+                          </Button>
+                        </div>
+                      ) : a.status === "Checked In" ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-primary px-1.5">
+                            <KeyRound className="h-3.5 w-3.5" /> Checked In · On Floor Duty
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setDisputeModalApp(a);
+                              setDisputeReasonInput("");
+                            }}
+                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
+                          >
+                            Raise Dispute
+                          </Button>
                         </div>
                       ) : a.status === "Completed" || a.status === "Hired" ? (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 px-1.5">
-                          <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Duty Verified & Escrow Released
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success px-1.5">
+                            <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Duty Verified &amp; Escrow Released
+                          </span>
+                          {a.hospitalRating ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-xl bg-muted border border-border px-2.5 py-1 text-xs font-bold text-foreground"
+                              title={a.hospitalReview || "Hospital rating recorded"}
+                            >
+                              <Star className="h-3.5 w-3.5 fill-primary text-primary" />
+                              Rated {a.hospitalRating}/5
+                            </span>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => openRateModal(a)}
+                              className="rounded-xl text-xs font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer gap-1"
+                            >
+                              <Star className="h-3.5 w-3.5 fill-white" /> Rate Clinician
+                            </Button>
+                          )}
+                        </div>
+                      ) : a.status === "Disputed" ? (
+                        <span
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-destructive px-1.5"
+                          title={a.disputeReason || "Escalated to FALE Ops"}
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5" /> Disputed (Under FALE Ops Review)
+                        </span>
+                      ) : a.status === "No-Show" ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-destructive px-1.5">
+                          <HiXMark className="h-3.5 w-3.5 stroke-[3]" /> Marked No-Show · Slot Reopened
                         </span>
                       ) : a.status === "Rejected" ? (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 px-1.5">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-destructive px-1.5">
                           <HiXMark className="h-3.5 w-3.5 stroke-[3]" /> Claim Declined
                         </span>
                       ) : a.status === "Slot Filled" ? (
@@ -1289,14 +1558,14 @@ function Applicants() {
                             size="sm"
                             variant="outline"
                             onClick={() => openRejectModal(a)}
-                            className="rounded-xl text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
                           >
                             Decline Claim
                           </Button>
                           <Button
                             size="sm"
                             onClick={() => handleConfirmShift(a)}
-                            className="rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+                            className="rounded-xl text-xs font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             Confirm Shift
                           </Button>
@@ -1311,14 +1580,14 @@ function Applicants() {
                             size="sm"
                             variant="outline"
                             onClick={() => openRejectModal(a)}
-                            className="rounded-xl text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
                           >
                             Decline
                           </Button>
                           <Button
                             size="sm"
                             onClick={() => handleInvite(a)}
-                            className="rounded-xl text-xs font-semibold shadow-xs"
+                            className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             Invite to interview
                           </Button>
@@ -1331,14 +1600,14 @@ function Applicants() {
                             size="sm"
                             variant="outline"
                             onClick={() => openRejectModal(a)}
-                            className="rounded-xl text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
                           >
                             Decline
                           </Button>
                           <Button
                             size="sm"
                             onClick={() => handleInvite(a)}
-                            className="rounded-xl text-xs font-semibold shadow-xs"
+                            className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             Invite to interview
                           </Button>
@@ -1351,14 +1620,14 @@ function Applicants() {
                             size="sm"
                             variant="outline"
                             onClick={() => openRejectModal(a)}
-                            className="rounded-xl text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
                           >
                             Decline
                           </Button>
                           <Button
                             size="sm"
                             onClick={() => handleMakeOffer(a)}
-                            className="rounded-xl text-xs font-semibold shadow-xs"
+                            className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
                             Extend offer
                           </Button>
@@ -1371,14 +1640,14 @@ function Applicants() {
                             size="sm"
                             variant="outline"
                             onClick={() => openRejectModal(a)}
-                            className="rounded-xl text-xs font-semibold text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
                           >
                             Decline
                           </Button>
                           <Button
                             size="sm"
                             onClick={() => handleHire(a)}
-                            className="rounded-xl text-xs font-semibold shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                            className="rounded-xl text-xs font-semibold shadow-2xs bg-success hover:bg-success/90 text-white cursor-pointer"
                           >
                             Confirm Hired
                           </Button>
@@ -1386,13 +1655,13 @@ function Applicants() {
                       )}
 
                       {a.status === "Hired" && (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 px-1.5">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success px-1.5">
                           <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Placed / Hired
                         </span>
                       )}
 
                       {a.status === "Rejected" && (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 px-1.5">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-destructive px-1.5">
                           <HiXMark className="h-3.5 w-3.5 stroke-[2.5]" /> Not Selected
                         </span>
                       )}
@@ -1407,7 +1676,8 @@ function Applicants() {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Empty State with Lottie Animation */}
@@ -1421,18 +1691,22 @@ function Applicants() {
               />
             </div>
             <h3 className="text-base font-bold text-foreground">
-              {roleTypeTab === "jobs"
-                ? "No permanent role applicants found"
-                : roleTypeTab === "shifts"
-                ? "No locum shift candidates found"
-                : "No applicants found"}
+              {filter === "Needs Action" && counts.All > 0
+                ? "All caught up — no candidates waiting for review"
+                : roleTypeTab === "jobs"
+                  ? "No permanent role applicants found"
+                  : roleTypeTab === "shifts"
+                    ? "No locum shift candidates found"
+                    : "No applicants found"}
             </h3>
             <p className="mt-1 text-xs sm:text-sm text-muted-foreground max-w-sm mx-auto">
-              {roleTypeTab === "jobs"
-                ? "Candidates applying for your permanent vacancies will appear here."
-                : roleTypeTab === "shifts"
-                ? "Healthcare professionals claiming broadcast shifts will appear here."
-                : "Try changing your search keywords or filter selection."}
+              {filter === "Needs Action" && counts.All > 0
+                ? "New applications and shift claims will appear here automatically. Switch to All to browse completed shifts."
+                : roleTypeTab === "jobs"
+                  ? "Candidates applying for your permanent vacancies will appear here."
+                  : roleTypeTab === "shifts"
+                    ? "Healthcare professionals claiming broadcast shifts will appear here."
+                    : "Try changing your search keywords or filter selection."}
             </p>
             <Button
               variant="outline"
@@ -1442,9 +1716,9 @@ function Applicants() {
                 setSelectedRole("All");
                 setSearch("");
               }}
-              className="mt-4 rounded-xl text-xs font-semibold shadow-2xs hover:bg-muted"
+              className="mt-4 rounded-xl text-xs font-semibold shadow-2xs hover:bg-muted cursor-pointer"
             >
-              Reset filters
+              {filter === "Needs Action" && counts.All > 0 ? "View All & Completed" : "Reset filters"}
             </Button>
           </div>
         )}
@@ -1658,7 +1932,7 @@ function Applicants() {
                           onClick={() => {
                             handleHire(selectedResume);
                             setSelectedResume(null);
-                            }}
+                          }}
                           className="rounded-xl text-xs font-semibold shadow-xs bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto"
                         >
                           Confirm Hired
@@ -1859,6 +2133,25 @@ function Applicants() {
                     </span>
                   </div>
                 </div>
+              ) : verifyHoursInput > (verifyTimesheetModalApp.scheduledHours || 8) ? (
+                <div className="rounded-2xl border border-amber-300/60 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs space-y-1.5">
+                  <p className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                    <HiOutlineClock className="h-4 w-4 shrink-0 text-amber-600" />
+                    Overtime Settlement ({verifyHoursInput - (verifyTimesheetModalApp.scheduledHours || 8)} extra hrs)
+                  </p>
+                  <div className="flex justify-between text-foreground font-medium">
+                    <span>Approved Clinician Gross ({verifyHoursInput} hrs):</span>
+                    <span className="font-bold text-foreground">
+                      ₹{((verifyTimesheetModalApp.hourlyRate || 500) * verifyHoursInput).toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                  <div className="pt-1 border-t border-amber-200 dark:border-amber-900/40 flex justify-between font-bold text-amber-800 dark:text-amber-300">
+                    <span>Extra Escrow Debited from Wallet:</span>
+                    <span>
+                      ₹{((verifyTimesheetModalApp.hourlyRate || 500) * (verifyHoursInput - (verifyTimesheetModalApp.scheduledHours || 8))).toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                </div>
               ) : (
                 <div className="rounded-2xl border border-muted bg-muted/40 p-3 text-xs text-muted-foreground flex items-center gap-2">
                   <HiOutlineShieldCheck className="h-4 w-4 shrink-0 text-primary" />
@@ -1882,6 +2175,174 @@ function Applicants() {
                 className="rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
               >
                 {submittingVerifyTimesheet ? "Verifying..." : "Approve & Release Escrow"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ================= RAISE SHIFT DISPUTE MODAL ================= */}
+      {disputeModalApp && (
+        <Dialog open={true} onOpenChange={(open) => { if (!open) setDisputeModalApp(null); }}>
+          <DialogContent className="max-w-md rounded-3xl p-6 sm:p-7">
+            <DialogHeader>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="grid h-10 w-10 place-items-center rounded-2xl bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <DialogTitle className="text-base font-black text-foreground">
+                    Raise Shift Dispute
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground">
+                    {disputeModalApp.name} · {disputeModalApp.for}
+                  </DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Escrow payout is immediately frozen until FALE Clinical Ops reviews attendance logs and timesheets from both parties.
+              </p>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-foreground">Dispute Reason & Ward Notes</label>
+                <textarea
+                  rows={3}
+                  value={disputeReasonInput}
+                  onChange={(e) => setDisputeReasonInput(e.target.value)}
+                  placeholder="e.g., Clinician logged 8h but ward supervisor log shows 5h duty or left post early..."
+                  className="w-full rounded-xl border border-input bg-background p-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0 mt-2">
+              <Button
+                variant="outline"
+                disabled={submittingDispute}
+                onClick={() => setDisputeModalApp(null)}
+                className="rounded-xl font-bold text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={submittingDispute}
+                onClick={handleConfirmDispute}
+                className="rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer"
+              >
+                {submittingDispute ? "Escalating..." : "Escalate to FALE Ops"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ================= RATE CLINICIAN (1-5 STARS) MODAL ================= */}
+      {rateModalApp && (
+        <Dialog open={true} onOpenChange={(open) => { if (!open) setRateModalApp(null); }}>
+          <DialogContent className="max-w-md rounded-3xl p-6 sm:p-7">
+            <DialogHeader>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="grid h-10 w-10 place-items-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300">
+                  <Star className="h-5 w-5 fill-amber-500 text-amber-500" />
+                </div>
+                <div>
+                  <DialogTitle className="text-base font-black text-foreground">
+                    Rate Shift Performance
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground">
+                    {rateModalApp.name} · {rateModalApp.for}
+                  </DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-muted/30 p-4">
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setRatingScore(star)}
+                      className="p-1 transition-transform hover:scale-110 cursor-pointer"
+                      aria-label={`Rate ${star} stars`}
+                    >
+                      <Star
+                        className={cn(
+                          "h-7 w-7 transition-colors",
+                          star <= ratingScore
+                            ? "fill-amber-400 text-amber-500"
+                            : "text-muted-foreground/30"
+                        )}
+                      />
+                    </button>
+                  ))}
+                </div>
+                <span className="text-xs font-bold text-foreground">
+                  {ratingScore === 5
+                    ? "5/5 — Exceptional Clinical Duty"
+                    : ratingScore === 4
+                      ? "4/5 — Strong & Reliable Shift"
+                      : ratingScore === 3
+                        ? "3/5 — Satisfactory Coverage"
+                        : `${ratingScore}/5 — Needs Improvement`}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-foreground">Clinical Strengths (Optional)</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {CLINICAL_RATING_TAGS.map((tag) => {
+                    const selected = ratingTagsSelected.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => toggleRatingTag(tag)}
+                        className={cn(
+                          "rounded-lg px-2.5 py-1 text-[11px] font-semibold border transition-all cursor-pointer",
+                          selected
+                            ? "bg-amber-500/15 border-amber-500/40 text-amber-800 dark:text-amber-300"
+                            : "border-input bg-card text-muted-foreground hover:border-ring"
+                        )}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-foreground">Ward Endorsement Note (Optional)</label>
+                <textarea
+                  rows={2}
+                  value={ratingReviewInput}
+                  onChange={(e) => setRatingReviewInput(e.target.value)}
+                  placeholder="Share brief feedback on clinical handover, patient care, or ward readiness..."
+                  className="w-full rounded-xl border border-input bg-background p-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0 mt-2">
+              <Button
+                variant="outline"
+                disabled={submittingRating}
+                onClick={() => setRateModalApp(null)}
+                className="rounded-xl font-bold text-xs"
+              >
+                Skip
+              </Button>
+              <Button
+                disabled={submittingRating}
+                onClick={handleSubmitRating}
+                className="rounded-xl font-bold text-xs bg-amber-500 hover:bg-amber-600 text-white shadow-xs cursor-pointer gap-1.5"
+              >
+                <Star className="h-3.5 w-3.5 fill-white" />
+                {submittingRating ? "Submitting..." : `Submit ${ratingScore}★ Rating`}
               </Button>
             </DialogFooter>
           </DialogContent>
