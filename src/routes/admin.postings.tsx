@@ -1,3 +1,4 @@
+import { ShiftRequirements, ShiftArrivalInstructions } from "@/components/fale/ShiftDetailsFields";
 import { AllyReviewNote } from "@/components/fale/AllyReviewNote";
 import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { usePageLoad } from "@/hooks/use-page-load";
@@ -349,6 +350,7 @@ function JobApprovalsAdmin() {
           compensation: comp,
           openings: s.openings || 1,
           type: "shift" as const,
+          shiftDetails: s.details,
           expOrHours: `${s.hours || 8} hrs duty`,
           experienceRequired: "Immediate Duty Ready",
           qualificationRequired: "State Council Registered Practitioner",
@@ -1162,6 +1164,7 @@ function JobApprovalsAdmin() {
                 </div>
               )}
 
+              {selectedJob?.shiftDetails && <div className="space-y-3"><ShiftRequirements details={selectedJob.shiftDetails} /><ShiftArrivalInstructions details={selectedJob.shiftDetails} /></div>}
               {/* Ally Statutory Posting Compliance Card */}
               {(() => {
                 const comp = getPostingCompliance(selectedJob);

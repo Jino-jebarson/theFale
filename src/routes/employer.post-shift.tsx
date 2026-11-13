@@ -1,3 +1,6 @@
+import { calculateShiftCharges } from "@/lib/shiftCharges";
+import { ShiftDetailsFields } from "@/components/fale/ShiftDetailsFields";
+import type { ShiftDetails } from "@/lib/adapters/shiftAdapter";
 import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { usePageLoad } from "@/hooks/use-page-load";
 import { RequestError } from "@/components/fale/RequestError";
@@ -160,7 +163,7 @@ function PostShiftScreen() {
         if (wallet) {
           setAvailableEscrow(paiseToRupees(wallet.availableBalancePaise));
         }
-        if (bank && (bank.accountNumber || (bank as any).accountNumberMasked || (bank as any).accountNumberLast4)) {
+        if (bank && bank.status?.toLowerCase() === "verified" && (bank.accountNumber || (bank as any).accountNumberMasked || (bank as any).accountNumberLast4)) {
           setHasLinkedBank(true);
         }
         if (policy) {
@@ -180,6 +183,7 @@ function PostShiftScreen() {
             setIsUrgent(Boolean(match.urgent));
             setSurgeReason(match.surgeLabel || "");
             setDutyNotes(match.description || "");
+            setDetails(match.details || {});
             const baseHourly = paiseToRupees(match.rawRatePerHourPaise || 0);
             setHourlyRate(baseHourly || match.rate || 600);
             setSelectedSlot("custom");
@@ -202,6 +206,7 @@ function PostShiftScreen() {
 
   // Form State
   const [roleTitle, setRoleTitle] = useState("");
+  const [details, setDetails] = useState<ShiftDetails>({});
   const [dept, setDept] = useState("");
   const [city, setCity] = useState(() => String(store.profile["city"] || ""));
   const [dateOption, setDateOption] = useState("Today · Urgent");
@@ -395,19 +400,21 @@ function PostShiftScreen() {
     return slot ? slot.hours : 12;
   }, [selectedSlot, customHours]);
 
-  // Economics (includes urgent +₹50/hr surge + facility service fee: 0% 1st shift, 5% 2nd+ shift)
+  // Economics (includes urgent +₹50/hr surge + facility service fee: 8% hospital reserve; first completed shift fee refunded)
   const effectiveHourlyRate = useMemo(() => hourlyRate + (isUrgent ? 50 : 0), [hourlyRate, isUrgent]);
   const payPerWorker = useMemo(() => effectiveHourlyRate * activeHours, [effectiveHourlyRate, activeHours]);
   const workerEscrowTotal = useMemo(() => payPerWorker * openings, [payPerWorker, openings]);
   const facilityFeePercent = useMemo(() => {
     if (editingShift) return editingShift.facilityFeePercent ?? 0;
-    return shiftPolicy?.platformFeePercent ?? 0;
+    return shiftPolicy?.platformFeePercent ?? 8;
   }, [editingShift, shiftPolicy]);
-  const facilityFeeAmount = useMemo(
-    () => Math.round((workerEscrowTotal * facilityFeePercent) / 100),
-    [workerEscrowTotal, facilityFeePercent]
-  );
-  const totalEscrowAmount = useMemo(() => workerEscrowTotal + facilityFeeAmount, [workerEscrowTotal, facilityFeeAmount]);
+  const gstPercent = editingShift ? (editingShift.platformFeeGstPercent ?? 0) : (shiftPolicy?.platformFeeGstPercent ?? 0);
+  const gstRateReady = Boolean(editingShift || shiftPolicy?.platformFeeGstPercent !== undefined);
+  const charges = useMemo(() => calculateShiftCharges(Math.round(payPerWorker * 100), openings, facilityFeePercent, gstPercent),
+    [payPerWorker, openings, facilityFeePercent, gstPercent]);
+  const facilityFeeAmount = charges.platformFeePaise / 100;
+  const gstAmount = charges.platformFeeGstPaise / 100;
+  const totalEscrowAmount = charges.totalPaise / 100;
   const existingLockedEscrow = useMemo(
     () => (editingShift ? paiseToRupees(editingShift.totalEscrowRequiredPaise || 0) : 0),
     [editingShift]
@@ -549,6 +556,7 @@ function PostShiftScreen() {
       return;
     }
 
+    if (!gstRateReady) { toast.error("Fee details are unavailable. Refresh this page before posting."); return; }
     if (availableEscrow < additionalEscrowNeeded) {
       toast.error("Insufficient escrow balance", {
         description: `Required ₹${additionalEscrowNeeded.toLocaleString("en-IN")}, available ₹${availableEscrow.toLocaleString("en-IN")}. Please top up your wallet.`,
@@ -593,12 +601,16 @@ function PostShiftScreen() {
       postedShifts: [newShift, ...(s.postedShifts ?? [])],
     }));
 
+    if (!details.profession || !details.reportTo?.trim() || !details.reportLocation?.trim()) {
+      toast.error("Select a profession and enter the reporting person and location."); return;
+    }
     setSubmitting(true);
     try {
       let returnedStatus = "PENDING_APPROVAL";
       {
         const shiftPayload = {
           title: roleTitle.trim(),
+          details: { ...details, city },
           department: dept.trim(),
           startAt: startIso,
           endAt: endIso,
@@ -1098,7 +1110,7 @@ function PostShiftScreen() {
                             ₹{aiRateSuggestion.minHourlyRate}/hr
                           </span>
                           <span className="text-[9px] sm:text-[10px] text-muted-foreground/80 mt-0.5 whitespace-nowrap">
-                            ~1–2h fill
+                            Lower observed range
                           </span>
                         </button>
 
@@ -1194,6 +1206,8 @@ function PostShiftScreen() {
 
               {/* Reporting & Duty Notes */}
               <div className="pt-2 border-t border-border/60 space-y-1.5">
+                <p className="text-xs text-muted-foreground">The hospital pays the platform fee plus GST on that fee. Both are reserved with shift pay and refunded for your first completed shift. Clinicians pay no platform fee.</p>
+                <ShiftDetailsFields value={{ ...details, city }} onChange={setDetails} />
                 <label htmlFor="duty-instructions" className="text-xs font-semibold text-foreground block">
                   Reporting &amp; Duty Instructions (Optional)
                 </label>
@@ -1202,7 +1216,7 @@ function PostShiftScreen() {
                   rows={3}
                   value={dutyNotes}
                   onChange={(e) => setDutyNotes(e.target.value)}
-                  placeholder="Specify reporting station/floor, duty supervisor contact, uniform/scrubs, or security pass instructions..."
+                  placeholder="Describe the clinical duties visible to applicants. Use Arrival instructions above for private reporting details."
                   className="w-full rounded-xl border border-input bg-background p-3.5 text-xs sm:text-sm font-normal text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none leading-relaxed"
                 />
               </div>
@@ -1325,12 +1339,18 @@ function PostShiftScreen() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">
-                    Platform Fee ({facilityFeePercent === 0 ? "1st Shift Free" : `${facilityFeePercent}%`}):
+                    Platform fee reserve ({facilityFeePercent}%):
                   </span>
                   <span className={cn("font-mono font-bold", facilityFeePercent === 0 ? "text-success" : "text-foreground")}>
                     {facilityFeePercent === 0 ? "₹0 (Waived)" : `₹${facilityFeeAmount.toLocaleString("en-IN")}`}
                   </span>
                 </div>
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-muted-foreground">GST on platform fee ({gstRateReady ? gstPercent + "%" : "rate pending"}):</span>
+                  <span className="font-mono font-semibold">{gstRateReady ? gstAmount.toLocaleString("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2 }) : "Loading..."}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">GST applies to the platform fee only. The first completed shift's platform fee and GST are refunded.</p>
+
                 {shiftPolicy && !editingShift && (
                   <div className={cn(
                     "rounded-lg p-2 border text-[10.5px] font-semibold flex items-center gap-1.5",
@@ -1424,7 +1444,7 @@ function PostShiftScreen() {
                 ? <>Your shift is live immediately and broadcast to verified clinicians in {city || "your city"}.</>
                 : shiftPolicy && !shiftPolicy.kycVerified && (shiftPolicy.priorApprovedShiftsCount ?? 0) > 0
                   ? "Compliance Admin will approve this shift shortly. Once your hospital KYC is verified, future shifts will publish immediately."
-                  : "As your facility's first shift, Compliance Admin will verify it shortly. Once hospital KYC is verified, subsequent shifts will publish instantly!"}
+                  : "As your facility's first shift, Compliance Admin will verify it shortly. After this first shift is approved, subsequent eligible shifts publish instantly."}
             </DialogDescription>
           </DialogHeader>
 

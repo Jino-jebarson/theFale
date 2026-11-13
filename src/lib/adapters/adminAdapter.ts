@@ -245,7 +245,7 @@ export async function disbursePayout(
 ): Promise<void> {
   await apiFetch(`/admin/payouts/${claimId}/disburse`, {
     method: "POST",
-    body: JSON.stringify({ utr, notes: notes || "Escrow payout disbursed via automated NEFT/IMPS" }),
+    body: JSON.stringify({ utr, notes: notes || "External bank payment confirmed by admin" }),
   });
 }
 

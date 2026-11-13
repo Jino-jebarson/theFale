@@ -111,6 +111,7 @@ export interface FacilityKYCItem {
 }
 
 export interface AdminJobApproval {
+  shiftDetails?: import("@/lib/adapters/shiftAdapter").ShiftDetails | undefined;
   id: string;
   facilityId?: string;
   title: string;
@@ -191,6 +192,11 @@ export interface AdminApplication {
 }
 
 export interface WalletTransaction {
+  canonicalDocument?: boolean | undefined;
+  destinationSnapshot?: string | undefined;
+  bankDisbursedAt?: string | undefined;
+  platformFeePaise?: number | null | undefined;
+  platformFeeGstPaise?: number | null | undefined;
   id: string;
   type: "topup" | "escrow_hold" | "disbursement" | "credit_purchase" | "standby_credit" | "refund";
   title: string;

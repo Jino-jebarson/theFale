@@ -1,3 +1,5 @@
+import { shiftInHistory } from "@/lib/employerWorkflow";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { usePageLoad } from "@/hooks/use-page-load";
 import { RequestError } from "@/components/fale/RequestError";
@@ -24,7 +26,7 @@ import {
 } from "react-icons/hi2";
 import { toast } from "sonner";
 import { AppShell, StatusBadge } from "@/components/fale/AppShell";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import { EmptyEarningsGraphic } from "@/components/fale/EmptyEarningsGraphic";
 import {
   Dialog,
@@ -49,12 +51,12 @@ import { getFacilityShifts, cancelShift, type UiShiftItem } from "@/lib/adapters
 export const Route = createFileRoute("/employer/postings")({
   head: () => ({
     meta: [
-      { title: "Active Roles & Shifts — Hospital Command" },
+      { title: "Jobs & Shifts — Hospital Command" },
       {
         name: "description",
         content: "Monitor live hospital vacancies, review applicant counts, and track broadcast shift coverage.",
       },
-      { property: "og:title", content: "Active Roles & Shifts — FALE Healthcare" },
+      { property: "og:title", content: "Jobs & Shifts — FALE Healthcare" },
       { property: "og:description", content: "Hospital clinical workforce requisition dashboard." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -70,8 +72,8 @@ function EmployerPostings() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"jobs" | "shifts">("jobs");
   const [search, setSearch] = useState("");
-  const [jobFilter, setJobFilter] = useState<"all" | "active" | "pending" | "closed">("all");
-  const [shiftFilter, setShiftFilter] = useState<"all" | "open" | "booked" | "pending">("all");
+  const [jobFilter, setJobFilter] = useState<"all" | "active" | "pending" | "closed">("active");
+  const [shiftFilter, setShiftFilter] = useState<"all" | "open" | "booked" | "pending" | "history">("all");
   const [selectedJob, setSelectedJob] = useState<any | null>(null);
   const [shiftToCancel, setShiftToCancel] = useState<any | null>(null);
   const [cancellingShift, setCancellingShift] = useState(false);
@@ -140,17 +142,17 @@ function EmployerPostings() {
         const applicantsForJob = apiApplicants.filter((a) => a.jobId === j.id);
 
         let uiStatus = "Active";
-        if (j.status === "CLOSED" || j.status === "FILLED") uiStatus = "Closed";
-        else if (j.status === "PENDING" || j.status === "UNDER_REVIEW") uiStatus = "Under review";
+        if (["CLOSED", "FILLED", "REJECTED", "CANCELLED"].includes(j.status)) uiStatus = "Closed";
+        else if (["PENDING", "UNDER_REVIEW", "PENDING_APPROVAL"].includes(j.status)) uiStatus = "Under review";
 
         return {
           id: j.id,
           title: j.title,
-          dept: j.department || "Clinical Medicine",
+          dept: j.department || "Department not specified",
           city: j.city || "",
-          workLocation: j.workLocation || j.city || "Main Campus",
+          workLocation: j.workLocation || j.city || "Location not specified",
           openings: j.openings || 1,
-          employmentType: j.employmentType || "Full-time",
+          employmentType: j.employmentType || "Not specified",
           minSalary: minRupees,
           maxSalary: maxRupees,
           salaryDisplay:
@@ -158,14 +160,14 @@ function EmployerPostings() {
               ? `₹${(minRupees / 1000).toFixed(0)}k–${(maxRupees / 1000).toFixed(0)}k/mo`
               : minRupees
               ? `₹${(minRupees / 1000).toFixed(0)}k+/mo`
-              : "Competitive",
+              : "Salary not specified",
           status: uiStatus,
           rawStatus: j.status,
           applicantsCount: applicantsForJob.length,
           postedDate: j.postedAt || (j as any).createdAt ? new Date(j.postedAt || (j as any).createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "Recent",
-          experienceRequired: j.experienceRequired || "1-3 yrs clinical experience",
-          qualificationRequired: j.qualificationRequired || "State Council Registration Required",
-          description: j.description || "Healthcare opportunity at accredited partner hospital.",
+          experienceRequired: j.experienceRequired || "Not specified",
+          qualificationRequired: j.qualificationRequired || "Not specified",
+          description: j.description || "No description provided.",
         };
       });
     }
@@ -179,7 +181,8 @@ function EmployerPostings() {
     {
       return apiShifts.map((sh: any) => {
         let uiStatus = "Live Broadcast";
-        if (sh.status === "FILLED" || sh.status === "COMPLETED") uiStatus = "Clinician Assigned";
+        if (sh.status === "FILLED" || sh.status === "BOOKED") uiStatus = "Clinician Assigned";
+        else if (sh.status === "COMPLETED") uiStatus = "Completed";
         else if (sh.status === "PENDING_APPROVAL") uiStatus = "Awaiting Verification";
         else if (sh.status === "CANCELLED") uiStatus = "Cancelled";
         else if (sh.status === "REJECTED") uiStatus = "Rejected";
@@ -192,29 +195,33 @@ function EmployerPostings() {
           id: sh.id,
           title: sh.title,
           dept: sh.dept || "Emergency & Trauma",
-          date: sh.date || "Today",
+          date: sh.date || "Date not specified",
           timeSlot: sh.time || sh.timeSlot || `${sh.startTime || "08:00"} - ${sh.endTime || "16:00"}`,
           hours: sh.hours || 8,
           rate: sh.rate || 0,
           totalPayout: perWorkerTotal,
           totalEscrow,
           facilityFeePercent: sh.facilityFeePercent ?? 0,
+          gstPercent: sh.platformFeeGstPercent ?? 0,
           autoApproved: Boolean(sh.autoApproved),
           slots: sh.slots || 1,
-          slotsClaimed: sh.slotsClaimed || (sh.status === "FILLED" ? 1 : 0),
+          slotsClaimed: sh.slotsClaimed ?? 0,
           status: uiStatus,
           rawStatus: (sh.status || "OPEN").toUpperCase(),
+          applicantsCount: apiApplicants.filter(a => (a.shiftId || a.jobId) === sh.id).length,
+          city: sh.city || "",
           urgency: sh.urgent ? "Urgent" : (sh.urgency || "Standard"),
         };
       });
     }
 
 
-  }, [isApiEnabled, apiShifts]);
+  }, [isApiEnabled, apiShifts, apiApplicants]);
 
   // Filtered lists
   const filteredJobs = useMemo(() => {
     return allJobs.filter((j) => {
+      if (jobFilter === "all" && j.status === "Closed") return false;
       if (jobFilter === "active" && j.status !== "Active") return false;
       if (jobFilter === "pending" && j.status !== "Under review") return false;
       if (jobFilter === "closed" && j.status !== "Closed") return false;
@@ -236,6 +243,7 @@ function EmployerPostings() {
 
   const filteredShifts = useMemo(() => {
     return allShifts.filter((sh) => {
+      if (shiftFilter === "history" ? !shiftInHistory(sh.rawStatus) : shiftInHistory(sh.rawStatus)) return false;
       if (shiftFilter === "open" && sh.status !== "Live Broadcast") return false;
       if (shiftFilter === "booked" && !isShiftBooked(sh)) return false;
       if (shiftFilter === "pending" && sh.status !== "Awaiting Verification") return false;
@@ -252,50 +260,33 @@ function EmployerPostings() {
 
   return (
     <AppShell>
+      {loading && <p role="status" className="flex items-center gap-2 p-4 text-sm"><ButtonSpinner />Loading jobs and shifts...</p>}
       <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="w-full min-w-0 space-y-6">
         {/* Executive Header & Quick Post Actions */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-              Active Roles & Requisitions
+              Jobs & Shifts
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
-              Monitor live hospital vacancies, review applicant flow, and track broadcast shift coverage.
+              Manage openings and staffing. Open an application list to review candidates, attendance or timesheets.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:items-center sm:gap-2.5">
-            <Button
-              asChild
-              size="sm"
-              variant="outline"
-              className="rounded-xl font-bold text-[11px] min-[390px]:text-xs h-9 px-2 sm:px-3.5 gap-1.5 border-border hover:border-primary/50 text-foreground cursor-pointer shadow-2xs w-full justify-center"
-            >
-              <Link to="/employer/post-shift">
-                <HiOutlineBolt className="h-4 w-4 text-primary shrink-0" />
-                <span className="whitespace-nowrap">Broadcast Shift</span>
-              </Link>
-            </Button>
-            <Button
-              asChild
-              size="sm"
-              className="rounded-xl font-bold text-[11px] min-[390px]:text-xs h-9 px-2 sm:px-3.5 gap-1.5 bg-primary hover:bg-primary/90 text-white cursor-pointer shadow-xs w-full justify-center"
-            >
-              <Link to="/employer/post">
-                <HiOutlinePlus className="h-4 w-4 shrink-0" />
-                <span className="whitespace-nowrap">Post Clinical Vacancy</span>
-              </Link>
-            </Button>
-          </div>
+          <Button asChild size="sm" className="rounded-xl self-start sm:self-center gap-2">
+            <Link to={activeTab === "jobs" ? "/employer/post" : "/employer/post-shift"}>
+              <HiOutlinePlus className="h-4 w-4" />{activeTab === "jobs" ? "Post Job" : "Post Shift"}
+            </Link>
+          </Button>
         </div>
 
-        {/* Dual Mode Switcher: Clinical Jobs vs Locum Shifts */}
+        {/* Dual Mode Switcher: Permanent Jobs vs Locum Shifts */}
         <div className="p-1 rounded-2xl bg-muted/60 border border-border/60 w-full sm:max-w-md shadow-2xs">
           <div className="grid grid-cols-2 gap-1 sm:gap-1.5">
             <button
               type="button"
-              onClick={() => setActiveTab("jobs")}
+              aria-pressed={activeTab === "jobs"} onClick={() => setActiveTab("jobs")}
               className={cn(
                 "flex items-center justify-center gap-1.5 sm:gap-2 py-2 px-1.5 min-[380px]:px-2.5 sm:px-3 rounded-xl text-[11px] min-[380px]:text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-w-0",
                 activeTab === "jobs"
@@ -304,7 +295,7 @@ function EmployerPostings() {
               )}
             >
               <HiOutlineBriefcase className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary shrink-0" />
-              <span>Clinical Jobs</span>
+              <span>Permanent Jobs</span>
               <span
                 className={cn(
                   "rounded-full px-1.5 py-0.5 text-[10px] font-mono font-bold shrink-0",
@@ -317,7 +308,7 @@ function EmployerPostings() {
 
             <button
               type="button"
-              onClick={() => setActiveTab("shifts")}
+              aria-pressed={activeTab === "shifts"} onClick={() => setActiveTab("shifts")}
               className={cn(
                 "flex items-center justify-center gap-1.5 sm:gap-2 py-2 px-1.5 min-[380px]:px-2.5 sm:px-3 rounded-xl text-[11px] min-[380px]:text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-w-0",
                 activeTab === "shifts"
@@ -326,7 +317,7 @@ function EmployerPostings() {
               )}
             >
               <HiOutlineBolt className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary shrink-0" />
-              <span>Locum Duty Shifts</span>
+              <span>Locum Shifts</span>
               <span
                 className={cn(
                   "rounded-full px-1.5 py-0.5 text-[10px] font-mono font-bold shrink-0",
@@ -346,16 +337,16 @@ function EmployerPostings() {
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
               {(
                 [
-                  { id: "all", label: "All Openings", count: allJobs.length },
+                  { id: "all", label: "Current Openings", count: allJobs.filter(j => j.status !== "Closed").length },
                   { id: "active", label: "Active", count: allJobs.filter((j) => j.status === "Active").length },
                   { id: "pending", label: "Under Review", count: allJobs.filter((j) => j.status === "Under review").length },
-                  { id: "closed", label: "Closed", count: allJobs.filter((j) => j.status === "Closed").length },
+                  { id: "closed", label: "History", count: allJobs.filter((j) => j.status === "Closed").length },
                 ] as const
               ).map((f) => (
                 <button
                   key={f.id}
                   type="button"
-                  onClick={() => setJobFilter(f.id)}
+                  aria-pressed={jobFilter === f.id} onClick={() => setJobFilter(f.id)}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-semibold transition-all cursor-pointer shrink-0",
                     jobFilter === f.id
@@ -379,16 +370,17 @@ function EmployerPostings() {
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
               {(
                 [
-                  { id: "all", label: "All Shifts", count: allShifts.length },
-                  { id: "open", label: "Live Broadcast", count: allShifts.filter((s) => s.status === "Live Broadcast").length },
-                  { id: "booked", label: "Clinician Assigned", count: allShifts.filter(isShiftBooked).length },
-                  { id: "pending", label: "In Review", count: allShifts.filter((s) => s.status === "Awaiting Verification").length },
+                  { id: "all", label: "Current Shifts", count: allShifts.filter(s => !shiftInHistory(s.rawStatus)).length },
+                  { id: "open", label: "Open", count: allShifts.filter((s) => s.status === "Live Broadcast").length },
+                  { id: "booked", label: "Confirmed", count: allShifts.filter(s => !shiftInHistory(s.rawStatus) && isShiftBooked(s)).length },
+                  { id: "pending", label: "Under Review", count: allShifts.filter((s) => s.status === "Awaiting Verification").length },
+                  { id: "history", label: "History", count: allShifts.filter(s => shiftInHistory(s.rawStatus)).length },
                 ] as const
               ).map((f) => (
                 <button
                   key={f.id}
                   type="button"
-                  onClick={() => setShiftFilter(f.id)}
+                  aria-pressed={shiftFilter === f.id} onClick={() => setShiftFilter(f.id)}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-semibold transition-all cursor-pointer shrink-0",
                     shiftFilter === f.id
@@ -414,7 +406,7 @@ function EmployerPostings() {
           <div className="relative sm:w-64">
             <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
-              type="text"
+              type="text" aria-label="Search openings"
               placeholder={activeTab === "jobs" ? "Search jobs by title, department..." : "Search shifts by role, dept..."}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -432,10 +424,10 @@ function EmployerPostings() {
           </div>
         </div>
 
-        {/* TAB 1: Clinical Jobs List */}
+        {/* TAB 1: Permanent Jobs List */}
         {activeTab === "jobs" && (
           <div className="space-y-3.5">
-            {filteredJobs.length === 0 ? (
+            {filteredJobs.length === 0 && !loading && !pageLoad.error ? (
               <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center">
                 <EmptyEarningsGraphic className="w-32 h-32 mx-auto mb-2 text-muted-foreground/60" />
                 <h3 className="text-base font-bold text-foreground">No clinical job postings match</h3>
@@ -492,28 +484,22 @@ function EmployerPostings() {
                     <div className="flex items-center gap-2 text-muted-foreground font-medium">
                       <HiOutlineUserGroup className="h-4 w-4 text-primary shrink-0" />
                       <span>
-                        <strong className="text-foreground font-bold">{job.applicantsCount}</strong> Shortlisted Candidates
+                        <strong className="text-foreground font-bold">{job.applicantsCount}</strong> Applications
                       </span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 w-full sm:w-auto sm:flex sm:items-center">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setSelectedJob(job)}
-                        className="h-8.5 rounded-xl text-[11px] min-[390px]:text-xs font-semibold border-input hover:border-ring cursor-pointer w-full justify-center px-2 sm:px-3"
-                      >
-                        <HiOutlineEye className="h-3.5 w-3.5 text-muted-foreground mr-1 shrink-0" />
-                        <span className="whitespace-nowrap">View Details</span>
-                      </Button>
+                      <DropdownMenu><DropdownMenuTrigger asChild><Button size="sm" variant="outline" className="rounded-xl">More actions</Button></DropdownMenuTrigger>
+                        <DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => setSelectedJob(job)}>View Details</DropdownMenuItem></DropdownMenuContent>
+                      </DropdownMenu>
                       <Button
                         asChild
                         size="sm"
                         className="h-8.5 rounded-xl text-[11px] min-[390px]:text-xs font-bold bg-primary hover:bg-primary/90 text-white cursor-pointer shadow-2xs w-full justify-center px-2 sm:px-3"
                       >
-                        <Link to="/employer/applicants" className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                          <span className="sm:hidden">Review ({job.applicantsCount})</span>
-                          <span className="hidden sm:inline">Review Applicants ({job.applicantsCount})</span>
+                        <Link to="/employer/applicants" search={{ openingId: job.id, type: "jobs" }} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                          <span className="sm:hidden">Applications ({job.applicantsCount})</span>
+                          <span className="hidden sm:inline">View Applications ({job.applicantsCount})</span>
                           <HiArrowRight className="h-3.5 w-3.5 shrink-0" />
                         </Link>
                       </Button>
@@ -528,7 +514,7 @@ function EmployerPostings() {
         {/* TAB 2: Locum Shifts List */}
         {activeTab === "shifts" && (
           <div className="space-y-3.5">
-            {filteredShifts.length === 0 ? (
+            {filteredShifts.length === 0 && !loading && !pageLoad.error ? (
               <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center">
                 <EmptyEarningsGraphic className="w-32 h-32 mx-auto mb-2 text-muted-foreground/60" />
                 <h3 className="text-base font-bold text-foreground">No active locum duty shifts</h3>
@@ -537,7 +523,7 @@ function EmployerPostings() {
                 </p>
                 <div className="mt-4">
                   <Button asChild size="sm" className="rounded-xl font-bold text-xs h-8.5 px-4 bg-primary hover:bg-primary/90 text-white shadow-xs">
-                    <Link to="/employer/post-shift">Broadcast Locum Shift</Link>
+                    <Link to="/employer/post-shift">Post Shift</Link>
                   </Button>
                 </div>
               </div>
@@ -562,11 +548,11 @@ function EmployerPostings() {
                         <p className="mt-1 text-xs text-muted-foreground flex items-center gap-2 flex-wrap font-medium">
                           <span className="flex items-center gap-1">
                             <HiOutlineClock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            <span>{sh.date} • {sh.timeSlot} ({sh.hours} hrs)</span>
+                            <span>{sh.city ? `${sh.city} - ` : ""}{sh.date} • {sh.timeSlot} ({sh.hours} hrs)</span>
                           </span>
                           <span>•</span>
                           <span className="font-semibold text-foreground">
-                            {sh.slotsClaimed} / {sh.slots} Slots Assigned
+                            {sh.slotsClaimed} of {sh.slots} clinicians confirmed - {sh.applicantsCount} applications
                           </span>
                         </p>
                       </div>
@@ -588,7 +574,7 @@ function EmployerPostings() {
                           "h-1.5 w-1.5 rounded-full",
                           sh.status === "Live Broadcast" ? "bg-emerald-500 animate-pulse" : "bg-blue-500"
                         )} />
-                        {sh.status}
+                        {sh.status === "Live Broadcast" ? "Open" : sh.status === "Clinician Assigned" ? "Confirmed" : sh.status === "Awaiting Verification" ? "Under Review" : sh.status}
                       </span>
                     </div>
                   </div>
@@ -597,46 +583,27 @@ function EmployerPostings() {
                     <span className="text-emerald-600 font-semibold text-[11px] flex items-center gap-1 flex-wrap">
                       <HiOutlineShieldCheck className="h-4 w-4 shrink-0" />
                       <span>
-                        Escrow Locked: ₹{(sh.totalEscrow || sh.totalPayout)?.toLocaleString("en-IN")}
-                        {sh.facilityFeePercent === 0 ? " (0% 1st-Shift Fee)" : ` (incl. ${sh.facilityFeePercent}% fee)`}
+                        {shiftInHistory(sh.rawStatus) ? "Shift total:" : "Escrow reserved:"} ₹{(sh.totalEscrow || sh.totalPayout)?.toLocaleString("en-IN")}
+                        {!shiftInHistory(sh.rawStatus) && sh.facilityFeePercent > 0 ? ` (includes ${sh.facilityFeePercent}% platform fee reserve${sh.gstPercent ? ` + ${sh.gstPercent}% GST on that fee` : ""})` : ""}
                       </span>
                     </span>
 
                     <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
-                      {["PENDING_APPROVAL", "OPEN", "FILLED"].includes(sh.rawStatus) && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              window.location.href = `/employer/post-shift?editId=${sh.id}`;
-                            }}
-                            className="h-8.5 rounded-xl text-xs font-semibold gap-1 border-border hover:bg-muted cursor-pointer"
-                          >
-                            <HiOutlinePencilSquare className="h-3.5 w-3.5" />
-                            <span>Edit</span>
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setShiftToCancel(sh)}
-                            className="h-8.5 rounded-xl text-xs font-semibold gap-1 border-rose-200 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
-                          >
-                            <HiOutlineTrash className="h-3.5 w-3.5" />
-                            <span>Delete</span>
-                          </Button>
-                        </>
-                      )}
+                      {["PENDING_APPROVAL", "OPEN", "FILLED"].includes(sh.rawStatus) && <DropdownMenu>
+                        <DropdownMenuTrigger asChild><Button size="sm" variant="outline" className="rounded-xl">More actions</Button></DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onSelect={() => { window.location.href = "/employer/post-shift?editId=" + sh.id; }}>Edit Shift</DropdownMenuItem>
+                          <DropdownMenuItem className="text-destructive" onSelect={() => setShiftToCancel(sh)}>Cancel Shift</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>}
                       <Button
                         asChild
                         size="sm"
                         className="h-8.5 rounded-xl text-xs font-bold bg-primary hover:bg-primary/90 text-white cursor-pointer shadow-2xs justify-center"
                       >
-                        <Link to="/employer/applicants" className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                        <Link to="/employer/applicants" search={{ openingId: sh.id, type: "shifts" }} className="inline-flex items-center gap-1.5 whitespace-nowrap">
                           <span>
-                            {sh.slotsClaimed > 0
-                              ? `Review Claimed (${sh.slotsClaimed})`
-                              : "View Claimed Clinicians"}
+                            View Applications ({sh.applicantsCount})
                           </span>
                           <HiArrowRight className="h-3.5 w-3.5 shrink-0" />
                         </Link>
@@ -710,7 +677,7 @@ function EmployerPostings() {
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
                     <HiOutlineUserGroup className="h-4 w-4 text-primary shrink-0" />
                     <span className="whitespace-nowrap text-[11px] sm:text-xs">
-                      Shortlisted: <strong className="text-foreground font-bold">{selectedJob.applicantsCount}</strong>
+                      Applications: <strong className="text-foreground font-bold">{selectedJob.applicantsCount}</strong>
                     </span>
                   </div>
 
@@ -719,9 +686,9 @@ function EmployerPostings() {
                     size="sm"
                     className="h-9 rounded-xl font-bold text-xs px-3.5 sm:px-4 bg-primary hover:bg-primary/90 text-white cursor-pointer shadow-xs inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap"
                   >
-                    <Link to="/employer/applicants">
+                    <Link to="/employer/applicants" search={{ openingId: selectedJob.id, type: "jobs" }}>
                       <span className="sm:hidden">Review ({selectedJob.applicantsCount})</span>
-                      <span className="hidden sm:inline">Review Applicants</span>
+                      <span className="hidden sm:inline">View Applications</span>
                       <HiArrowRight className="h-3.5 w-3.5 shrink-0" />
                     </Link>
                   </Button>
@@ -735,7 +702,7 @@ function EmployerPostings() {
           <DialogContent className="flex flex-col gap-4 sm:max-w-md rounded-2xl border border-border bg-card p-5 sm:p-6">
             <DialogHeader className="text-left pr-8 space-y-1.5">
               <DialogTitle className="text-base font-extrabold text-foreground">
-                Cancel &amp; Delete Shift Posting?
+                Cancel this shift?
               </DialogTitle>
               <DialogDescription className="text-xs leading-relaxed text-muted-foreground">
                 Cancelling <strong className="text-foreground">{shiftToCancel?.title}</strong> will remove it from clinician feeds and automatically refund locked escrow back to your hospital wallet.
@@ -770,7 +737,7 @@ function EmployerPostings() {
                 onClick={handleConfirmCancelShift}
                 className="h-9 px-4 rounded-xl text-xs font-bold w-full sm:w-auto cursor-pointer"
               >
-                {cancellingShift ? "Refunding Escrow..." : "Confirm Delete & Refund"}
+                {cancellingShift ? "Refunding Escrow..." : "Confirm Cancellation"}
               </Button>
             </DialogFooter>
           </DialogContent>

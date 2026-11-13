@@ -1,3 +1,6 @@
+import { amountInWords } from "@/lib/amountInWords";
+import { toEarning } from "@/lib/earningsModel";
+import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { copyText } from "@/lib/copyText";
 import { usePageLoad } from "@/hooks/use-page-load";
 import { RequestError } from "@/components/fale/RequestError";
@@ -35,7 +38,7 @@ import { Logo } from "@/components/fale/Logo";
 import { AppShell, PageHead } from "@/components/fale/AppShell";
 import { StudentLockCard } from "@/components/fale/StudentLockCard";
 import { EmptyEarningsGraphic } from "@/components/fale/EmptyEarningsGraphic";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonSpinner } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -51,27 +54,32 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useApp, setState, type CandidatePayoutMethod, type CandidatePayoutTransaction } from "@/lib/store";
-import { generatePayoutAdvicePdf, printPayoutAdvicePdf } from "@/lib/payoutSlipPdf";
+import { generatePayoutAdvicePdf, printPayoutAdvicePdf, type PayoutAdviceRecord } from "@/lib/payoutSlipPdf";
 import { cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees } from "@/lib/api";
-import { getMyClaims, type ShiftClaimDto } from "@/lib/adapters/shiftAdapter";
+import { getMyClaims, getPayoutAdvice, type ShiftClaimDto } from "@/lib/adapters/shiftAdapter";
 import { getCandidateProfile, savePayoutMethod as apiSavePayoutMethod, getPayoutMethod } from "@/lib/adapters/candidateAdapter";
 
-export interface UiPayoutTransaction extends Omit<CandidatePayoutTransaction, "status"> {
-  status: string;
-  grossAmount?: number;
-  platformFee?: number;
-  tdsAmount?: number;
-  rawClaim?: ShiftClaimDto;
+export interface UiPayoutTransaction extends PayoutAdviceRecord {
+  shiftId?: string | undefined; rawClaim: ShiftClaimDto; adviceAvailable: boolean; amountsRecorded: boolean;
 }
-
+function toUiPayout(c: ShiftClaimDto): UiPayoutTransaction {
+  const item=toEarning(c), paid=item.state === "paid";
+  const status=paid ? "Disbursed" : item.state === "pending" ? "Pending Payout" : item.state === "frozen" ? "Disputed (Frozen)" : item.state === "closed" ? "Cancelled" : "In Escrow";
+  const date=(value?:string) => value ? new Date(value).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"}) + " IST" : "Not recorded";
+  return { id:c.id,shiftId:c.shiftId,shiftTitle:c.shiftTitle || "Title not recorded",hospitalName:c.facilityName || "Hospital not recorded",dept:c.shiftDepartment || c.department || "Not recorded",
+    shiftDate:date(c.startAt),hours:item.hours,rate:item.hours ? item.gross/item.hours : 0,amount:item.net,
+    grossAmount:item.amountsRecorded ? item.gross : undefined,platformFee:item.amountsRecorded ? item.fee : undefined,tdsAmount:item.amountsRecorded ? item.tds : undefined,
+    payoutDate:paid ? date(c.disbursedAt) : item.label,status,payoutMethodUsed:c.payoutMethodSnapshot || "Historical destination not recorded",utr:c.utr,slipRef:c.payoutSlipRef || c.id,
+    rawClaim:c,adviceAvailable:item.adviceAvailable,amountsRecorded:item.amountsRecorded };
+}
 export const Route = createFileRoute("/earnings")({
   head: () => ({
     meta: [
-      { title: "Earnings & 24-hr Payouts — FALE Healthcare" },
+      { title: "Earnings & Payouts — FALE Healthcare" },
       {
         name: "description",
-        content: "Track clinical shift earnings, 24-hr escrow guarantee payouts, and manage your verified Cashfree UPI / bank payout destination.",
+        content: "Track saved clinical shift earnings, recorded payments and payout details.",
       },
     ],
   }),
@@ -79,29 +87,8 @@ export const Route = createFileRoute("/earnings")({
 });
 
 
-function amountInWords(num: number): string {
-  const a = [
-    "", "One ", "Two ", "Three ", "Four ", "Five ", "Six ", "Seven ", "Eight ", "Nine ",
-    "Ten ", "Eleven ", "Twelve ", "Thirteen ", "Fourteen ", "Fifteen ", "Sixteen ", "Seventeen ", "Eighteen ", "Nineteen ",
-  ];
-  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-
-  if (!num || num === 0) return "Rupees Zero Only";
-
-  function inWords(n: number): string {
-    if (n < 20) return a[n];
-    if (n < 100) return b[Math.floor(n / 10)] + " " + a[n % 10];
-    if (n < 1000) return a[Math.floor(n / 100)] + "Hundred " + inWords(n % 100);
-    if (n < 100000) return inWords(Math.floor(n / 1000)) + "Thousand " + inWords(n % 1000);
-    if (n < 10000000) return inWords(Math.floor(n / 100000)) + "Lakh " + inWords(n % 100000);
-    return inWords(Math.floor(n / 10000000)) + "Crore " + inWords(n % 10000000);
-  }
-
-  return `Rupees ${inWords(Math.floor(num)).trim()} Only`;
-}
-
 function formatMobilePayoutMethod(method: string): string {
-  if (!method) return "Cashfree Escrow";
+  if (!method) return "Not recorded";
   if (method.startsWith("Cashfree Direct Bank · ")) {
     return method.replace("Cashfree Direct Bank · ", "");
   }
@@ -119,6 +106,9 @@ function formatMobilePayoutMethod(method: string): string {
 
 function CandidateEarningsPage() {
   const pageLoad = usePageLoad();
+  const action = useConfirmedAction();
+  const [loadedMethod,setLoadedMethod]=useState<CandidatePayoutMethod|null>(null);
+  const [methodError,setMethodError]=useState<string|null>(null);
   const store = useApp();
   const [activeTab, setActiveTab] = useState<"all" | "pending" | "tds">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -138,141 +128,28 @@ function CandidateEarningsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      getMyClaims(),
-      getCandidateProfile(),
-      getPayoutMethod(),
-    ])
-      .then(([claims, profile, pmApi]) => {
-        const pm = pmApi || profile?.payoutMethod;
-        if (profile) {
-          setState((prev) => ({
-            candidateLevel: profile.isStudent ? "student" : (profile.candidateLevel?.toLowerCase() as any),
-            candidatePayoutMethod: pm && (pm.upiId || pm.accountNumber || (pm as any).accountNumberLast4)
-              ? {
-                  type: ((pm.methodType || (pm as any).type || "upi").toLowerCase() as any),
-                  upiId: pm.upiId,
-                  accountNumber: pm.accountNumber || (pm as any).accountNumberLast4,
-                  accountNumberLast4: (pm as any).accountNumberLast4,
-                  bankName: pm.bankName,
-                  ifsc: pm.ifsc,
-                  accountHolderName: pm.accountHolderName || profile.name,
-                  status: (pm.status as any) || "Pending",
-                  verifiedAt: pm.verifiedAt || "Pending verification",
-                }
-              : undefined,
-            profile: {
-              ...prev.profile,
-              name: profile.name || prev.profile["name"] || "",
-              email: profile.email || prev.profile["email"] || "",
-              phone: profile.phone || prev.profile["phone"] || "",
-              city: profile.city || prev.profile["city"] || "",
-              regNumber: profile.regNumber || prev.profile["regNumber"] || "",
-            },
-          }));
-
-          if (pm && (pm.upiId || pm.accountNumber)) {
-            setPayoutType(((pm.methodType || (pm as any).type || "upi").toLowerCase() as any));
-            if (pm.upiId) setFormUpiId(pm.upiId);
-            if (pm.accountHolderName) setFormHolderName(pm.accountHolderName);
-            if (pm.bankName) setFormBankName(pm.bankName);
-            if (pm.accountNumber) setFormAccNumber(pm.accountNumber);
-            if (pm.ifsc) setFormIfsc(pm.ifsc);
-          }
-        }
-        const defaultMethodDesc = pm
-          ? pm.methodType === "upi"
-            ? `Cashfree Instant UPI · ${pm.upiId}`
-            : `Cashfree Direct Bank · ${pm.bankName || "Bank"} (****${pm.accountNumberLast4 || "XXXX"})`
-          : "Cashfree Instant Escrow";
-
-        const mapped: UiPayoutTransaction[] = claims.map((c) => {
-          const gross = c.grossAmountPaise ? paiseToRupees(c.grossAmountPaise) : 0;
-          const fee = c.platformFeePaise ? paiseToRupees(c.platformFeePaise) : 0;
-          const tds = c.tdsAmountPaise ? paiseToRupees(c.tdsAmountPaise) : 0;
-          const amt = c.netAmountPaise
-            ? paiseToRupees(c.netAmountPaise)
-            : c.payoutPaise
-              ? paiseToRupees(c.payoutPaise)
-              : gross ? gross - fee - tds : 0;
-
-          const isDisputed = c.status === "DISPUTED";
-          const isRefunded = c.status === "CANCELLED" && c.payoutStatus === "REFUNDED";
-          const isCancelled = c.status === "CANCELLED" && !isRefunded;
-          const isDisbursed = c.payoutStatus === "DISBURSED";
-          const isPendingDisbursement =
-            !isDisputed &&
-            !isRefunded &&
-            !isCancelled &&
-            (c.payoutStatus === "PENDING_DISBURSEMENT" || c.status === "COMPLETED");
-
-          const mappedStatus = isDisputed
-            ? "Disputed (Frozen)"
-            : isRefunded
-              ? "Refunded to Hospital"
-              : isCancelled
-                ? "Cancelled"
-                : isDisbursed
-                  ? "Disbursed"
-                  : isPendingDisbursement
-                    ? "Pending Payout"
-                    : "In Escrow (24h SLA)";
-
-          const effectiveHours = c.actualHours || c.hours || 8;
-          const effectiveRate = gross ? Math.round(gross / effectiveHours) : (amt ? Math.round(amt / effectiveHours) : 500);
-
-          return {
-            id: c.id,
-            shiftId: c.shiftId,
-            shiftTitle: c.shiftTitle || "Locum Duty Shift",
-            hospitalName: c.facilityName || "Partner Hospital",
-            dept: c.shiftDepartment || "Clinical",
-            shiftDate: c.startAt
-              ? new Date(c.startAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-              : c.claimedAt
-                ? new Date(c.claimedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                : "Recent",
-            hours: effectiveHours,
-            rate: effectiveRate,
-            amount: isRefunded || isCancelled ? 0 : amt,
-            grossAmount: isRefunded || isCancelled ? 0 : (gross || (amt + fee + tds)),
-            platformFee: isRefunded || isCancelled ? 0 : fee,
-            tdsAmount: isRefunded || isCancelled ? 0 : tds,
-            payoutDate: isDisputed
-              ? "Frozen — Under FALE Ops Review"
-              : isRefunded
-                ? "Escrow Refunded to Hospital"
-                : isCancelled
-                  ? "Shift Cancelled"
-                  : isDisbursed
-                    ? (c.completedAt ? new Date(c.completedAt).toLocaleDateString("en-IN") : "Disbursed")
-                    : isPendingDisbursement
-                      ? "Releasing Soon (24h SLA)"
-                      : "In Escrow (24h SLA)",
-            status: mappedStatus,
-            payoutMethodUsed: defaultMethodDesc,
-            utr: c.utr || (isDisbursed ? `CFUTR${c.id.slice(0, 8).toUpperCase()}` : undefined),
-            slipRef: c.payoutSlipRef || `FALE-PAY-${c.id.slice(0, 6).toUpperCase()}`,
-            rawClaim: c,
-          };
-        });
-
-        setApiPayouts(mapped);
-        setLoadError(null);
-      })
-      .catch((err) => {
-        pageLoad.fail(err);
-        console.error("Failed to load claims:", err);
-        setLoadError("Unable to load earnings and payouts.");
-        setApiPayouts([]);
-      })
-      .finally(() => setLoading(false));
-  }, [pageLoad.retryKey]);
+    if(isStudent) {setLoading(false);return;}
+    let alive=true;setLoading(true);setMethodError(null);
+    Promise.allSettled([getMyClaims(),getCandidateProfile(),getPayoutMethod()]).then(([claims,profile,method])=>{
+      if(!alive)return;
+      if(claims.status === "fulfilled" && Array.isArray(claims.value)) {
+        setApiPayouts(claims.value.filter(c=>toEarning(c).state!=="application").map(toUiPayout));setLoadError(null);
+      } else {setApiPayouts([]);setLoadError("Unable to load earnings and payouts.");pageLoad.fail(claims.status === "rejected" ? claims.reason : new Error("Invalid earnings response"));}
+      if(profile.status === "fulfilled" && profile.value) {const p=profile.value;setState(prev=>({profile:{...prev.profile,name:p.name||prev.profile["name"]||"",regNumber:p.regNumber||""}}));}
+      if(method.status === "fulfilled") {
+        const p=method.value;
+        const value:CandidatePayoutMethod|null=p ? {type:p.methodType==="bank" ? "bank":"upi",status:p.status==="Verified"&&p.verifiedAt ? "Verified":"Pending",accountHolderName:p.accountHolderName||"",
+          ...(p.upiId?{upiId:p.upiId}:{}),...(p.accountNumberLast4?{accountNumberLast4:p.accountNumberLast4}:{}),...(p.bankName?{bankName:p.bankName}:{}),...(p.ifsc?{ifsc:p.ifsc}:{}),...(p.verifiedAt?{verifiedAt:p.verifiedAt}:{})}:null;
+        setLoadedMethod(value);
+        if(value) {setPayoutType(value.type);setFormUpiId(value.upiId||"");setFormHolderName(value.accountHolderName||"");setFormBankName(value.bankName||"");setFormIfsc(value.ifsc||"");}
+      } else setMethodError("Payout destination could not be loaded. Earnings remain available.");
+      setLoading(false);
+    });return()=>{alive=false;};
+  },[pageLoad.retryKey,isStudent]);
 
   const candidateName = String(store.profile["name"] || "Clinician");
-  const candidatePayoutMethod: CandidatePayoutMethod | null = store.candidatePayoutMethod || null;
-  const hasLinkedPayout = Boolean(candidatePayoutMethod && (candidatePayoutMethod.upiId || candidatePayoutMethod.accountNumber));
+  const candidatePayoutMethod = loadedMethod;
+  const hasLinkedPayout = Boolean(candidatePayoutMethod && (candidatePayoutMethod.upiId || candidatePayoutMethod.accountNumberLast4));
 
 
   const payouts: UiPayoutTransaction[] = (apiPayouts || []);
@@ -281,52 +158,33 @@ function CandidateEarningsPage() {
   const [payoutType, setPayoutType] = useState<"upi" | "bank">(candidatePayoutMethod?.type || "upi");
   const [formUpiId, setFormUpiId] = useState(candidatePayoutMethod?.upiId || "");
   const [formHolderName, setFormHolderName] = useState(candidatePayoutMethod?.accountHolderName || candidateName);
-  const [formBankName, setFormBankName] = useState(candidatePayoutMethod?.bankName || "HDFC Bank Ltd");
-  const [formAccNumber, setFormAccNumber] = useState(candidatePayoutMethod?.accountNumber || "");
-  const [formConfirmAcc, setFormConfirmAcc] = useState(candidatePayoutMethod?.accountNumber || "");
+  const [formBankName, setFormBankName] = useState(candidatePayoutMethod?.bankName || "");
+  const [formAccNumber, setFormAccNumber] = useState("");
+  const [formConfirmAcc, setFormConfirmAcc] = useState("");
   const [formIfsc, setFormIfsc] = useState(candidatePayoutMethod?.ifsc || "");
   const [isVerifying, setIsVerifying] = useState(false);
 
   // Financial Telemetry
   const totalDisbursed = useMemo(() => {
     return payouts
-      .filter((p) => p.status === "Disbursed")
-      .reduce((sum, p) => sum + p.amount, 0);
+      .filter((p) => p.status === "Disbursed" && p.amountsRecorded)
+      .reduce((sum, p) => sum + (p.amountsRecorded ? p.amount : 0), 0);
   }, [payouts]);
 
   const inEscrowPayouts = useMemo(() => {
-    return payouts.filter((p) => p.status === "In Escrow (24h SLA)" || p.status === "Pending Payout");
+    return payouts.filter((p) => p.status === "In Escrow" || p.status === "Pending Payout");
   }, [payouts]);
 
   const inEscrowAmount = useMemo(() => {
     return inEscrowPayouts.reduce((sum, p) => sum + p.amount, 0);
   }, [inEscrowPayouts]);
 
-  const tdsList = useMemo(() => {
-    {
-      return payouts
-        .filter((p) => p.status === "Disbursed")
-        .map((p) => {
-          const gross = p.grossAmount || p.amount;
-          const tdsAmt = p.tdsAmount !== undefined ? p.tdsAmount : (isStudent ? 0 : Math.round(gross * 0.01));
-          return {
-            id: `TDS-${p.id.slice(0, 8).toUpperCase()}`,
-            period: p.shiftDate,
-            gross: gross,
-            tdsRate: isStudent ? "0% (Sec 10(16))" : "1% (Sec 194J)",
-            tdsAmount: tdsAmt,
-            netCredited: p.amount,
-            status: isStudent ? "Tax-Free Stipend" : "Deposited to TRACES",
-          };
-        });
-    }
-
-  }, [isApiEnabled, isStudent, payouts]);
+  const tdsList = useMemo(()=>payouts.filter(p=>p.status==="Disbursed"&&p.amountsRecorded).map(p=>({id:p.slipRef||p.id,period:p.shiftDate,gross:p.grossAmount!,tdsRate:"Recorded withholding",tdsAmount:p.tdsAmount!,netCredited:p.amount,status:"Recorded - filing not confirmed"})),[payouts]);
 
   const filteredPayouts = useMemo(() => {
     let list = payouts;
     if (activeTab === "pending") {
-      list = list.filter((p) => p.status === "In Escrow (24h SLA)" || p.status === "Pending Payout");
+      list = list.filter((p) => p.status === "In Escrow" || p.status === "Pending Payout");
     }
     if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase();
@@ -346,82 +204,44 @@ function CandidateEarningsPage() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleSavePayoutMethod = async (e: React.FormEvent) => {
+  const handleSavePayoutMethod=async(e:React.FormEvent)=>{
     e.preventDefault();
-
-    if (payoutType === "upi") {
-      if (!formUpiId || !formUpiId.includes("@")) {
-        toast.error("Please enter a valid UPI ID (e.g. name@okhdfcbank)");
-        return;
-      }
-    } else {
-      if (!formAccNumber || formAccNumber.length < 8) {
-        toast.error("Please enter a valid bank account number");
-        return;
-      }
-      if (formAccNumber !== formConfirmAcc) {
-        toast.error("Account numbers do not match");
-        return;
-      }
-      if (!formIfsc || formIfsc.length < 11) {
-        toast.error("Please enter a valid 11-digit IFSC code");
-        return;
-      }
-    }
-
-    setIsVerifying(true);
-    try {
-        const saved = await apiSavePayoutMethod({
-          methodType: payoutType,
-          upiId: payoutType === "upi" ? formUpiId.trim().toLowerCase() : undefined,
-          accountNumber: payoutType === "bank" ? formAccNumber.trim() : undefined,
-          ifsc: payoutType === "bank" ? formIfsc.trim().toUpperCase() : undefined,
-          bankName: payoutType === "bank" ? formBankName.trim() : undefined,
-          accountHolderName: formHolderName.trim() || candidateName,
-        });
-
-      const updated: CandidatePayoutMethod = {
-        type: payoutType,
-        upiId: payoutType === "upi" ? formUpiId.toLowerCase() : undefined,
-        accountNumber: payoutType === "bank" ? formAccNumber : undefined,
-        accountNumberLast4: payoutType === "bank" ? formAccNumber.slice(-4) : undefined,
-        ifsc: payoutType === "bank" ? formIfsc.toUpperCase() : undefined,
-        bankName: payoutType === "bank" ? formBankName : undefined,
-        accountHolderName: formHolderName || candidateName,
-        status: saved.status === "Verified" ? "Verified" : "Pending",
-        verifiedAt: saved.verifiedAt || "",
-      };
-
-      setState(() => ({
-        candidatePayoutMethod: updated,
-      }));
-
-      setPayoutModalOpen(false);
-      toast.success("Payout details saved", { description: "Ownership verification is pending." });
-    } catch (err: any) {
-      toast.error("Verification failed", {
-        description: err?.message || "Could not save payout destination.",
-      });
-    } finally {
-      setIsVerifying(false);
-    }
+    if(!formHolderName.trim()) {toast.error("Enter the account holder name.");return;}
+    if(payoutType==="upi"&&!/^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+$/.test(formUpiId.trim())) {toast.error("Enter a valid UPI ID.");return;}
+    if(payoutType==="bank"&&(!/^\d{9,18}$/.test(formAccNumber)||formAccNumber!==formConfirmAcc||!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(formIfsc.toUpperCase())||!formBankName.trim())) {toast.error("Check the bank name, account numbers and IFSC.");return;}
+    await action.run(async()=>{setIsVerifying(true);try {
+      const saved=await apiSavePayoutMethod({methodType:payoutType,accountHolderName:formHolderName.trim(),...(payoutType==="upi"?{upiId:formUpiId.trim().toLowerCase()}:{accountNumber:formAccNumber,bankName:formBankName.trim(),ifsc:formIfsc.toUpperCase()})});
+      setLoadedMethod({type:payoutType,status:saved.status==="Verified"&&saved.verifiedAt ? "Verified":"Pending",accountHolderName:saved.accountHolderName||formHolderName,
+        ...(saved.upiId?{upiId:saved.upiId}:{}),...(saved.accountNumberLast4?{accountNumberLast4:saved.accountNumberLast4}:{}),...(saved.bankName?{bankName:saved.bankName}:{}),...(saved.ifsc?{ifsc:saved.ifsc}:{}),...(saved.verifiedAt?{verifiedAt:saved.verifiedAt}:{})});
+      setFormAccNumber("");setFormConfirmAcc("");setPayoutModalOpen(false);toast.success("Payout details saved",{description:"Ownership review is required before payment."});
+    }finally{setIsVerifying(false);}});
   };
+  const openSlip=async(tx:UiPayoutTransaction)=>action.run(async()=>{
+    if(!tx.adviceAvailable||!tx.amountsRecorded)throw new Error("Saved payout advice is not available for this duty.");
+    setSelectedSlipTx(toUiPayout(await getPayoutAdvice(tx.id)));
+  });
+  const exportSlip=async(print=false)=>action.run(async()=>{
+    if(!selectedSlipTx)return;const fresh=toUiPayout(await getPayoutAdvice(selectedSlipTx.id));
+    if(!fresh.adviceAvailable||!fresh.amountsRecorded)throw new Error("Saved payout advice is unavailable.");
+    const name=fresh.rawClaim.candidateName||"Name not recorded",reg=fresh.rawClaim.payoutRegistrationNumber||"Not recorded";
+    if(print)printPayoutAdvicePdf(fresh,name,reg);else generatePayoutAdvicePdf(fresh,name,reg);
+  });
 
   return (
     <AppShell>
-      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
-      <div className="max-w-7xl mx-auto space-y-6 pb-16 min-w-0">
+      <RequestError message={pageLoad.error} onRetry={pageLoad.retry} /><RequestError message={methodError} onRetry={pageLoad.retry} /><RequestError message={action.error} />
+      <div className="w-full space-y-6 pb-16 min-w-0">
 
         {/* ================= PAGE HEADER (MATCHING HUDDLE) ================= */}
         <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-2xl font-extrabold tracking-tight sm:text-[28px] text-foreground">
-              {isStudent ? "Earnings & Clinical Stipends" : "Earnings & 24-Hour Payouts"}
+              {isStudent ? "Earnings & Clinical Stipends" : "Earnings & Payouts"}
             </h1>
             <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed max-w-3xl">
               {isStudent
                 ? "Professional clinical earnings, locum shift payouts, and disbursement accounts."
-                : `Guaranteed shift remuneration, automated Cashfree disbursements, and tax slips for ${candidateName}.`}
+                : `Track saved shift remuneration, recorded bank payments and deductions for ${candidateName}.`}
             </p>
           </div>
 
@@ -477,8 +297,8 @@ function CandidateEarningsPage() {
           <StudentLockCard
             title="Clinical Earnings Unlock After Graduation"
             description="Shift earnings, automated bank disbursements, and tax certificates will unlock once you complete your graduation and verify your Council Registration."
-            item3Title="Instant Payouts"
-            item3Desc="Access automated 24-hr direct bank transfers and tax slips."
+            item3Title="Recorded Payouts"
+            item3Desc="Access recorded bank payments and payout advice."
           />
         ) : (
           <>
@@ -499,7 +319,7 @@ function CandidateEarningsPage() {
                     {isStudent ? "Disbursed Stipends" : "Disbursed Earnings"}
                   </span>
                   <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
-                    ₹{Math.round(totalDisbursed).toLocaleString("en-IN")}
+                    {loading ? "Loading..." : loadError ? "Unavailable" : `\u20b9${(totalDisbursed).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}`}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     {isStudent ? "Credited to bank / UPI" : "Received in bank / UPI"}
@@ -514,15 +334,15 @@ function CandidateEarningsPage() {
                     <HiOutlineLockClosed className="h-5 w-5" />
                   </span>
                   <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
-                    {isStudent ? "Next Cycle Ready" : "Releasing < 24h"}
+                    {isStudent ? "Next Cycle Ready" : "Awaiting bank payment"}
                   </span>
                 </div>
                 <div>
                   <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
-                    {isStudent ? "Next Stipend Cycle" : "In 24-hr Escrow"}
+                    {isStudent ? "Next Stipend Cycle" : "Confirmed duty reserve"}
                   </span>
                   <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
-                    ₹{Math.round(inEscrowAmount).toLocaleString("en-IN")}
+                    {loading ? "Loading..." : loadError ? "Unavailable" : `\u20b9${(inEscrowAmount).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}`}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     {isStudent
@@ -549,10 +369,10 @@ function CandidateEarningsPage() {
                     {isStudent ? "Monthly Stipend Rate" : "This Month's Earnings"}
                   </span>
                   <div className="text-2xl sm:text-3xl font-black tracking-tight text-foreground mt-1">
-                    ₹{Math.round(totalDisbursed + inEscrowAmount).toLocaleString("en-IN")}
+                    {loading ? "Loading..." : loadError ? "Unavailable" : `\u20b9${(totalDisbursed + inEscrowAmount).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}`}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {isStudent ? "Accredited teaching hospital" : "Gross locum earnings"}
+                    {isStudent ? "Accredited teaching hospital" : "Net recorded earnings"}
                   </p>
                 </div>
               </div>
@@ -585,7 +405,7 @@ function CandidateEarningsPage() {
               </div>
             </section>
 
-            {/* Unified 24-Hour Payout Destination Strip */}
+            {/* Unified Payout Destination Strip */}
             {!hasLinkedPayout ? (
               <section className="rounded-2xl sm:rounded-3xl border border-primary/20 bg-primary-soft/30 p-4 sm:p-5 lg:p-6 shadow-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -596,7 +416,7 @@ function CandidateEarningsPage() {
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="text-sm sm:text-base font-extrabold text-foreground tracking-tight">
-                          Candidate 24-Hour Payout Destination
+                          Candidate Payout Destination
                         </h3>
                         <span className="text-[10px] text-primary bg-primary-soft border border-primary/25 px-2.5 py-0.5 rounded-full font-bold">
                           Not Linked
@@ -607,21 +427,21 @@ function CandidateEarningsPage() {
                       {totalDisbursed > 0 ? (
                         <p className="text-sm font-black text-primary flex items-center gap-1.5 pt-0.5">
                           <HiOutlineBolt className="h-4 w-4 shrink-0" />
-                          <span>₹{Math.round(totalDisbursed).toLocaleString("en-IN")} Disbursed & Ready for Instant Transfer</span>
+                          <span>{loading ? "Loading..." : loadError ? "Unavailable" : `\u20b9${(totalDisbursed).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}`} Recorded bank payments</span>
                         </p>
                       ) : inEscrowAmount > 0 ? (
                         <p className="text-sm font-black text-primary flex items-center gap-1.5 pt-0.5">
                           <HiOutlineBolt className="h-4 w-4 shrink-0" />
-                          <span>₹{Math.round(inEscrowAmount).toLocaleString("en-IN")} Pending in 24-Hour Escrow</span>
+                          <span>{loading ? "Loading..." : loadError ? "Unavailable" : `\u20b9${(inEscrowAmount).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}`} Reserved for confirmed duties</span>
                         </p>
                       ) : null}
 
                       <p className="text-xs text-muted-foreground leading-relaxed">
                         {totalDisbursed > 0
-                          ? "Link your personal UPI ID or bank account so your disbursed shift earnings transfer directly to your account within 24 hours."
+                          ? "Link your UPI ID or bank account for manual ownership review before bank payment."
                           : inEscrowAmount > 0
-                          ? "Link your personal UPI ID or bank account so your shift earnings disburse automatically within 24 hours of duty signoff."
-                          : "Link your personal UPI ID or bank account to enable automated shift payouts within 24 hours of timesheet signoff."}
+                          ? "Link your UPI ID or bank account for manual ownership review before bank payment."
+                          : "Link your UPI ID or bank account for manual ownership review before bank payment."}
                       </p>
                     </div>
                   </div>
@@ -647,17 +467,17 @@ function CandidateEarningsPage() {
                     <div className="space-y-1.5 min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-sm sm:text-base font-extrabold text-foreground tracking-tight leading-snug">
-                          Active Cashfree 24-Hour Payout Destination
+                          Saved Payout Destination
                         </h3>
                         <span className="text-[10px] text-primary bg-primary-soft border border-primary/20 px-2.5 py-0.5 rounded-full font-bold shrink-0">
-                          {candidatePayoutMethod.verifiedAt || "Pending verification"}
+                          {candidatePayoutMethod.status === "Verified" ? "Ownership verified" : "Ownership review pending"}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground font-medium">
-                        {candidatePayoutMethod.type === "upi" ? "Instant 24x7 UPI Direct Remittance" : "Direct Commercial Bank Mandate"}
+                        {candidatePayoutMethod.type === "upi" ? "UPI payout destination" : "Direct Commercial Bank Mandate"}
                       </p>
                       <p className="text-xs text-muted-foreground leading-relaxed pt-0.5">
-                        Shift earnings are disbursed automatically into this verified destination within 24 hours of timesheet signoff.
+                        Payment is recorded after an external bank transfer. Saving details starts ownership review.
                       </p>
                     </div>
                   </div>
@@ -667,11 +487,11 @@ function CandidateEarningsPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
                         <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider block">
-                          {candidatePayoutMethod.type === "upi" ? "Verified UPI ID" : `${candidatePayoutMethod.bankName || "Commercial Bank"}`}
+                          {candidatePayoutMethod.type === "upi" ? "Saved UPI ID" : `${candidatePayoutMethod.bankName || "Commercial Bank"}`}
                         </span>
                         <button
                           type="button"
-                          onClick={() => handleCopy(candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId! : candidatePayoutMethod.accountNumber!, "payout", "Payout destination")}
+                          onClick={() => handleCopy(candidatePayoutMethod.type === "upi" ? candidatePayoutMethod.upiId! : (candidatePayoutMethod.accountNumberLast4 || "Not recorded"), "payout", "Payout destination")}
                           className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0 transition-colors p-0.5"
                           title="Copy details"
                         >
@@ -694,7 +514,7 @@ function CandidateEarningsPage() {
                       <div className="font-mono font-bold text-foreground text-sm sm:text-base break-all">
                         {candidatePayoutMethod.type === "upi"
                           ? (candidatePayoutMethod.upiId || "Not Configured")
-                          : (candidatePayoutMethod.accountNumber ? `•••• •••• ${candidatePayoutMethod.accountNumber.slice(-4)} (${candidatePayoutMethod.ifsc || ""})` : "Not Configured")}
+                          : (candidatePayoutMethod.accountNumberLast4 ? `•••• •••• ${candidatePayoutMethod.accountNumberLast4} (${candidatePayoutMethod.ifsc || ""})` : "Not Configured")}
                       </div>
                       <span className="text-xs text-muted-foreground block">
                         Matched Name: <span className="font-medium text-foreground">{candidatePayoutMethod.accountHolderName || candidateName}</span>
@@ -721,7 +541,7 @@ function CandidateEarningsPage() {
                       },
                       {
                         id: "pending",
-                        label: isStudent ? "In Escrow (Next Cycle)" : "In Escrow (24h SLA)",
+                        label: isStudent ? "In Escrow (Next Cycle)" : "In Escrow",
                         mobileLabel: isStudent ? "Next Cycle" : "In Escrow",
                         count: inEscrowPayouts.length,
                         activeBadge: inEscrowPayouts.length > 0 ? `${inEscrowPayouts.length} Active` : undefined,
@@ -795,7 +615,7 @@ function CandidateEarningsPage() {
                   <div className="sm:hidden divide-y divide-border/60">
                     {loading ? (
                       <div className="py-12 px-4 text-center text-muted-foreground text-xs font-medium">
-                        <HiOutlineArrowPath className="mx-auto h-6 w-6 text-primary animate-spin" />
+                        <ButtonSpinner className="mx-auto h-6 w-6 text-primary" />
                         <p className="mt-2 font-semibold">Loading shift claims & payouts...</p>
                       </div>
                     ) : loadError ? (
@@ -818,10 +638,10 @@ function CandidateEarningsPage() {
                           {searchQuery
                             ? "Try adjusting your search terms or clearing the filter."
                             : activeTab === "pending"
-                            ? "Escrow disbursements appear here after timesheet signoff and release within 24 hours."
+                            ? "Approved duties await recorded bank payment."
                             : isStudent
                             ? "Your verified clinical rotations and academic allowances will appear here."
-                            : "Complete verified clinical duties to receive 24-hr escrow guaranteed direct disbursements."}
+                            : "Complete verified clinical duties to see recorded earnings."}
                         </p>
                         {searchQuery ? (
                           <button
@@ -861,7 +681,7 @@ function CandidateEarningsPage() {
                             </div>
                             <div className="text-right shrink-0">
                               <div className="font-black tracking-tight text-base sm:text-lg text-foreground">
-                                ₹{Math.round(tx.amount).toLocaleString("en-IN")}
+                                {tx.amountsRecorded ? `\u20b9${tx.amount.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}` : "Amount not recorded"}
                               </div>
                                 <span
                                 className={cn(
@@ -913,7 +733,8 @@ function CandidateEarningsPage() {
                             </div>
                             <button
                               type="button"
-                              onClick={() => setSelectedSlipTx(tx)}
+                              disabled={!tx.adviceAvailable || !tx.amountsRecorded || action.isPending}
+                                  onClick={() => void openSlip(tx)}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary-soft hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer shrink-0 border border-primary/20 shadow-2xs"
                               title="View & Print Payout Advice Slip"
                             >
@@ -944,7 +765,7 @@ function CandidateEarningsPage() {
                         {loading ? (
                           <tr>
                             <td colSpan={7} className="py-12 text-center text-muted-foreground font-medium">
-                              <HiOutlineArrowPath className="mx-auto h-6 w-6 text-primary animate-spin" />
+                              <ButtonSpinner className="mx-auto h-6 w-6 text-primary" />
                               <p className="mt-2 text-xs font-semibold">Loading shift claims & payouts...</p>
                             </td>
                           </tr>
@@ -972,10 +793,10 @@ function CandidateEarningsPage() {
                                   {searchQuery
                                     ? "Try adjusting your search terms or clearing the filter."
                                     : activeTab === "pending"
-                                    ? "Escrow disbursements appear here after timesheet signoff and release within 24 hours."
+                                    ? "Approved duties await recorded bank payment."
                                     : isStudent
                                     ? "Your verified clinical rotations and academic allowances will appear here."
-                                    : "Complete verified clinical duties to receive 24-hr escrow guaranteed direct disbursements."}
+                                    : "Complete verified clinical duties to see recorded earnings."}
                                 </p>
                                 {searchQuery ? (
                                   <button
@@ -1038,12 +859,13 @@ function CandidateEarningsPage() {
                                 {tx.utr && <div className="text-[10px] text-muted-foreground/70 mt-0.5">UTR: {tx.utr}</div>}
                               </td>
                               <td className="py-4 px-5 whitespace-nowrap text-right font-black tracking-tight text-sm sm:text-base text-foreground">
-                                ₹{Math.round(tx.amount).toLocaleString("en-IN")}
+                                {tx.amountsRecorded ? `\u20b9${tx.amount.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}` : "Amount not recorded"}
                               </td>
                               <td className="py-4 px-5 whitespace-nowrap text-right">
                                 <button
                                   type="button"
-                                  onClick={() => setSelectedSlipTx(tx)}
+                                  disabled={!tx.adviceAvailable || !tx.amountsRecorded || action.isPending}
+                                  onClick={() => void openSlip(tx)}
                                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary-soft hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer border border-primary/20"
                                   title="View & Print Payout Advice Slip"
                                 >
@@ -1065,16 +887,12 @@ function CandidateEarningsPage() {
                 <div>
                   <div className="px-5 py-3.5 bg-muted/20 border-b border-border/60 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-muted-foreground gap-3">
                     <span className="leading-relaxed">
-                      {isStudent ? (
-                        <>Academic stipends are 100% tax-free under <strong>Section 10(16)</strong> of the Income Tax Act. Zero TDS deducted.</>
-                      ) : (
-                        <>TDS applicable under <strong>Section 194J</strong> (Professional Healthcare Cover). Annual summary available for ITR filing.</>
-                      )}
+                      Recorded withholding from saved disbursed claims. This summary does not confirm tax filing or deposit; official certificates are not connected.
                     </span>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
+                      disabled title="Tax certificate service is not connected"
                       className="h-8 text-xs text-primary font-bold hover:bg-muted cursor-pointer shrink-0 self-start sm:self-auto"
                     >
                       {isStudent ? "Email Exemption Slip" : "Email Form 16A Summary"}
@@ -1092,7 +910,7 @@ function CandidateEarningsPage() {
                         <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
                           {isStudent
                             ? "Academic stipends are tax-exempt under Section 10(16)."
-                            : "Quarterly TDS certificates (Form 16A) are generated after verified quarterly filing."}
+                            : "Official tax certificates are not connected. Saved withholding appears after recorded bank disbursement."}
                         </p>
                       </div>
                     ) : (
@@ -1104,19 +922,19 @@ function CandidateEarningsPage() {
                             <span className="text-xs text-muted-foreground mt-0.5 block">{t.period} · {t.tdsRate}</span>
                           </div>
                           <div className="text-right">
-                            <div className="font-black tracking-tight text-sm text-foreground">₹{Math.round(t.netCredited).toLocaleString("en-IN")}</div>
-                            <div className="text-[10px] text-muted-foreground font-medium">Gross: ₹{Math.round(t.gross).toLocaleString("en-IN")}</div>
+                            <div className="font-black tracking-tight text-sm text-foreground">₹{(t.netCredited).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                            <div className="text-[10px] text-muted-foreground font-medium">Gross: ₹{(t.gross).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                           </div>
                         </div>
                         <div className="flex items-center justify-between pt-1 border-t border-border/40 text-xs">
                           <span className="text-[11px] text-muted-foreground">
                             TDS: <span className={t.tdsAmount === 0 ? "text-muted-foreground font-medium" : "text-destructive font-semibold"}>
-                              {t.tdsAmount === 0 ? "₹0" : `-₹${Math.round(t.tdsAmount).toLocaleString("en-IN")}`}
+                              {t.tdsAmount === 0 ? "₹0" : `-₹${(t.tdsAmount).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}`}
                             </span>
                           </span>
                           <button
                             type="button"
-                            onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
+                            disabled title="Tax certificate service is not connected"
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary-soft hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer border border-primary/20"
                           >
                             <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
@@ -1168,21 +986,21 @@ function CandidateEarningsPage() {
                               {t.period}
                             </td>
                             <td className="py-4 px-5 whitespace-nowrap text-right font-mono text-muted-foreground font-medium">
-                              ₹{t.gross.toLocaleString("en-IN")}
+                              ₹{t.gross.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}
                             </td>
                             <td className="py-4 px-5 whitespace-nowrap text-right font-medium text-foreground">
                               {t.tdsRate}
                             </td>
                             <td className="py-4 px-5 whitespace-nowrap text-right font-mono text-destructive font-semibold">
-                              {t.tdsAmount === 0 ? "₹0" : `-₹${t.tdsAmount.toLocaleString("en-IN")}`}
+                              {t.tdsAmount === 0 ? "₹0" : `-₹${t.tdsAmount.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}`}
                             </td>
                             <td className="py-4 px-5 whitespace-nowrap text-right font-mono font-bold text-foreground">
-                              ₹{t.netCredited.toLocaleString("en-IN")}
+                              ₹{t.netCredited.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}
                             </td>
                             <td className="py-4 px-5 whitespace-nowrap text-right">
                               <button
                                 type="button"
-                                onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
+                                disabled title="Tax certificate service is not connected"
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-primary bg-primary/10 hover:bg-primary hover:text-white font-bold text-xs transition-all cursor-pointer"
                               >
                                 <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
@@ -1212,11 +1030,11 @@ function CandidateEarningsPage() {
                 <HiOutlineBanknotes className="h-5 w-5" />
               </span>
               <DialogTitle className="text-base sm:text-lg font-black text-foreground">
-                24-Hour Payout Destination
+                Payout Destination
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-muted-foreground pt-0.5 leading-relaxed">
-              Configure your verified UPI ID or Bank Account for automated Cashfree shift earnings.
+              Configure your UPI ID or bank account for ownership review.
             </DialogDescription>
           </DialogHeader>
 
@@ -1246,9 +1064,9 @@ function CandidateEarningsPage() {
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold text-foreground">Instant UPI</span>
+                          <span className="text-xs font-bold text-foreground">UPI destination</span>
                           <span className="text-[10px] bg-primary-soft text-primary border border-primary/20 font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
-                            Fastest · 24×7
+                            UPI destination
                           </span>
                         </div>
                         <span className="text-[11px] text-muted-foreground block mt-1 leading-snug">
@@ -1336,7 +1154,7 @@ function CandidateEarningsPage() {
                     className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    Cashfree will perform an instant VPA check to verify account holder match.
+                    An admin reviews account ownership evidence before enabling payment.
                   </p>
                 </div>
               )}
@@ -1414,10 +1232,10 @@ function CandidateEarningsPage() {
               <div className="p-3.5 rounded-2xl border border-primary/20 bg-primary-soft/30 text-xs text-muted-foreground space-y-1 mt-2">
                 <div className="flex items-center gap-1.5 font-bold text-foreground text-xs">
                   <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
-                  <span>24-Hour Payout Guarantee</span>
+                  <span>Payout ownership review</span>
                 </div>
                 <p className="text-[11px] leading-relaxed">
-                  Upon clocking out and timesheet approval by the hospital supervisor, funds held in FALE Escrow are instantly transferred to this verified account.
+                  Saving details starts a manual ownership review. Payment is recorded after an external bank transfer and has no guaranteed transfer time.
                 </p>
               </div>
             </div>
@@ -1437,11 +1255,11 @@ function CandidateEarningsPage() {
                 type="submit"
                 size="sm"
                 isLoading={isVerifying}
-                loadingText="Validating with Cashfree..."
+                loadingText="Saving payout details..."
                 className="rounded-xl text-xs font-bold h-10 px-5 cursor-pointer bg-primary hover:bg-primary-hover text-white shadow-2xs gap-1.5 flex-1 sm:flex-initial"
               >
                 <HiOutlineCheck className="h-4 w-4" />
-                <span>Verify &amp; Save Payout</span>
+                <span>Save for review</span>
               </Button>
             </div>
           </form>
@@ -1575,25 +1393,25 @@ function CandidateEarningsPage() {
                   <div className="space-y-1">
                     <Logo />
                     <div className="text-[10px] text-muted-foreground leading-relaxed pt-1">
-                      <p className="font-bold text-foreground/90">THE FALE HEALTHCARE PRIVATE LIMITED</p>
-                      <p>Healthcare Staffing &amp; 24-Hour Nodal Escrow Platform</p>
-                      <p>CIN: U85100KA2025PTC189210 · GSTIN: 29AABCT1234F1Z5</p>
-                      <p>Bengaluru, Karnataka - 560001 · support@thefale.com</p>
+                      <p className="font-bold text-foreground/90">THE FALE</p>
+                      <p>Healthcare Staffing &amp; Payout Records</p>
+                      <p>Recorded payment advice - not a tax certificate</p>
+                      <p>Issuer particulars available from billing · support@thefale.com</p>
                     </div>
                   </div>
 
-                  <div className="text-left sm:text-right space-y-1 shrink-0">
+                  <div className="text-left sm:text-right space-y-1 min-w-0">
                     <span className="inline-block text-[11px] font-mono font-bold tracking-wider px-2.5 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20">
                       PAYOUT ADVICE SLIP
                     </span>
-                    <div className="font-mono text-xs font-bold text-foreground mt-1">
+                    <div className="font-mono text-xs font-bold text-foreground mt-1 break-all">
                       {selectedSlipTx.slipRef}
                     </div>
                     <p className="text-[10px] text-muted-foreground">
                       Disbursal Date: <span className="font-medium text-foreground">{selectedSlipTx.payoutDate}</span>
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      Settlement Route: <span className="font-medium text-foreground">Cashfree Nodal Escrow</span>
+                      Settlement Route: <span className="font-medium text-foreground">Recorded bank payment</span>
                     </p>
                   </div>
                 </div>
@@ -1615,12 +1433,12 @@ function CandidateEarningsPage() {
                       <span className="font-bold block text-xs tracking-wide">
                         {selectedSlipTx.status === "Disbursed"
                           ? "PAYMENT SETTLED & DISBURSED"
-                          : "FUNDS HELD IN 24-HOUR ESCROW"}
+                          : "AWAITING BANK PAYMENT"}
                       </span>
                       <span className="text-[11px] opacity-85 block mt-0.5">
                         {selectedSlipTx.status === "Disbursed"
                           ? "Timesheet verified by hospital supervisor • Remuneration transferred to candidate."
-                          : "Shift verified by hospital • Scheduled for automatic bank transfer within 24 hours."}
+                          : "Hospital-approved amounts await recorded bank payment."}
                       </span>
                     </div>
                   </div>
@@ -1631,7 +1449,7 @@ function CandidateEarningsPage() {
                     </div>
                   ) : (
                     <div className="text-[10px] font-semibold uppercase tracking-wider bg-background/80 px-2.5 py-1 rounded-md border border-amber-500/30 text-amber-700 dark:text-amber-300">
-                      24h Escrow SLA
+                      Awaiting bank payment
                     </div>
                   )}
                 </div>
@@ -1642,9 +1460,9 @@ function CandidateEarningsPage() {
                     <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                       Beneficiary Healthcare Professional
                     </p>
-                    <div className="font-bold text-sm text-foreground">{candidateName}</div>
+                    <div className="font-bold text-sm text-foreground">{selectedSlipTx.rawClaim.candidateName || "Name not recorded"}</div>
                     <div className="space-y-0.5 text-[11px] text-muted-foreground">
-                      <p><span className="text-foreground font-medium">Council Reg. #:</span> {String(store.profile["regNumber"] || "TNMC-84912 / KMC-99124")}</p>
+                      <p><span className="text-foreground font-medium">Council Reg. #:</span> {String(selectedSlipTx.rawClaim.payoutRegistrationNumber || "Not recorded")}</p>
                       <p><span className="text-foreground font-medium">Designation:</span> {selectedSlipTx.shiftTitle.split(" - ")[0] || "Registered Clinician"}</p>
                       <p><span className="text-foreground font-medium">Credited To:</span> <span className="font-mono text-foreground">{selectedSlipTx.payoutMethodUsed}</span></p>
                     </div>
@@ -1659,7 +1477,7 @@ function CandidateEarningsPage() {
                       <p><span className="text-foreground font-medium">Department:</span> {selectedSlipTx.dept}</p>
                       <p><span className="text-foreground font-medium">Duty Slot:</span> {selectedSlipTx.shiftDate}</p>
                       <p>
-                        <span className="text-foreground font-medium">Duty Hours:</span> {selectedSlipTx.hours} Hours (@ ₹{selectedSlipTx.rate}/hr)
+                        <span className="text-foreground font-medium">Duty Hours:</span> {selectedSlipTx.hours} Hours (@ ₹{selectedSlipTx.rate.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}/hr)
                       </p>
                       {selectedSlipTx.rawClaim?.actualHours && selectedSlipTx.rawClaim?.hours && selectedSlipTx.rawClaim.actualHours !== selectedSlipTx.rawClaim.hours && (
                         <p className="text-amber-600 dark:text-amber-400 font-semibold text-[10px] pt-0.5">
@@ -1688,37 +1506,37 @@ function CandidateEarningsPage() {
                             {selectedSlipTx.shiftTitle} ({selectedSlipTx.dept})
                           </span>
                           <span className="text-[10px] font-mono font-semibold text-primary block mt-1">
-                            {selectedSlipTx.hours} hrs × ₹{selectedSlipTx.rate.toLocaleString("en-IN")}/hr
+                            {selectedSlipTx.hours} hrs × ₹{selectedSlipTx.rate.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}/hr
                           </span>
                         </div>
                         <span className="font-mono font-bold text-xs text-foreground shrink-0">
-                          ₹{(selectedSlipTx.grossAmount || (selectedSlipTx.hours * selectedSlipTx.rate)).toLocaleString("en-IN")}
+                          ₹{(selectedSlipTx.grossAmount ?? 0).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}
                         </span>
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>Night / ICU Differential</span>
-                        <span className="font-mono">₹0.00</span>
+                        <span>Allowance breakdown</span>
+                        <span className="font-mono">Included in gross</span>
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                         <span>FALE Platform Fee (Candidate)</span>
                         <span className={selectedSlipTx.platformFee ? "font-mono text-muted-foreground" : "text-emerald-600 font-semibold"}>
-                          {selectedSlipTx.platformFee ? `-₹${selectedSlipTx.platformFee.toLocaleString("en-IN")}` : "100% Free"}
+                          {selectedSlipTx.platformFee ? `-₹${selectedSlipTx.platformFee.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}` : "No candidate fee"}
                         </span>
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>TDS Withholding (Sec 194J)</span>
+                        <span>Recorded TDS Withholding</span>
                         <span className="font-mono">
-                          {selectedSlipTx.tdsAmount ? `-₹${selectedSlipTx.tdsAmount.toLocaleString("en-IN")}` : "₹0.00 (Exempt)"}
+                          {selectedSlipTx.tdsAmount ? `-₹${selectedSlipTx.tdsAmount.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}` : "₹0.00"}
                         </span>
                       </div>
 
                       <div className="flex items-center justify-between pt-2.5 border-t-2 border-border/80 text-xs">
                         <span className="font-bold text-foreground">Net Disbursed Remuneration</span>
                         <span className="font-mono font-black text-sm text-primary">
-                          ₹{selectedSlipTx.amount.toLocaleString("en-IN")}
+                          ₹{selectedSlipTx.amount.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}
                         </span>
                       </div>
                     </div>
@@ -1731,7 +1549,7 @@ function CandidateEarningsPage() {
                         <tr>
                           <th className="py-2.5 px-3">Description</th>
                           <th className="py-2.5 px-3 text-center">Hours / Units</th>
-                          <th className="py-2.5 px-3 text-right">Agreed Rate</th>
+                          <th className="py-2.5 px-3 text-right">Average Rate</th>
                           <th className="py-2.5 px-3 text-right">Gross Total</th>
                         </tr>
                       </thead>
@@ -1747,15 +1565,15 @@ function CandidateEarningsPage() {
                             {selectedSlipTx.hours} hrs
                           </td>
                           <td className="py-2.5 px-3 text-right font-mono text-muted-foreground">
-                            ₹{selectedSlipTx.rate.toLocaleString("en-IN")} / hr
+                            ₹{selectedSlipTx.rate.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})} / hr
                           </td>
                           <td className="py-2.5 px-3 text-right font-mono font-semibold text-foreground">
-                            ₹{(selectedSlipTx.grossAmount || (selectedSlipTx.hours * selectedSlipTx.rate)).toLocaleString("en-IN")}
+                            ₹{(selectedSlipTx.grossAmount ?? 0).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}
                           </td>
                         </tr>
                         <tr>
                           <td className="py-2 px-3 text-muted-foreground">
-                            Night Duty / ICU Differential Allowance
+                            Allowance breakdown
                           </td>
                           <td className="py-2 px-3 text-center text-muted-foreground font-mono">-</td>
                           <td className="py-2 px-3 text-right text-muted-foreground font-mono">-</td>
@@ -1767,22 +1585,22 @@ function CandidateEarningsPage() {
                           </td>
                           <td className="py-2 px-3 text-center text-muted-foreground font-mono">-</td>
                           <td className={selectedSlipTx.platformFee ? "py-2 px-3 text-right font-mono text-muted-foreground" : "py-2 px-3 text-right text-emerald-600 font-semibold"}>
-                            {selectedSlipTx.platformFee ? `-₹${selectedSlipTx.platformFee.toLocaleString("en-IN")}` : "100% Free"}
+                            {selectedSlipTx.platformFee ? `-₹${selectedSlipTx.platformFee.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}` : "100% Free"}
                           </td>
                           <td className="py-2 px-3 text-right font-mono text-muted-foreground">
-                            {selectedSlipTx.platformFee ? `-₹${selectedSlipTx.platformFee.toLocaleString("en-IN")}` : "₹0.00"}
+                            {selectedSlipTx.platformFee ? `-₹${selectedSlipTx.platformFee.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}` : "₹0.00"}
                           </td>
                         </tr>
                         <tr>
                           <td className="py-2 px-3 text-muted-foreground">
-                            TDS Withholding (Section 194J - Professional Services)
+                            Recorded TDS Withholding
                           </td>
                           <td className="py-2 px-3 text-center text-muted-foreground font-mono">-</td>
                           <td className="py-2 px-3 text-right text-muted-foreground font-mono">
-                            {selectedSlipTx.tdsAmount ? "1% Withholding" : "Exempt / Threshold"}
+                            {selectedSlipTx.tdsAmount ? "Recorded withholding" : "Recorded withholding"}
                           </td>
                           <td className="py-2 px-3 text-right font-mono text-muted-foreground">
-                            {selectedSlipTx.tdsAmount ? `-₹${selectedSlipTx.tdsAmount.toLocaleString("en-IN")}` : "₹0.00"}
+                            {selectedSlipTx.tdsAmount ? `-₹${selectedSlipTx.tdsAmount.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}` : "₹0.00"}
                           </td>
                         </tr>
                       </tbody>
@@ -1792,7 +1610,7 @@ function CandidateEarningsPage() {
                             Net Disbursed Professional Remuneration
                           </td>
                           <td className="py-3 px-3 text-right font-mono font-black text-base text-primary">
-                            ₹{selectedSlipTx.amount.toLocaleString("en-IN")}
+                            ₹{selectedSlipTx.amount.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}
                           </td>
                         </tr>
                       </tfoot>
@@ -1810,15 +1628,15 @@ function CandidateEarningsPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs border-t border-border/70 pt-4">
                   <div>
                     <span className="text-[10px] text-muted-foreground block">Payout Partner</span>
-                    <span className="font-bold text-foreground">Cashfree AutoPayouts</span>
+                    <span className="font-bold text-foreground">Recorded bank payment</span>
                   </div>
                   <div>
                     <span className="text-[10px] text-muted-foreground block">Escrow Nodal A/C</span>
-                    <span className="font-mono font-medium text-foreground">FALE-NODAL-01</span>
+                    <span className="font-mono font-medium text-foreground">Saved claim destination</span>
                   </div>
                   <div>
                     <span className="text-[10px] text-muted-foreground block">Disbursal Mode</span>
-                    <span className="font-medium text-foreground">Instant IMPS / UPI 24x7</span>
+                    <span className="font-medium text-foreground">External bank transfer</span>
                   </div>
                   <div>
                     <span className="text-[10px] text-muted-foreground block">Timesheet Sign-off</span>
@@ -1831,15 +1649,14 @@ function CandidateEarningsPage() {
                   <div className="max-w-md text-left">
                     <p className="font-medium text-foreground/80">Compliance &amp; Legal Validity Note:</p>
                     <p>
-                      This is an electronically generated Remuneration Advice Slip issued in accordance with RBI Nodal Escrow Regulations and Section 194J of the Income Tax Act, 1961. It constitutes valid proof of locum engagement and professional receipt.
-                    </p>
+                      This advice reflects saved claim amounts and bank references. It does not confirm tax filing or tax deposit. Pending advice is not proof of payment.</p>
                   </div>
 
                   <div className="flex items-center gap-2 p-2 rounded-xl border border-primary/20 bg-primary/5 shrink-0 text-left">
                     <HiOutlineShieldCheck className="h-6 w-6 text-primary shrink-0" />
                     <div>
-                      <span className="font-bold text-foreground block text-[11px]">FALE ESCROW SECURE</span>
-                      <span className="text-[9px] text-muted-foreground block">Cryptographically Verified</span>
+                      <span className="font-bold text-foreground block text-[11px]">FALE PAYOUT RECORD</span>
+                      <span className="text-[9px] text-muted-foreground block">System-generated record</span>
                     </div>
                   </div>
                 </div>
@@ -1850,7 +1667,7 @@ function CandidateEarningsPage() {
           {/* Bottom Sticky Action Bar (Hidden when printing) */}
           <div className="p-3.5 px-4 sm:px-6 border-t border-border/60 bg-card flex items-center justify-between gap-3 shrink-0 print:hidden">
             <span className="text-[11px] text-muted-foreground hidden sm:inline">
-              Official Locum Payout Advice · FALE Nodal Escrow SLA
+              Recorded Locum Payout Advice · Saved claim ledger
             </span>
             <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
               <Button
@@ -1864,11 +1681,8 @@ function CandidateEarningsPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  if (selectedSlipTx) {
-                    printPayoutAdvicePdf(selectedSlipTx, candidateName, String(store.profile["regNumber"] || "TNMC-84912 / KMC-99124"));
-                  }
-                }}
+                onClick={() => void exportSlip(true)}
+                isLoading={action.isPending}
                 className="h-9 rounded-xl text-xs font-semibold gap-1.5 px-3.5 cursor-pointer hidden sm:flex"
               >
                 <HiOutlinePrinter className="h-3.5 w-3.5 shrink-0" />
@@ -1876,12 +1690,8 @@ function CandidateEarningsPage() {
               </Button>
               <Button
                 size="sm"
-                onClick={() => {
-                  if (selectedSlipTx) {
-                    generatePayoutAdvicePdf(selectedSlipTx, candidateName, String(store.profile["regNumber"] || "TNMC-84912 / KMC-99124"));
-                    toast.success("Payout Advice PDF downloaded successfully!");
-                  }
-                }}
+                onClick={() => void exportSlip()}
+                isLoading={action.isPending}
                 className="h-9 rounded-xl text-xs font-bold gap-1.5 px-4 cursor-pointer bg-primary hover:bg-primary-hover text-white shadow-2xs flex-1 sm:flex-initial"
               >
                 <HiOutlineArrowDownTray className="h-4 w-4 shrink-0" />

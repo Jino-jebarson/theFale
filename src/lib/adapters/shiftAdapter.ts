@@ -1,3 +1,13 @@
+export interface ShiftDetails {
+  profession?: string | undefined; city?: string | undefined; registrationRequired?: boolean | undefined; blsRequired?: boolean | undefined; aclsRequired?: boolean | undefined;
+  icuExperienceRequired?: boolean | undefined; minimumExperienceYears?: number | undefined; reportTo?: string | undefined; reportLocation?: string | undefined;
+  dressRequirement?: string | undefined; itemsToBring?: string | undefined; reportingNotes?: string | undefined;
+}
+export interface ShiftCheckInPayload {
+  method: "PIN" | "QR"; pin?: string | undefined; qrToken?: string | undefined;
+  latitude: number; longitude: number; accuracy: number; locationCapturedAt: string;
+  selfieDataUrl: string; selfieCapturedAt: string;
+}
 // src/lib/adapters/shiftAdapter.ts
 // Locum shift and duty claim adapter with escrow hold
 
@@ -5,34 +15,37 @@ import { apiFetch, paiseToRupees, rupeesToPaise } from "@/lib/api";
 
 export interface LocumShiftDto {
   id: string;
-  facilityId?: string;
-  facilityName?: string;
-  facilityCity?: string;
-  city?: string;
-  facilityAddress?: string;
-  facilityAccreditation?: string;
+  facilityId?: string | undefined;
+  facilityName?: string | undefined;
+  facilityCity?: string | undefined;
+  city?: string | undefined;
+  facilityAddress?: string | undefined;
+  facilityAccreditation?: string | undefined;
   title: string;
+  details?: ShiftDetails | undefined;
   department: string;
   startAt: string;
   endAt: string;
   hours: number;
   ratePerHourPaise: number;
-  surgeRatePerHourPaise?: number;
-  surgeLabel?: string;
-  totalPayoutPaise?: number;
-  totalPayPaise?: number;
+  surgeRatePerHourPaise?: number | undefined;
+  surgeLabel?: string | undefined;
+  totalPayoutPaise?: number | undefined;
+  totalPayPaise?: number | undefined;
   openings: number;
   slotsClaimed: number;
   urgent: boolean;
   status: string;
-  description?: string;
-  createdAt?: string;
-  hasClaimed?: boolean;
-  facilityFeePercent?: number;
-  facilityFeePaise?: number;
-  totalEscrowRequiredPaise?: number;
-  autoApproved?: boolean;
-  matchScore?: number;
+  description?: string | undefined;
+  createdAt?: string | undefined;
+  hasClaimed?: boolean | undefined;
+  facilityFeePercent?: number | undefined;
+  facilityFeePaise?: number | undefined;
+  platformFeeGstPercent?: number | undefined;
+  platformFeeGstPaise?: number | undefined;
+  totalEscrowRequiredPaise?: number | undefined;
+  autoApproved?: boolean | undefined;
+  matchScore?: number | undefined;
 }
 
 export interface FacilityShiftPolicyDto {
@@ -41,73 +54,83 @@ export interface FacilityShiftPolicyDto {
   firstShiftApprovalRequired: boolean;
   firstShiftFeeWaived: boolean;
   platformFeePercent: number;
+  platformFeeGstPercent?: number | undefined;
   priorApprovedShiftsCount: number;
   priorValidShiftsCount: number;
   availableBalancePaise: number;
 }
 
 export interface ShiftClaimDto {
+  department?: string | undefined;
   id: string;
   shiftId: string;
   candidateId: string;
-  candidateName?: string;
-  candidateRole?: string;
-  candidateCity?: string;
-  candidateProfession?: string;
-  facilityName?: string;
-  shiftTitle?: string;
-  shiftDepartment?: string;
-  shiftStartAt?: string;
-  shiftEndAt?: string;
-  startAt?: string;
-  endAt?: string;
-  hours?: number;
-  actualHours?: number;
+  candidateName?: string | undefined;
+  candidateRole?: string | undefined;
+  candidateCity?: string | undefined;
+  candidateProfession?: string | undefined;
+  facilityName?: string | undefined;
+  shiftTitle?: string | undefined;
+  shiftDepartment?: string | undefined;
+  shiftStartAt?: string | undefined;
+  shiftEndAt?: string | undefined;
+  startAt?: string | undefined;
+  endAt?: string | undefined;
+  hours?: number | undefined;
+  actualHours?: number | undefined;
   status: string;
-  claimedAt?: string;
-  checkedInAt?: string;
-  completedAt?: string;
-  payoutPaise?: number;
-  grossAmountPaise?: number;
-  platformFeePaise?: number;
-  tdsAmountPaise?: number;
-  netAmountPaise?: number;
-  payoutStatus?: string;
-  utr?: string;
-  payoutSlipRef?: string;
-  matchScore?: number;
-  checkInTime?: string;
-  completionTime?: string;
-  disputeReason?: string;
-  disputedAt?: string;
-  disputedBy?: string;
-  platformFeePercent?: number;
-  firstShiftFree?: boolean;
-  checkInPin?: string;
-  hospitalRating?: number;
-  hospitalReview?: string;
-  ratingTags?: string;
-  ratedAt?: string;
-  candidateRatingAvg?: number;
-  candidateRatingCount?: number;
-  completedShiftsCount?: number;
+  claimedAt?: string | undefined;
+  checkedInAt?: string | undefined;
+  completedAt?: string | undefined;
+  payoutPaise?: number | undefined;
+  grossAmountPaise?: number | undefined;
+  platformFeePaise?: number | undefined;
+  tdsAmountPaise?: number | undefined;
+  netAmountPaise?: number | undefined;
+  payoutStatus?: string | undefined;
+  utr?: string | undefined;
+  payoutSlipRef?: string | undefined;
+  disbursedAt?: string | undefined;
+  payoutMethodSnapshot?: string | undefined;
+  payoutRegistrationNumber?: string | undefined;
+  matchScore?: number | undefined;
+  checkInTime?: string | undefined;
+  completionTime?: string | undefined;
+  disputeReason?: string | undefined;
+  disputedAt?: string | undefined;
+  disputedBy?: string | undefined;
+  platformFeePercent?: number | undefined;
+  firstShiftFree?: boolean | undefined;
+  checkInPin?: string | undefined;
+  checkInQrToken?: string | undefined;
+  arrivalInstructions?: ShiftDetails | undefined;
+  attendanceRecorded?: boolean | undefined;
+  checkInMethod?: string | undefined;
+  hospitalRating?: number | undefined;
+  hospitalReview?: string | undefined;
+  ratingTags?: string | undefined;
+  ratedAt?: string | undefined;
+  candidateRatingAvg?: number | undefined;
+  candidateRatingCount?: number | undefined;
+  completedShiftsCount?: number | undefined;
 }
 
 export interface UiShiftItem {
   id: string;
   title: string;
+  details?: ShiftDetails | undefined;
   org: string;
   dept: string;
   city: string;
   time: string;
   date: string;
-  startAt?: string;
-  createdAt?: string;
+  startAt?: string | undefined;
+  createdAt?: string | undefined;
   pay: string;
   rate: number;
   rateNumber: number;
   totalPayNumber: number;
-  urgent?: boolean;
+  urgent?: boolean | undefined;
   slots: number;
   slotsClaimed: number;
   status: string;
@@ -115,16 +138,18 @@ export interface UiShiftItem {
   hours: number;
   rawRatePerHourPaise: number;
   rawTotalPayoutPaise: number;
-  hasClaimed?: boolean;
-  surgeRatePerHourPaise?: number;
-  surgeLabel?: string;
-  endAt?: string;
-  description?: string;
-  facilityFeePercent?: number;
-  facilityFeePaise?: number;
-  totalEscrowRequiredPaise?: number;
-  autoApproved?: boolean;
-  matchScore?: number;
+  hasClaimed?: boolean | undefined;
+  surgeRatePerHourPaise?: number | undefined;
+  surgeLabel?: string | undefined;
+  endAt?: string | undefined;
+  description?: string | undefined;
+  facilityFeePercent?: number | undefined;
+  facilityFeePaise?: number | undefined;
+  platformFeeGstPercent?: number | undefined;
+  platformFeeGstPaise?: number | undefined;
+  totalEscrowRequiredPaise?: number | undefined;
+  autoApproved?: boolean | undefined;
+  matchScore?: number | undefined;
 }
 
 export function mapLocumShiftToUi(dto: LocumShiftDto): UiShiftItem {
@@ -151,6 +176,7 @@ export function mapLocumShiftToUi(dto: LocumShiftDto): UiShiftItem {
   return {
     id: dto.id,
     title: dto.title,
+    details: dto.details,
     org: dto.facilityName || "Hospital Partner",
     dept: dto.department || "Emergency",
     city: dto.city || dto.facilityCity || "Chennai",
@@ -177,6 +203,8 @@ export function mapLocumShiftToUi(dto: LocumShiftDto): UiShiftItem {
     description: dto.description,
     facilityFeePercent: dto.facilityFeePercent ?? 0,
     facilityFeePaise: dto.facilityFeePaise ?? 0,
+    platformFeeGstPercent: dto.platformFeeGstPercent ?? 0,
+    platformFeeGstPaise: dto.platformFeeGstPaise ?? 0,
     totalEscrowRequiredPaise: dto.totalEscrowRequiredPaise ?? ((dto.totalPayPaise || 0) * (dto.openings || 1)),
     autoApproved: Boolean(dto.autoApproved),
     matchScore: dto.matchScore,
@@ -203,17 +231,17 @@ export async function getMyClaims(): Promise<ShiftClaimDto[]> {
   return apiFetch<ShiftClaimDto[]>("/shifts/claims", { validate: Array.isArray });
 }
 
-export async function checkInShift(claimId: string, pin?: string): Promise<ShiftClaimDto> {
+export async function checkInShift(claimId: string, evidence: ShiftCheckInPayload): Promise<ShiftClaimDto> {
   return apiFetch<ShiftClaimDto>(`/shifts/claims/${claimId}/check-in`, {
     method: "POST",
-    body: pin ? JSON.stringify({ pin: pin.trim() }) : undefined,
+    body: JSON.stringify(evidence),
   });
 }
 
 export interface CompleteShiftPayload {
-  panNumber?: string;
-  tdsConsent?: boolean;
-  actualHours?: number;
+  panNumber?: string | undefined;
+  tdsConsent?: boolean | undefined;
+  actualHours?: number | undefined;
 }
 
 export async function completeShift(
@@ -236,7 +264,7 @@ export async function disputeShift(claimId: string, reason?: string): Promise<Sh
 
 export interface RateShiftClaimPayload {
   rating: number;
-  review?: string;
+  review?: string | undefined;
   tags?: string[];
 }
 
@@ -261,6 +289,7 @@ export async function updateShift(
   const isUrgentVal = Boolean(payload.urgent ?? payload.isUrgent);
   const bodyData = {
     title: payload.title.trim(),
+    details: payload.details,
     department: payload.department.trim(),
     startAt: payload.startAt,
     endAt: payload.endAt,
@@ -291,8 +320,8 @@ export async function getDisputedShiftClaims(): Promise<ShiftClaimDto[]> {
 
 export interface ResolveDisputePayload {
   resolution: "RELEASE_TO_CANDIDATE" | "PARTIAL_SPLIT" | "REFUND_HOSPITAL";
-  approvedHours?: number;
-  notes?: string;
+  approvedHours?: number | undefined;
+  notes?: string | undefined;
 }
 
 export async function resolveShiftDispute(
@@ -313,23 +342,25 @@ export async function cancelShiftClaim(claimId: string): Promise<void> {
 
 export interface PostShiftPayload {
   title: string;
+  details?: ShiftDetails | undefined;
   department: string;
   startAt: string;
   endAt: string;
-  hours?: number;
+  hours?: number | undefined;
   ratePerHourPaise: number;
-  surgeRatePerHourPaise?: number;
-  surgeLabel?: string;
+  surgeRatePerHourPaise?: number | undefined;
+  surgeLabel?: string | undefined;
   openings: number;
-  urgent?: boolean;
-  isUrgent?: boolean;
-  description?: string;
+  urgent?: boolean | undefined;
+  isUrgent?: boolean | undefined;
+  description?: string | undefined;
 }
 
 export async function postShift(payload: PostShiftPayload): Promise<LocumShiftDto> {
   const isUrgentVal = Boolean(payload.urgent ?? payload.isUrgent);
   const bodyData = {
     title: payload.title.trim(),
+    details: payload.details,
     department: payload.department.trim(),
     startAt: payload.startAt,
     endAt: payload.endAt,
@@ -350,4 +381,8 @@ export async function postShift(payload: PostShiftPayload): Promise<LocumShiftDt
     },
     body: JSON.stringify(bodyData),
   });
+}
+
+export async function getPayoutAdvice(claimId: string): Promise<ShiftClaimDto> {
+  return apiFetch<ShiftClaimDto>(`/payouts/${claimId}/slip`, { cache: "no-store" });
 }

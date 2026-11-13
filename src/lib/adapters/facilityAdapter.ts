@@ -57,6 +57,14 @@ export interface FacilityWalletDto {
 }
 
 export interface WalletTransactionDto {
+  canonicalDocument?: boolean | undefined;
+  claimId?: string | undefined;
+  reviewedAt?: string | undefined;
+  reviewNotes?: string | undefined;
+  destinationSnapshot?: string | undefined;
+  bankDisbursedAt?: string | undefined;
+  platformFeePaise?: number | null;
+  platformFeeGstPaise?: number | null;
   id: string;
   walletId?: string;
   type: string;
@@ -347,6 +355,7 @@ export function formatApplicationStatus(status?: string): string {
       return "Offer";
     case "CONFIRMED":
       return "Confirmed";
+    case "IN_PROGRESS":
     case "CHECKED_IN":
       return "Checked In";
     case "COMPLETED":
@@ -380,6 +389,10 @@ export function formatApplicationStatus(status?: string): string {
     case "UNDER_REVIEW":
     case "UNDER_SCREENING":
       return "New";
+    case "CANCELLED":
+      return "Cancelled";
+    case "WITHDRAWN":
+      return "Withdrawn";
     case "SHORTLISTED":
     default:
       return "Shortlisted";

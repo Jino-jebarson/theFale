@@ -1,9 +1,12 @@
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { parseApplicationScope, matchesApplicationStage, applicationStageLabel, formatDutySchedule } from "@/lib/employerWorkflow";
+import { ShiftAttendancePanel } from "@/components/fale/ShiftAttendancePanel";
 import { copyText } from "@/lib/copyText";
 import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { usePageLoad } from "@/hooks/use-page-load";
 import { RequestError } from "@/components/fale/RequestError";
 import { useState, useEffect, useMemo } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   HiOutlineShieldCheck,
   HiOutlineMapPin,
@@ -66,13 +69,13 @@ import {
 export const Route = createFileRoute("/employer/applicants")({
   head: () => ({
     meta: [
-      { title: "Shortlisted Clinicians - FALE" },
+      { title: "Applications - FALE" },
       {
         name: "description",
         content:
           "Review council-verified healthcare professionals shortlisted for your open roles.",
       },
-      { property: "og:title", content: "Shortlisted Clinicians - FALE" },
+      { property: "og:title", content: "Applications - FALE" },
       {
         property: "og:description",
         content: "Review council-verified shortlisted candidates.",
@@ -81,6 +84,7 @@ export const Route = createFileRoute("/employer/applicants")({
       { name: "twitter:card", content: "summary" },
     ],
   }),
+  validateSearch: parseApplicationScope,
   component: Applicants,
 });
 
@@ -140,9 +144,17 @@ function Applicants() {
   const pageLoad = usePageLoad();
   const pageAction = useConfirmedAction();
   const s = useApp();
-  const [roleTypeTab, setRoleTypeTab] = useState<"all" | "jobs" | "shifts">("all");
-  const [filter, setFilter] = useState("All");
-  const [hasInitializedFilter, setHasInitializedFilter] = useState(false);
+  const scope = Route.useSearch();
+  const navigate = useNavigate();
+  const [roleTypeTab, setRoleTypeTab] = useState<"all" | "jobs" | "shifts">(scope.type || "all");
+  const [filter, setFilter] = useState(scope.openingId ? "All" : "Needs Action");
+  useEffect(() => {
+    setRoleTypeTab(scope.type || "all"); setFilter(scope.openingId ? "All" : "Needs Action"); setSelectedRole("All");
+  }, [scope.openingId, scope.type]);
+  const changeType = (type: "all" | "jobs" | "shifts") => {
+    setRoleTypeTab(type); setFilter("Needs Action");
+    void navigate({ to: "/employer/applicants", search: type === "all" ? {} : { type } });
+  };
   const [selectedRole, setSelectedRole] = useState("All");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<Record<string, string>>({});
@@ -262,6 +274,8 @@ function Applicants() {
 
         return {
           id: a.id,
+          openingId: a.shiftId || a.jobId,
+          dutySchedule: a.shiftId || a.shiftStartAt ? formatDutySchedule(a.shiftStartAt, a.shiftEndAt) : undefined,
           name: a.candidateName || "Candidate",
           role: candidateRole,
           exp: candidateExp,
@@ -286,11 +300,13 @@ function Applicants() {
           experienceList: Array.isArray(a.experienceList) ? a.experienceList : [],
           resumeUrl: a.resumeUrl || undefined,
           resumeFileName: a.resumeFileName || undefined,
-          isShiftClaim: Boolean(a.isShiftClaim || a.shiftId || (a.jobTitle && a.jobTitle.toLowerCase().includes("shift"))),
+          isShiftClaim: Boolean(a.isShiftClaim || a.shiftId || (a.jobTitle && a.jobTitle.toLowerCase().includes("(locum shift)"))),
           actualHours: a.actualHours || undefined,
           scheduledHours: a.scheduledHours || 8,
           hourlyRate: a.hourlyRatePaise ? Math.round(a.hourlyRatePaise / 100) : (a.hourlyRate || 0),
           checkInPin: a.checkInPin || undefined,
+          checkInQrToken: a.checkInQrToken || undefined,
+          attendanceRecorded: Boolean(a.attendanceRecorded),
           disputeReason: a.disputeReason || undefined,
           hospitalRating: a.hospitalRating || undefined,
           hospitalReview: a.hospitalReview || undefined,
@@ -310,12 +326,12 @@ function Applicants() {
 
   // Overall counts for Permanent Roles vs Locum Shifts
   const permanentCount = useMemo(
-    () => allApplicants.filter((a) => !a.isShiftClaim && !a.for?.toLowerCase().includes("shift")).length,
+    () => allApplicants.filter((a) => !a.isShiftClaim && !a.for?.toLowerCase().includes("(locum shift)")).length,
     [allApplicants]
   );
 
   const shiftCount = useMemo(
-    () => allApplicants.filter((a) => a.isShiftClaim || a.for?.toLowerCase().includes("shift")).length,
+    () => allApplicants.filter((a) => a.isShiftClaim || a.for?.toLowerCase().includes("(locum shift)")).length,
     [allApplicants]
   );
 
@@ -347,12 +363,13 @@ function Applicants() {
   // Applicants scoped to active Role Type ("all" | "jobs" | "shifts")
   const applicantsInRoleType = useMemo(() => {
     return allApplicants.filter((a) => {
-      const isShift = Boolean(a.isShiftClaim || a.for?.toLowerCase().includes("shift"));
+      if (scope.openingId && a.openingId !== scope.openingId) return false;
+      const isShift = Boolean(a.isShiftClaim || a.for?.toLowerCase().includes("(locum shift)"));
       if (roleTypeTab === "jobs" && isShift) return false;
       if (roleTypeTab === "shifts" && !isShift) return false;
       return true;
     });
-  }, [allApplicants, roleTypeTab]);
+  }, [allApplicants, roleTypeTab, scope.openingId]);
 
   // Unique roles for custom Select scoped to active view
   const roles = useMemo(() => {
@@ -386,59 +403,19 @@ function Applicants() {
     };
   }, [applicantsInRoleType]);
 
-  // Smart default: land on "Needs Action" whenever newly applied / pending candidates exist
-  useEffect(() => {
-    if (loading || hasInitializedFilter) return;
-    if (allApplicants.length > 0) {
-      if (counts["Needs Action"] > 0) {
-        setFilter("Needs Action");
-      }
-      setHasInitializedFilter(true);
-    }
-  }, [loading, hasInitializedFilter, allApplicants.length, counts]);
-
-  // Dynamic filter tabs based on role type
   const filterTabs = useMemo(() => {
-    if (roleTypeTab === "shifts") {
-      const list = ["Needs Action", "All"];
-      if (counts.Claimed > 0) list.push("Claimed");
-      if (counts.Shortlisted > 0) list.push("Shortlisted");
-      if (counts.Confirmed > 0) list.push("Confirmed");
-      if (counts.CheckedIn > 0) list.push("Checked In");
-      if (counts.TimesheetSubmitted > 0) list.push("Timesheet Submitted");
-      if (counts.Completed > 0) list.push("Completed");
-      if (counts.Disputed > 0) list.push("Disputed");
-      if (counts.NoShow > 0) list.push("No-Show");
-      if (counts.Hired > 0) list.push("Hired");
-      if (counts.Rejected > 0) list.push("Rejected");
-      if (counts.SlotFilled > 0) list.push("Slot Filled");
-      return list;
-    }
-    const list = ["Needs Action", "All", "New", "Shortlisted"];
-    if (counts.Claimed > 0) list.push("Claimed");
-    if (counts.Confirmed > 0) list.push("Confirmed");
-    if (counts.CheckedIn > 0) list.push("Checked In");
-    if (counts.TimesheetSubmitted > 0) list.push("Timesheet Submitted");
-    if (counts.Completed > 0) list.push("Completed");
-    if (counts.Disputed > 0) list.push("Disputed");
-    if (counts.NoShow > 0) list.push("No-Show");
-    list.push("Interview");
-    if (counts.Offer > 0) list.push("Offer");
-    if (counts.Hired > 0) list.push("Hired");
-    if (counts.Rejected > 0) list.push("Rejected");
-    if (counts.SlotFilled > 0) list.push("Slot Filled");
-    if (counts.PositionFilled > 0) list.push("Position Filled");
-    return list;
-  }, [counts, roleTypeTab]);
+    const stages = roleTypeTab === "shifts"
+      ? ["Needs Action", "New Applications", "Confirmed", "On Duty", "Timesheet Review", "Completed", "History"]
+      : roleTypeTab === "jobs"
+        ? ["Needs Action", "New Applications", "Shortlisted", "Interview", "Offer", "Hired", "History"]
+        : ["Needs Action", "New Applications", "In Progress", "Timesheet Review", "Completed", "History"];
+    return scope.openingId ? ["All", ...stages] : stages;
+  }, [roleTypeTab, scope.openingId]);
 
   // Filtered & priority-sorted candidate list (newly applied & action-needed first, newest first)
   const filteredList = useMemo(() => {
     const matched = applicantsInRoleType.filter((a) => {
-      if (filter === "Needs Action") {
-        if (!ACTION_NEEDED_STATUSES.has(a.status)) return false;
-      } else if (filter !== "All" && a.status !== filter) {
-        return false;
-      }
+      if (!matchesApplicationStage(a.status, filter)) return false;
       if (selectedRole !== "All" && a.role !== selectedRole) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -462,6 +439,16 @@ function Applicants() {
       return timeB - timeA;
     });
   }, [applicantsInRoleType, filter, selectedRole, search]);
+
+  const groupedApplications = useMemo(() => {
+    const groups = new Map<string, { title: string; schedule?: string | undefined; applicants: typeof filteredList }>();
+    for (const applicant of filteredList) {
+      const key = String(applicant.openingId || applicant.for);
+      if (!groups.has(key)) groups.set(key, { title: applicant.for, schedule: applicant.dutySchedule, applicants: [] });
+      groups.get(key)!.applicants.push(applicant);
+    }
+    return Array.from(groups, ([id, group]) => ({ id, ...group }));
+  }, [filteredList]);
 
   const handleShortlist = async (app: Applicant) => { await pageAction.run(async () => {
     {
@@ -520,7 +507,7 @@ function Applicants() {
       }
       setStatus((prev) => ({ ...prev, [verifyTimesheetModalApp.id]: "Completed" }));
       toast.success(`Timesheet Verified & Approved!`, {
-        description: `Verified ${verifyHoursInput} hrs for ${verifyTimesheetModalApp.name}. Clinician payout processed; unused escrow refunded to hospital balance.`,
+        description: `Verified ${verifyHoursInput} hrs for ${verifyTimesheetModalApp.name}. Payout queued for disbursement; unused escrow reconciled to hospital balance.`,
       });
       setVerifyTimesheetModalApp(null);
       fetchApplicants();
@@ -762,7 +749,7 @@ function Applicants() {
   const openRejectModal = (app: Applicant) => {
     setRejectCandidate(app);
     setRejectionNotes("");
-    const isShift = Boolean(app.isShiftClaim || app.for?.toLowerCase().includes("shift"));
+    const isShift = Boolean(app.isShiftClaim || app.for?.toLowerCase().includes("(locum shift)"));
     setRejectionReasonPreset(isShift ? "Council registration / credential mismatch" : "Interview performance");
   };
 
@@ -805,16 +792,17 @@ function Applicants() {
 
   return (
     <AppShell>
+      {loading && <p role="status" className="flex items-center gap-2 p-4 text-sm"><ButtonSpinner />Loading applications...</p>}
       <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="w-full min-w-0 space-y-6">
         {/* Clean Executive Header */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-              Shortlisted Candidates
+              Applications
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Newly applied &amp; action-needed clinicians appear first, followed by completed shift history.
+              Review applications, manage upcoming duties and approve timesheets. Completed work stays in History.
             </p>
           </div>
           {counts["Needs Action"] > 0 ? (
@@ -829,27 +817,27 @@ function Applicants() {
           ) : allApplicants.length > 0 ? (
             <span className="inline-flex items-center gap-1.5 self-start sm:self-auto rounded-full bg-success-soft border border-success/20 px-3 py-1 text-xs font-semibold text-success">
               <HiCheck className="h-3.5 w-3.5 stroke-[2.5]" />
-              All caught up · {counts.Completed + counts.Hired} completed
+              No applications awaiting review - {counts.Confirmed} upcoming {counts.Confirmed === 1 ? "duty" : "duties"}
             </span>
           ) : null}
         </div>
 
         {/* Role Type Switcher: All Candidates vs Permanent Roles vs Locum Shifts */}
-        <div className="inline-flex items-center gap-1.5 p-1 rounded-2xl bg-muted/60 border border-border/60 shadow-2xs overflow-x-auto max-w-full no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid grid-cols-3 sm:inline-flex items-center gap-1.5 p-1 rounded-2xl bg-muted/60 border border-border/60 shadow-2xs w-full sm:w-auto overflow-x-auto max-w-full no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <button
             type="button"
             onClick={() => {
-              setRoleTypeTab("all");
-              setFilter("All");
+              changeType("all");
             }}
             className={cn(
-              "inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0",
+              "inline-flex items-center justify-center gap-2 h-10 px-2 sm:px-4 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0",
               roleTypeTab === "all"
                 ? "bg-card text-foreground shadow-xs border border-border/70"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            <span className="whitespace-nowrap">All Candidates</span>
+            <span className="sm:hidden">All</span><span className="hidden sm:inline whitespace-nowrap">All Applications</span>
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-[10px] font-bold leading-none shrink-0",
@@ -863,18 +851,17 @@ function Applicants() {
           <button
             type="button"
             onClick={() => {
-              setRoleTypeTab("jobs");
-              setFilter("All");
+              changeType("jobs");
             }}
             className={cn(
-              "inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0",
+              "inline-flex items-center justify-center gap-2 h-10 px-2 sm:px-4 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0",
               roleTypeTab === "jobs"
                 ? "bg-card text-foreground shadow-xs border border-border/70"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
             <HiOutlineBriefcase className="h-4 w-4 text-primary shrink-0" />
-            <span className="whitespace-nowrap">Permanent Roles</span>
+            <span className="sm:hidden">Jobs</span><span className="hidden sm:inline whitespace-nowrap">Permanent Jobs</span>
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-[10px] font-bold leading-none shrink-0",
@@ -888,18 +875,17 @@ function Applicants() {
           <button
             type="button"
             onClick={() => {
-              setRoleTypeTab("shifts");
-              setFilter("All");
+              changeType("shifts");
             }}
             className={cn(
-              "inline-flex items-center justify-center gap-2 h-10 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0",
+              "inline-flex items-center justify-center gap-2 h-10 px-2 sm:px-4 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0",
               roleTypeTab === "shifts"
                 ? "bg-card text-foreground shadow-xs border border-border/70"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
             <HiOutlineBolt className="h-4 w-4 text-primary shrink-0" />
-            <span className="whitespace-nowrap">Locum Shifts</span>
+            <span className="sm:hidden">Shifts</span><span className="hidden sm:inline whitespace-nowrap">Locum Shifts</span>
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-[10px] font-bold leading-none shrink-0",
@@ -910,19 +896,29 @@ function Applicants() {
             </span>
           </button>
         </div>
+          <Link to="/employer/postings" className="inline-flex min-h-10 shrink-0 items-center self-start text-xs font-semibold text-primary underline underline-offset-4 sm:self-center">Back to Jobs &amp; Shifts</Link>
+        </div>
 
+        {scope.openingId && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/30 p-3 text-sm">
+          <span>Showing applications for <strong>{allApplicants.find(a => a.openingId === scope.openingId)?.for || "the selected opening"}</strong></span>
+          <Link to="/employer/applicants" search={{}} className="text-primary font-semibold underline">Clear opening filter</Link>
+        </div>}
         {/* Clean Filter & Search Bar */}
         <div className="sticky top-[var(--header-offset,4rem)] z-30 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2.5 pb-2.5 mb-4 sm:mb-6 bg-background/95 backdrop-blur-md transition-all duration-300 ease-in-out">
-          <div className="surface rounded-2xl border border-border bg-card p-3 sm:p-3.5 shadow-xs flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="surface rounded-2xl border border-border bg-card p-3 sm:p-3.5 shadow-xs flex flex-col gap-3">
+            <select aria-label="Application stage" value={filter} onChange={event => setFilter(event.target.value)} className="sm:hidden w-full rounded-xl border bg-background p-2 text-sm">
+              {filterTabs.map(stage => <option key={stage} value={stage}>{stage} ({applicantsInRoleType.filter(a => matchesApplicationStage(a.status, stage)).length})</option>)}
+            </select>
             {/* Status Tabs */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="hidden sm:flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               {filterTabs.map((f) => {
                 const active = filter === f;
-                const count = counts[f as keyof typeof counts] || 0;
+                const count = applicantsInRoleType.filter(a => matchesApplicationStage(a.status, f)).length;
                 return (
                   <button
                     key={f}
                     type="button"
+                    aria-pressed={active}
                     onClick={() => setFilter(f)}
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-all cursor-pointer shrink-0",
@@ -953,7 +949,7 @@ function Applicants() {
                 <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder="Search candidates..."
+                  aria-label="Search applications" placeholder="Search name, profession or opening..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="h-9 w-full rounded-xl border border-input bg-card pl-9 pr-7 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all"
@@ -973,12 +969,12 @@ function Applicants() {
               <div className="w-full sm:w-48 shrink-0">
                 <Select value={selectedRole} onValueChange={setSelectedRole}>
                   <SelectTrigger className="h-9 w-full rounded-xl border-input bg-card text-xs font-medium">
-                    <SelectValue placeholder="All Roles" />
+                    <SelectValue placeholder="All professions" />
                   </SelectTrigger>
                   <SelectContent align="end">
                     {roles.map((r) => (
                       <SelectItem key={r} value={r} className="text-xs">
-                        {r === "All" ? "All Roles" : r}
+                        {r === "All" ? "All professions" : r}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -989,8 +985,15 @@ function Applicants() {
         </div>
 
         {/* Candidate Cards Grid */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {filteredList.map((a) => {
+        <div className="space-y-6">
+          {groupedApplications.map(group => <section key={group.id} aria-label={group.title} className="space-y-3">
+            <div className="rounded-xl bg-muted/40 border px-4 py-3">
+              <h2 className="text-base font-bold break-words">{group.title}</h2>
+              {group.schedule && <p className="mt-1 text-sm font-semibold">{group.schedule}</p>}
+              <p className="text-xs text-muted-foreground mt-1">{group.applicants.length} {group.applicants.length === 1 ? "application" : "applications"} in this view</p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {group.applicants.map((a) => {
             const isActionNeeded = ACTION_NEEDED_STATUSES.has(a.status);
             const isCompletedOrClosed = ["Completed", "Hired", "Rejected", "No-Show", "Slot Filled", "Position Filled"].includes(a.status);
             return (
@@ -1045,18 +1048,18 @@ function Applicants() {
                         </span>
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Applied for <span className="font-semibold text-foreground">{a.for}</span>
+                        {a.isShiftClaim ? <span className="font-semibold text-foreground">{a.dutySchedule || "Schedule not available"}</span> : "Permanent job application"}
                       </p>
                     </div>
                   </div>
 
                   {/* Status Badge + Applied Timestamp anchored top-right */}
                   <div className="shrink-0 flex flex-col items-end gap-1 pt-0.5">
-                    <StatusBadge status={a.status} />
+                    <StatusBadge status={applicationStageLabel(a.status)} />
                     {a.appliedDate && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
                         <HiOutlineClock className="h-3 w-3 shrink-0" />
-                        {a.appliedDate}
+                        Applied {a.appliedDate}
                       </span>
                     )}
                   </div>
@@ -1064,7 +1067,7 @@ function Applicants() {
 
                 {/* Sub-header Badges Strip (Role type, Match Score, Rating, Check-In PIN) */}
                 <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                  {a.isShiftClaim || a.for.toLowerCase().includes("shift") ? (
+                  {a.isShiftClaim || a.for.toLowerCase().includes("(locum shift)") ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft border border-primary/20 px-2.5 py-0.5 text-[10.5px] font-bold text-primary">
                       <HiOutlineBolt className="h-3 w-3 text-primary" />
                       Locum Shift
@@ -1073,31 +1076,6 @@ function Applicants() {
                     <span className="inline-flex items-center gap-1 rounded-full bg-muted border border-border px-2.5 py-0.5 text-[10.5px] font-bold text-foreground">
                       <HiOutlineBriefcase className="h-3 w-3 text-muted-foreground" />
                       Permanent Role
-                    </span>
-                  )}
-
-                  {a.match !== undefined && (
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-bold",
-                        (a.match ?? 0) >= 70
-                          ? "bg-success-soft border-success/25 text-success"
-                          : (a.match ?? 0) >= 40
-                            ? "bg-primary-soft/70 border-primary/20 text-primary"
-                            : "bg-muted border-border text-muted-foreground"
-                      )}
-                    >
-                      <BotMessageSquare
-                        className={cn(
-                          "h-3.5 w-3.5 shrink-0",
-                          (a.match ?? 0) >= 70
-                            ? "text-success"
-                            : (a.match ?? 0) >= 40
-                              ? "text-primary"
-                              : "text-muted-foreground"
-                        )}
-                      />
-                      <span>{(a.match ?? 0) >= 90 ? `Exact Match (${a.match}%)` : `${a.match}% Match`}</span>
                     </span>
                   )}
 
@@ -1113,17 +1091,8 @@ function Applicants() {
                     </span>
                   ) : null}
 
-                  {(a.isShiftClaim || a.for?.toLowerCase().includes("shift")) &&
-                    a.status === "Confirmed" &&
-                    a.checkInPin && (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full bg-primary-soft border border-primary/25 px-2.5 py-0.5 text-[11px] font-bold text-primary"
-                        title="Share this 4-digit Floor Check-In PIN with the clinician upon ward arrival"
-                      >
-                        <KeyRound className="h-3 w-3 shrink-0" />
-                        <span>Check-In PIN: {a.checkInPin}</span>
-                      </span>
-                    )}
+
+
                 </div>
 
                 {/* Key Skill Chips */}
@@ -1140,8 +1109,10 @@ function Applicants() {
                   </div>
                 )}
 
-                {/* Clinical Profile Summary (#11) */}
-                <div className="mt-3.5 rounded-2xl border border-border bg-muted/50 p-3 sm:p-3.5 space-y-2.5">
+                {["New", "Claimed", "Shortlisted"].includes(a.status) && (a.match ?? 0) < 70 && <p className="mt-3 rounded-xl border border-amber-300/50 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-foreground"><AlertTriangle className="inline h-3.5 w-3.5 mr-1" />Review profession and credentials before confirming this application.</p>}
+                <details className="mt-3.5 rounded-2xl border border-border bg-muted/30 p-3 sm:p-3.5">
+                  <summary className="cursor-pointer text-xs font-semibold">Candidate Insights <span className="ml-2 text-muted-foreground" title="Estimated profile match. This does not verify qualifications or replace your review.">{a.match}% estimated match</span></summary>
+                <div className="pt-3 space-y-2.5">
                   {/* Top Bar: Header & Action Pill */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
@@ -1149,7 +1120,7 @@ function Applicants() {
                         <BotMessageSquare className="h-3.5 w-3.5 text-primary" />
                       </div>
                       <span className="text-[10.5px] font-bold text-foreground tracking-wider uppercase whitespace-nowrap">
-                        Clinical Appraisal
+                        Candidate Insights
                       </span>
                       <span
                         className={cn(
@@ -1336,45 +1307,53 @@ function Applicants() {
                         </span>
                       </div>
 
-                      <span
-                        className={cn(
-                          "px-2.5 py-0.5 rounded-lg text-[10.5px] font-bold shrink-0 whitespace-nowrap border",
-                          (a.match ?? 0) >= 70
-                            ? "bg-success text-white border-success"
-                            : "bg-muted text-foreground border-border"
-                        )}
-                      >
-                        {a.match ?? 78}% Fit
-                      </span>
+
                     </div>
                   )}
                 </div>
+                </details>
               </div>
 
               {/* Action Buttons: View Resume + Stage Actions */}
-              <div className="mt-5 pt-3.5 border-t border-border/80 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="mt-5 pt-3.5 border-t border-border/80 flex flex-wrap items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Button
                     size="sm"
-                    variant="outline"
-                    onClick={() => setSelectedResume(a)}
-                    className="rounded-xl text-xs font-semibold gap-1.5 border-input hover:border-primary/40 text-foreground cursor-pointer"
+                    variant={isActionNeeded || isCompletedOrClosed ? "default" : "outline"}
+                    onClick={() => a.status === "Timesheet Submitted" ? openVerifyTimesheetModal(a) : setSelectedResume(a)}
+                    className="rounded-xl text-xs font-semibold border-input hover:border-primary/40 cursor-pointer justify-center text-center px-3.5"
                   >
-                    <HiOutlineDocumentText className="h-4 w-4 text-primary" /> View resume
+                    {a.status === "Timesheet Submitted" ? "Review Timesheet" : isCompletedOrClosed ? "View Summary" : isActionNeeded ? "Review Application" : "View Candidate"}
                   </Button>
 
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleOpenInterviewQuestions(a)}
-                    className="rounded-xl text-xs font-semibold gap-1.5 border-input hover:border-primary/40 text-foreground hover:text-primary cursor-pointer"
-                  >
-                    <BotMessageSquare className="h-3.5 w-3.5 text-primary" /> Interview Questions
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button size="sm" variant="outline" className="rounded-xl text-xs font-semibold cursor-pointer">
+                        More actions
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => handleOpenInterviewQuestions(a)}>Interview Questions</DropdownMenuItem>
+                      {a.isShiftClaim && a.status === "Confirmed" && <DropdownMenuItem disabled={pageAction.isPending} onSelect={() => void handleMarkNoShow(a)}>Mark No-Show</DropdownMenuItem>}
+                      {a.isShiftClaim && ["Confirmed", "Checked In", "Timesheet Submitted"].includes(a.status) && <DropdownMenuItem onSelect={() => { setDisputeModalApp(a); setDisputeReasonInput(""); }}>Raise Dispute</DropdownMenuItem>}
+                      {a.isShiftClaim && a.status === "Completed" && !a.hospitalRating && <DropdownMenuItem onSelect={() => openRateModal(a)}>Rate Clinician</DropdownMenuItem>}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  {a.isShiftClaim && (
+                    <ShiftAttendancePanel
+                      primary={["Confirmed", "Checked In"].includes(a.status)}
+                      claimId={a.id}
+                      pin={a.checkInPin}
+                      qrToken={a.checkInQrToken}
+                      recorded={a.attendanceRecorded}
+                    />
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {(a.isShiftClaim || a.for?.toLowerCase().includes("shift")) ? (
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <div hidden={isActionNeeded}>
+                  {(a.isShiftClaim || a.for?.toLowerCase().includes("(locum shift)")) ? (
                     <>
                       {a.status === "Timesheet Submitted" ? (
                         <div className="flex flex-wrap items-center gap-2">
@@ -1382,72 +1361,35 @@ function Applicants() {
                             <HiOutlineClock className="h-3.5 w-3.5 text-primary" />
                             Timesheet: {a.actualHours || a.scheduledHours || 8}h
                           </span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setDisputeModalApp(a);
-                              setDisputeReasonInput("");
-                            }}
-                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
-                          >
-                            Raise Dispute
-                          </Button>
+
                           <Button
                             size="sm"
                             onClick={() => openVerifyTimesheetModal(a)}
                             className="rounded-xl text-xs font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer"
                           >
-                            Verify Timesheet
+                            Review Timesheet
                           </Button>
                         </div>
                       ) : a.status === "Confirmed" ? (
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success px-1.5">
                             <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Confirmed
-                            {a.checkInPin ? ` · PIN ${a.checkInPin}` : ""}
+
                           </span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={pageAction.isPending} onClick={() => handleMarkNoShow(a)}
-                            className="rounded-xl text-xs font-semibold text-foreground border-input hover:border-primary/40 cursor-pointer"
-                          >
-                            Mark No-Show
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setDisputeModalApp(a);
-                              setDisputeReasonInput("");
-                            }}
-                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
-                          >
-                            Dispute
-                          </Button>
+
+
                         </div>
                       ) : a.status === "Checked In" ? (
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-primary px-1.5">
                             <KeyRound className="h-3.5 w-3.5" /> Checked In · On Floor Duty
                           </span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setDisputeModalApp(a);
-                              setDisputeReasonInput("");
-                            }}
-                            className="rounded-xl text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/5 cursor-pointer"
-                          >
-                            Raise Dispute
-                          </Button>
+
                         </div>
                       ) : a.status === "Completed" || a.status === "Hired" ? (
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-success px-1.5">
-                            <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Duty Verified &amp; Escrow Released
+                            <HiCheck className="h-3.5 w-3.5 stroke-[3]" /> Duty Completed
                           </span>
                           {a.hospitalRating ? (
                             <span
@@ -1457,15 +1399,7 @@ function Applicants() {
                               <Star className="h-3.5 w-3.5 fill-primary text-primary" />
                               Rated {a.hospitalRating}/5
                             </span>
-                          ) : (
-                            <Button
-                              size="sm"
-                              onClick={() => openRateModal(a)}
-                              className="rounded-xl text-xs font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-2xs cursor-pointer gap-1"
-                            >
-                              <Star className="h-3.5 w-3.5 fill-white" /> Rate Clinician
-                            </Button>
-                          )}
+                          ) : null}
                         </div>
                       ) : a.status === "Disputed" ? (
                         <span
@@ -1610,15 +1544,18 @@ function Applicants() {
                       )}
                     </>
                   )}
+                  </div>
                 </div>
               </div>
             </div>
             );
           })}
+            </div>
+          </section>)}
         </div>
 
         {/* Empty State with Lottie Animation */}
-        {filteredList.length === 0 && (
+        {!loading && !pageLoad.error && filteredList.length === 0 && (
           <div className="rounded-2xl border border-dashed border-border bg-card p-8 sm:p-12 text-center animate-in fade-in zoom-in-95 duration-300">
             <div className="mx-auto mb-3 w-44 sm:w-52 overflow-hidden flex items-center justify-center">
               <LottieAnimation
@@ -1631,14 +1568,14 @@ function Applicants() {
               {filter === "Needs Action" && counts.All > 0
                 ? "All caught up — no candidates waiting for review"
                 : roleTypeTab === "jobs"
-                  ? "No permanent role applicants found"
+                  ? "No permanent job applications found"
                   : roleTypeTab === "shifts"
                     ? "No locum shift candidates found"
                     : "No applicants found"}
             </h3>
             <p className="mt-1 text-xs sm:text-sm text-muted-foreground max-w-sm mx-auto">
               {filter === "Needs Action" && counts.All > 0
-                ? "New applications and shift claims will appear here automatically. Switch to All to browse completed shifts."
+                ? "New applications and timesheets appear here automatically. Choose another stage for upcoming duties, or History for closed applications."
                 : roleTypeTab === "jobs"
                   ? "Candidates applying for your permanent vacancies will appear here."
                   : roleTypeTab === "shifts"
@@ -1649,13 +1586,13 @@ function Applicants() {
               variant="outline"
               size="sm"
               onClick={() => {
-                setFilter("All");
+                setFilter(filter === "Needs Action" ? (roleTypeTab === "shifts" ? "Confirmed" : roleTypeTab === "jobs" ? "Interview" : "In Progress") : "Needs Action");
                 setSelectedRole("All");
                 setSearch("");
               }}
               className="mt-4 rounded-xl text-xs font-semibold shadow-2xs hover:bg-muted cursor-pointer"
             >
-              {filter === "Needs Action" && counts.All > 0 ? "View All & Completed" : "Reset filters"}
+              {filter === "Needs Action" && counts.All > 0 ? "View upcoming work" : "Reset filters"}
             </Button>
           </div>
         )}
@@ -1691,7 +1628,7 @@ function Applicants() {
                       <span className="rounded-full bg-primary-soft text-primary px-2.5 py-0.5 text-xs font-bold shrink-0">
                         {selectedResume.role}
                       </span>
-                      {selectedResume.isShiftClaim || selectedResume.for.toLowerCase().includes("shift") ? (
+                      {selectedResume.isShiftClaim || selectedResume.for.toLowerCase().includes("(locum shift)") ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 text-xs font-bold text-amber-700 dark:text-amber-300 shrink-0">
                           <HiOutlineBolt className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                           Locum Shift
@@ -1763,7 +1700,7 @@ function Applicants() {
                 </div>
 
                 <div className="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto">
-                  {(selectedResume.isShiftClaim || selectedResume.for?.toLowerCase().includes("shift")) ? (
+                  {(selectedResume.isShiftClaim || selectedResume.for?.toLowerCase().includes("(locum shift)")) ? (
                     (status[selectedResume.id] ?? selectedResume.status) === "Timesheet Submitted" ? (
                       <Button
                         size="sm"
@@ -1913,12 +1850,12 @@ function Applicants() {
                   <span className="grid h-8 w-8 place-items-center rounded-xl bg-rose-50 text-rose-600 dark:bg-rose-950/40">
                     <HiXMark className="h-5 w-5" />
                   </span>
-                  {rejectCandidate.isShiftClaim || rejectCandidate.for.toLowerCase().includes("shift")
+                  {rejectCandidate.isShiftClaim || rejectCandidate.for.toLowerCase().includes("(locum shift)")
                     ? "Decline Locum Shift Claim"
                     : "Decline Candidate"}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
-                  Record reason and clinical feedback for {rejectCandidate.isShiftClaim || rejectCandidate.for.toLowerCase().includes("shift") ? "declining the shift claim of" : "not selecting"} <strong>{rejectCandidate.name}</strong> for <strong>{rejectCandidate.for}</strong>.
+                  Record reason and clinical feedback for {rejectCandidate.isShiftClaim || rejectCandidate.for.toLowerCase().includes("(locum shift)") ? "declining the shift claim of" : "not selecting"} <strong>{rejectCandidate.name}</strong> for <strong>{rejectCandidate.for}</strong>.
                 </DialogDescription>
               </DialogHeader>
 
@@ -1977,7 +1914,7 @@ function Applicants() {
                   onClick={handleConfirmReject}
                   className="rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer"
                 >
-                  {submittingReject ? "Declining..." : rejectCandidate.isShiftClaim || rejectCandidate.for.toLowerCase().includes("shift") ? "Decline Claim & Reopen Slot" : "Confirm Decline"}
+                  {submittingReject ? "Declining..." : rejectCandidate.isShiftClaim || rejectCandidate.for.toLowerCase().includes("(locum shift)") ? "Decline Claim & Reopen Slot" : "Confirm Decline"}
                 </Button>
               </div>
             </div>

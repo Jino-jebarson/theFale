@@ -1,26 +1,12 @@
+import { amountInWords } from "./amountInWords";
 import { jsPDF } from "jspdf";
-import type { CandidatePayoutTransaction } from "./store";
-
-function amountInWords(num: number): string {
-  const a = [
-    "", "One ", "Two ", "Three ", "Four ", "Five ", "Six ", "Seven ", "Eight ", "Nine ",
-    "Ten ", "Eleven ", "Twelve ", "Thirteen ", "Fourteen ", "Fifteen ", "Sixteen ", "Seventeen ", "Eighteen ", "Nineteen ",
-  ];
-  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-
-  if (!num || num === 0) return "Rupees Zero Only";
-
-  function inWords(n: number): string {
-    if (n < 20) return a[n];
-    if (n < 100) return b[Math.floor(n / 10)] + " " + a[n % 10];
-    if (n < 1000) return a[Math.floor(n / 100)] + "Hundred " + inWords(n % 100);
-    if (n < 100000) return inWords(Math.floor(n / 1000)) + "Thousand " + inWords(n % 1000);
-    if (n < 10000000) return inWords(Math.floor(n / 100000)) + "Lakh " + inWords(n % 100000);
-    return inWords(Math.floor(n / 10000000)) + "Crore " + inWords(n % 10000000);
-  }
-
-  return `Rupees ${inWords(Math.floor(num)).trim()} Only`;
+export interface PayoutAdviceRecord {
+  id: string; shiftTitle: string; hospitalName: string; dept: string; shiftDate: string;
+  hours: number; rate: number; amount: number; payoutDate: string; status: string; payoutMethodUsed: string;
+  utr?: string | undefined; slipRef?: string | undefined;
+  grossAmount?: number | undefined; platformFee?: number | undefined; tdsAmount?: number | undefined;
 }
+export { amountInWords } from "./amountInWords";
 
 function createLogoCanvas(): string | null {
   if (typeof document === "undefined") return null;
@@ -78,10 +64,14 @@ function createLogoCanvas(): string | null {
 }
 
 export function buildPayoutAdviceDoc(
-  tx: CandidatePayoutTransaction,
+  tx: PayoutAdviceRecord,
   candidateName: string,
-  regNumber: string = "TNMC-84912 / KMC-99124"
+  regNumber: string = "Not recorded"
 ): jsPDF {
+  if (![tx.grossAmount, tx.platformFee, tx.tdsAmount, tx.amount].every(n => typeof n === "number" && Number.isFinite(n)))
+    throw new Error("Saved payout amounts are unavailable. Refresh the payout record before downloading.");
+  if (Math.abs(Math.round((tx.grossAmount! - tx.platformFee! - tx.tdsAmount! - tx.amount) * 100)) > 0)
+    throw new Error("The saved payout figures do not reconcile. Please contact support.");
   const doc = new jsPDF({
     orientation: "portrait",
     unit: "mm",
@@ -129,14 +119,14 @@ export function buildPayoutAdviceDoc(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
   doc.setTextColor(30, 41, 59);
-  doc.text("THE FALE HEALTHCARE PRIVATE LIMITED", margin, 34);
+  doc.text("THE FALE", margin, 34);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6.8);
   doc.setTextColor(100, 116, 139);
-  doc.text("Healthcare Staffing & 24-Hour Nodal Escrow Platform", margin, 38);
-  doc.text("CIN: U85100KA2025PTC189210 · GSTIN: 29AABCT1234F1Z5", margin, 41.8);
-  doc.text("Bengaluru, Karnataka - 560001 · support@thefale.com", margin, 45.5);
+  doc.text("Healthcare Staffing & Payout Records", margin, 38);
+  doc.text("Recorded payment advice - not a tax certificate", margin, 41.8);
+  doc.text("Issuer particulars available from billing · support@thefale.com", margin, 45.5);
 
   // Header Right Side: Document Reference Badge & Meta
   doc.setFillColor(255, 241, 230); // primary/10
@@ -151,14 +141,14 @@ export function buildPayoutAdviceDoc(
   doc.setFont("courier", "bold");
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text(tx.slipRef || "FALE-ADV-2026-8819", pageWidth - margin, 29.5, { align: "right" });
+  doc.text(tx.slipRef || tx.id, pageWidth - margin, 29.5, { align: "right" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
   doc.text(`Disbursal Date: ${tx.payoutDate}`, pageWidth - margin, 34.5, { align: "right" });
-  doc.text("Route: Cashfree Nodal Escrow", pageWidth - margin, 38.5, { align: "right" });
-  doc.text("Settlement SLA: 24-Hour Shift Guarantee", pageWidth - margin, 42.5, { align: "right" });
+  doc.text("Route: Recorded external bank payment", pageWidth - margin, 38.5, { align: "right" });
+  doc.text("Status follows the saved claim ledger", pageWidth - margin, 42.5, { align: "right" });
 
   // Divider Line
   doc.setDrawColor(226, 232, 240);
@@ -181,12 +171,12 @@ export function buildPayoutAdviceDoc(
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.2);
     doc.setTextColor(6, 95, 70); // emerald-800
-    doc.text("PAYMENT SETTLED & DISBURSED", margin + 8.5, 59.8);
+    doc.text("BANK DISBURSEMENT RECORDED", margin + 8.5, 59.8);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.8);
     doc.setTextColor(4, 120, 87); // emerald-700
-    doc.text("Timesheet verified by hospital supervisor • Remuneration transferred to candidate.", margin + 8.5, 64.6);
+    doc.text("External bank payment recorded by admin.", margin + 8.5, 64.6);
 
     if (tx.utr) {
       const utrW = 52;
@@ -212,12 +202,12 @@ export function buildPayoutAdviceDoc(
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.2);
     doc.setTextColor(146, 64, 14); // amber-800
-    doc.text("FUNDS HELD IN 24-HOUR ESCROW", margin + 8.5, 59.8);
+    doc.text("PENDING BANK DISBURSEMENT", margin + 8.5, 59.8);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.8);
     doc.setTextColor(180, 83, 9); // amber-700
-    doc.text("Shift verified by hospital • Scheduled for automatic bank transfer within 24 hours.", margin + 8.5, 64.6);
+    doc.text("Awaiting bank payment - this advice is not proof of payment.", margin + 8.5, 64.6);
 
     const slaW = 46;
     const slaX = pageWidth - margin - slaW - 2.5;
@@ -228,7 +218,7 @@ export function buildPayoutAdviceDoc(
     doc.setFont("helvetica", "bold");
     doc.setFontSize(6.8);
     doc.setTextColor(180, 83, 9);
-    doc.text("24h Settlement SLA", slaX + slaW / 2, 60.3, { align: "center", baseline: "middle" });
+    doc.text("Not proof of payment", slaX + slaW / 2, 60.3, { align: "center", baseline: "middle" });
   }
 
   // ==========================================
@@ -256,7 +246,7 @@ export function buildPayoutAdviceDoc(
   doc.setTextColor(71, 85, 105);
   doc.text(`Council Reg. #: ${regNumber}`, margin + 4, gridY + 16);
   doc.text(`Role: ${tx.shiftTitle.split(" - ")[0] || "Registered Clinician"}`, margin + 4, gridY + 20.5);
-  doc.text(`Credited To: ${tx.payoutMethodUsed}`, margin + 4, gridY + 25);
+  doc.text(`Saved destination: ${tx.payoutMethodUsed}`, margin + 4, gridY + 25);
 
   // Center Vertical Divider
   doc.setDrawColor(226, 232, 240);
@@ -278,7 +268,7 @@ export function buildPayoutAdviceDoc(
   doc.setTextColor(71, 85, 105);
   doc.text(`Department: ${tx.dept}`, 110, gridY + 16);
   doc.text(`Duty Slot: ${tx.shiftDate}`, 110, gridY + 20.5);
-  doc.text(`Verified Hours: ${tx.hours} hrs @ Rs. ${tx.rate.toLocaleString("en-IN")}/hr`, 110, gridY + 25);
+  doc.text(`Verified Hours: ${tx.hours} hrs @ Rs. ${tx.rate.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}/hr`, 110, gridY + 25);
 
   // ==========================================
   // 4. ITEMIZED REMUNERATION TABLE
@@ -303,7 +293,7 @@ export function buildPayoutAdviceDoc(
   doc.setTextColor(71, 85, 105);
   doc.text("Description", margin + 4, tableY + 4.8);
   doc.text("Hours / Units", 115, tableY + 4.8, { align: "center" });
-  doc.text("Agreed Rate", 152, tableY + 4.8, { align: "right" });
+  doc.text("Average Rate", 152, tableY + 4.8, { align: "right" });
   doc.text("Gross Total", pageWidth - margin - 4, tableY + 4.8, { align: "right" });
 
   // Row 1: Clinical Shift Base Remuneration
@@ -322,11 +312,11 @@ export function buildPayoutAdviceDoc(
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
   doc.text(`${tx.hours} hrs`, 115, r1Y + 1.5, { align: "center" });
-  doc.text(`Rs. ${tx.rate.toLocaleString("en-IN")}/hr`, 152, r1Y + 1.5, { align: "right" });
+  doc.text(`Rs. ${tx.rate.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}/hr`, 152, r1Y + 1.5, { align: "right" });
 
   doc.setFont("courier", "bold");
   doc.setTextColor(15, 23, 42);
-  doc.text(`Rs. ${(tx.hours * tx.rate).toLocaleString("en-IN")}`, pageWidth - margin - 4, r1Y + 1.5, { align: "right" });
+  doc.text(`Rs. ${tx.grossAmount!.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}`, pageWidth - margin - 4, r1Y + 1.5, { align: "right" });
 
   // Divider
   doc.setDrawColor(241, 245, 249);
@@ -337,11 +327,11 @@ export function buildPayoutAdviceDoc(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(71, 85, 105);
-  doc.text("Night Duty / ICU Differential Allowance", margin + 4, r2Y);
+  doc.text("Allowance breakdown", margin + 4, r2Y);
   doc.text("-", 115, r2Y, { align: "center" });
   doc.text("-", 152, r2Y, { align: "right" });
   doc.setFont("courier", "normal");
-  doc.text("Rs. 0.00", pageWidth - margin - 4, r2Y, { align: "right" });
+  doc.text("Included in gross", pageWidth - margin - 4, r2Y, { align: "right" });
 
   doc.line(margin + 2, r2Y + 3.5, pageWidth - margin - 2, r2Y + 3.5);
 
@@ -354,10 +344,10 @@ export function buildPayoutAdviceDoc(
   doc.text("-", 115, r3Y, { align: "center" });
   doc.setTextColor(16, 185, 129); // emerald
   doc.setFont("helvetica", "bold");
-  doc.text("100% Free", 152, r3Y, { align: "right" });
+  doc.text(tx.platformFee === 0 ? "No deduction" : "Recorded fee", 152, r3Y, { align: "right" });
   doc.setFont("courier", "normal");
   doc.setTextColor(71, 85, 105);
-  doc.text("Rs. 0.00", pageWidth - margin - 4, r3Y, { align: "right" });
+  doc.text(`Rs. ${tx.platformFee!.toLocaleString("en-IN", {minimumFractionDigits:2})}`, pageWidth - margin - 4, r3Y, { align: "right" });
 
   doc.line(margin + 2, r3Y + 3.5, pageWidth - margin - 2, r3Y + 3.5);
 
@@ -366,11 +356,11 @@ export function buildPayoutAdviceDoc(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(71, 85, 105);
-  doc.text("TDS Withholding (Section 194J - Professional Services)", margin + 4, r4Y);
+  doc.text("Recorded TDS Withholding", margin + 4, r4Y);
   doc.text("-", 115, r4Y, { align: "center" });
-  doc.text("Exempt / Threshold", 152, r4Y, { align: "right" });
+  doc.text("Saved withholding", 152, r4Y, { align: "right" });
   doc.setFont("courier", "normal");
-  doc.text("Rs. 0.00", pageWidth - margin - 4, r4Y, { align: "right" });
+  doc.text(`Rs. ${tx.tdsAmount!.toLocaleString("en-IN", {minimumFractionDigits:2})}`, pageWidth - margin - 4, r4Y, { align: "right" });
 
   // Total Summary Footer Row
   const totalY = tableY + tableHeight;
@@ -381,12 +371,12 @@ export function buildPayoutAdviceDoc(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.5);
   doc.setTextColor(15, 23, 42);
-  doc.text("Net Disbursed Professional Remuneration", margin + 4, totalY + 8.5);
+  doc.text(isDisbursed ? "Net Disbursed Professional Remuneration" : "Net Payable - Not Paid", margin + 4, totalY + 8.5);
 
   doc.setFont("courier", "bold");
   doc.setFontSize(11);
   doc.setTextColor(234, 88, 12);
-  doc.text(`Rs. ${tx.amount.toLocaleString("en-IN")}`, pageWidth - margin - 4, totalY + 8.8, { align: "right" });
+  doc.text(`Rs. ${tx.amount.toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2})}`, pageWidth - margin - 4, totalY + 8.8, { align: "right" });
 
   // Amount in Words Bar
   const wordsY = totalY + 15;
@@ -410,10 +400,10 @@ export function buildPayoutAdviceDoc(
   const colW = contentWidth / 4;
 
   const telemetry = [
-    { label: "Payout Partner", val: "Cashfree AutoPayouts" },
-    { label: "Escrow Nodal A/C", val: "FALE-NODAL-01" },
-    { label: "Disbursal Mode", val: "Instant 24x7 IMPS / UPI" },
-    { label: "Timesheet Sign-off", val: "Verified & Approved" },
+    {label:"Payment record",val:isDisbursed ? "Bank payment recorded" : "Awaiting payment"},
+    {label:"Destination",val:"Saved claim destination"},
+    {label:"Bank reference",val:tx.utr || "Not recorded"},
+    {label:"Timesheet sign-off",val:"Hospital approved"},
   ];
 
   telemetry.forEach((t, i) => {
@@ -448,7 +438,7 @@ export function buildPayoutAdviceDoc(
   doc.setFontSize(6.0);
   doc.setTextColor(100, 116, 139);
   doc.text(
-    "This is an electronically generated Remuneration Advice Slip issued in accordance with RBI Nodal Escrow Regulations and Section 194J of the Income Tax Act, 1961. It constitutes valid legal proof of locum engagement, professional compensation, and tax deduction status.",
+    "Amounts reflect the saved claim ledger. This advice is not a tax certificate and does not confirm tax deposit or filing. Pending advice does not confirm payment.",
     margin,
     noteY + 4,
     { maxWidth: 120 }
@@ -464,36 +454,31 @@ export function buildPayoutAdviceDoc(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
   doc.setTextColor(234, 88, 12);
-  doc.text("FALE ESCROW SECURE", sealX + sealWidth / 2, footerY + 7.2, { align: "center" });
+  doc.text("FALE PAYOUT RECORD", sealX + sealWidth / 2, footerY + 7.2, { align: "center" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6);
   doc.setTextColor(100, 116, 139);
-  doc.text("Cryptographically Verified", sealX + sealWidth / 2, footerY + 11.2, { align: "center" });
+  doc.text("System-generated record", sealX + sealWidth / 2, footerY + 11.2, { align: "center" });
 
   return doc;
 }
 
 export function generatePayoutAdvicePdf(
-  tx: CandidatePayoutTransaction,
+  tx: PayoutAdviceRecord,
   candidateName: string,
-  regNumber: string = "TNMC-84912 / KMC-99124"
+  regNumber: string = "Not recorded"
 ) {
   const doc = buildPayoutAdviceDoc(tx, candidateName, regNumber);
   const filename = `FALE-Payout-Advice-${tx.slipRef || tx.id}.pdf`;
   doc.save(filename);
 }
 
-export function printPayoutAdvicePdf(
-  tx: CandidatePayoutTransaction,
-  candidateName: string,
-  regNumber: string = "TNMC-84912 / KMC-99124"
-) {
-  const doc = buildPayoutAdviceDoc(tx, candidateName, regNumber);
-  doc.autoPrint();
-  const blobUrl = doc.output("bloburl");
-  const printWindow = window.open(blobUrl, "_blank");
-  if (!printWindow) {
-    window.print();
-  }
+export function printPayoutAdvicePdf(tx: PayoutAdviceRecord, candidateName: string, regNumber = "Not recorded") {
+  const doc = buildPayoutAdviceDoc(tx, candidateName, regNumber); doc.autoPrint();
+  const url = URL.createObjectURL(doc.output("blob"));
+  const opened = window.open("about:blank", "_blank");
+  if (!opened) { URL.revokeObjectURL(url); throw new Error("Allow popups to print the payout advice, or download the PDF."); }
+  opened.opener = null; opened.location.href = url;
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }

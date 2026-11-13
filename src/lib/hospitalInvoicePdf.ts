@@ -1,6 +1,12 @@
+import { walletDocumentTitle } from "./walletDocuments";
+import { amountInWords } from "./amountInWords";
 import { jsPDF } from "jspdf";
+import { recordedBaseAmount } from "./shiftCharges";
 
 export interface HospitalInvoicePdfData {
+  transactionType?: string | undefined;
+  disbursedAt?: string | undefined;
+  canonicalDocument?: boolean | undefined;
   invoiceId: string;
   date: string;
   period: string;
@@ -12,6 +18,7 @@ export interface HospitalInvoicePdfData {
   description: string;
   subtitle?: string;
   subtotal: number;
+  platformFee?: number | undefined;
   gst: number;
   total: number;
   status: string;
@@ -28,28 +35,6 @@ function resolveDocType(data: HospitalInvoicePdfData): "TAX_INVOICE" | "CREDIT_N
     return "ESCROW_RECEIPT";
   }
   return "TAX_INVOICE";
-}
-
-function amountInWords(num: number): string {
-  const a = [
-    "", "One ", "Two ", "Three ", "Four ", "Five ", "Six ", "Seven ", "Eight ", "Nine ",
-    "Ten ", "Eleven ", "Twelve ", "Thirteen ", "Fourteen ", "Fifteen ", "Sixteen ", "Seventeen ", "Eighteen ", "Nineteen ",
-  ];
-  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-
-  const safeNum = Math.abs(Math.floor(Number(num) || 0));
-  if (safeNum === 0) return "Rupees Zero Only";
-
-  function inWords(n: number): string {
-    if (n < 20) return a[n];
-    if (n < 100) return b[Math.floor(n / 10)] + " " + a[n % 10];
-    if (n < 1000) return a[Math.floor(n / 100)] + "Hundred " + inWords(n % 100);
-    if (n < 100000) return inWords(Math.floor(n / 1000)) + "Thousand " + inWords(n % 1000);
-    if (n < 10000000) return inWords(Math.floor(n / 100000)) + "Lakh " + inWords(n % 100000);
-    return inWords(Math.floor(n / 10000000)) + "Crore " + inWords(n % 10000000);
-  }
-
-  return `Rupees ${inWords(safeNum).trim()} Only`;
 }
 
 function createLogoCanvas(): string | null {
@@ -153,21 +138,9 @@ export function buildHospitalInvoiceDoc(data: HospitalInvoicePdfData): jsPDF {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
   doc.setTextColor(15, 23, 42);
-  const headerTitle = isCreditNote
-    ? "ESCROW CREDIT NOTE"
-    : isEscrowReceipt
-      ? "ESCROW FUNDING RECEIPT"
-      : "OFFICIAL TAX INVOICE";
-  const headerSubtitle = isCreditNote
-    ? "Timesheet / Dispute Escrow Refund Receipt"
-    : isEscrowReceipt
-      ? "Nodal Escrow Wallet Top-Up Confirmation"
-      : "GST Compliance & Escrow Settlement Receipt";
-  const headerStatus = isCreditNote
-    ? "STATUS: REFUNDED TO WALLET"
-    : isEscrowReceipt
-      ? "STATUS: CREDITED TO ESCROW"
-      : "STATUS: PAID & SETTLED";
+  const headerTitle = "SETTLEMENT STATEMENT";
+  const headerSubtitle = walletDocumentTitle(data.transactionType, data.status);
+  const headerStatus = "STATUS: " + data.status.toUpperCase();
 
   doc.text(headerTitle, pageWidth - margin, 21, { align: "right" });
 
@@ -212,8 +185,8 @@ export function buildHospitalInvoiceDoc(data: HospitalInvoicePdfData): jsPDF {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
-  doc.text(`GSTIN: ${data.gstin || "29AABCT1332L1Z4"}`, margin + 4, metaY + 17.5);
-  doc.text(data.facilityAddress || "Accredited Clinical Campus & Hospital Network, India", margin + 4, metaY + 22.5, { maxWidth: colW - 8 });
+  doc.text(`GSTIN: ${data.gstin || "Not recorded"}`, margin + 4, metaY + 17.5);
+  doc.text(data.facilityAddress || "Address not recorded", margin + 4, metaY + 22.5, { maxWidth: colW - 8 });
   doc.text(`Settlement Entity: Institutional Primary Current Account`, margin + 4, metaY + 31.5);
 
   // Box 2: Invoice & Escrow Particulars
@@ -244,18 +217,18 @@ export function buildHospitalInvoiceDoc(data: HospitalInvoicePdfData): jsPDF {
   doc.text("Reference / UTR:", col2X + 4, metaY + 22.5);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(15, 23, 42);
-  doc.text(data.refNumber || "CRD-FALE-TXN", col2X + colW - 4, metaY + 22.5, { align: "right" });
+  doc.text(data.utr || data.refNumber || "Not recorded", col2X + colW - 4, metaY + 22.5, { align: "right" });
 
   doc.setFont("helvetica", "normal");
   doc.setTextColor(71, 85, 105);
-  doc.text("Nodal Escrow Virtual A/C:", col2X + 4, metaY + 28);
+  doc.text("Saved destination:", col2X + 4, metaY + 28);
   doc.setFont("helvetica", "bold");
-  doc.text(data.nodalAccount || "FALEHOSP99418290", col2X + colW - 4, metaY + 28, { align: "right" });
+  doc.text(data.nodalAccount || "Not recorded", col2X + colW - 4, metaY + 28, { align: "right" });
 
   doc.setFont("helvetica", "normal");
   doc.setTextColor(71, 85, 105);
-  doc.text("Billing Period:", col2X + 4, metaY + 33.5);
-  doc.text(data.period, col2X + colW - 4, metaY + 33.5, { align: "right" });
+  doc.text(data.disbursedAt ? "Bank disbursed:" : "Billing Period:", col2X + 4, metaY + 33.5);
+  doc.text(data.disbursedAt ? new Date(data.disbursedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"}) : data.period, col2X + colW - 4, metaY + 33.5, { align: "right" });
 
   // Table Header
   const tableTop = 84;
@@ -266,9 +239,9 @@ export function buildHospitalInvoiceDoc(data: HospitalInvoicePdfData): jsPDF {
   doc.setFontSize(7.5);
   doc.setTextColor(71, 85, 105);
   doc.text("SERVICE / ITEM DESCRIPTION", margin + 4, tableTop + 5.5);
-  doc.text("HSN / SAC", margin + 95, tableTop + 5.5);
-  doc.text("TAXABLE AMT", margin + 128, tableTop + 5.5, { align: "right" });
-  doc.text("GST (18%)", margin + 154, tableTop + 5.5, { align: "right" });
+  doc.text("FEE (EX GST)", margin + 95, tableTop + 5.5);
+  doc.text("SUBTOTAL", margin + 128, tableTop + 5.5, { align: "right" });
+  doc.text("GST ON FEE", margin + 154, tableTop + 5.5, { align: "right" });
   doc.text("TOTAL (INR)", pageWidth - margin - 4, tableTop + 5.5, { align: "right" });
 
   // Table Row 1
@@ -286,7 +259,7 @@ export function buildHospitalInvoiceDoc(data: HospitalInvoicePdfData): jsPDF {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(71, 85, 105);
-  doc.text("998311", margin + 95, rowY);
+  doc.text(data.platformFee == null ? "Not recorded" : data.platformFee.toLocaleString("en-IN", {minimumFractionDigits:2}), margin + 95, rowY);
 
   const subtotalNum = Number(data.subtotal) || 0;
   const gstNum = Number(data.gst) || 0;
@@ -314,50 +287,45 @@ export function buildHospitalInvoiceDoc(data: HospitalInvoicePdfData): jsPDF {
   const totalsY = dividerY + 6;
 
   doc.setFillColor(248, 250, 252);
-  doc.roundedRect(totalsX, totalsY, totalsW, 38, 2, 2, "FD");
+  doc.roundedRect(totalsX, totalsY, totalsW, 50, 2, 2, "FD");
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
 
-  // Subtotal
-  doc.text(isCreditNote ? "Refund Subtotal:" : isEscrowReceipt ? "Escrow Deposit:" : "Taxable Subtotal:", totalsX + 4, totalsY + 6);
+  const baseAmount = recordedBaseAmount(subtotalNum, data.platformFee);
+  const baseLabel = data.transactionType === "disbursement" || data.transactionType === "escrow_hold" ? "Base shift amount:" : "Base amount:";
+  doc.text(baseLabel, totalsX + 4, totalsY + 6);
   doc.setTextColor(15, 23, 42);
-  doc.text(subtotalFormatted, totalsX + totalsW - 4, totalsY + 6, { align: "right" });
+  doc.text(baseAmount == null ? "Not recorded" : "INR " + baseAmount.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}), totalsX + totalsW - 4, totalsY + 6, { align: "right" });
 
-  // CGST (9%)
-  const cgst = data.gst / 2;
-  const cgstFormatted = "INR " + cgst.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  doc.setTextColor(100, 116, 139);
-  doc.text(isCreditNote || isEscrowReceipt ? "CGST (N/A):" : "CGST @ 9%:", totalsX + 4, totalsY + 12);
-  doc.setTextColor(15, 23, 42);
-  doc.text(cgstFormatted, totalsX + totalsW - 4, totalsY + 12, { align: "right" });
-
-  // SGST (9%)
-  doc.setTextColor(100, 116, 139);
-  doc.text(isCreditNote || isEscrowReceipt ? "SGST (N/A):" : "SGST @ 9%:", totalsX + 4, totalsY + 18);
-  doc.setTextColor(15, 23, 42);
-  doc.text(cgstFormatted, totalsX + totalsW - 4, totalsY + 18, { align: "right" });
-
+  doc.setTextColor(100,116,139);
+  doc.text("Platform fee:", totalsX+4,totalsY+12);
+  doc.setTextColor(15,23,42);
+  doc.text(data.platformFee == null ? "Not recorded" : "INR " + data.platformFee.toLocaleString("en-IN",{minimumFractionDigits:2}),totalsX+totalsW-4,totalsY+12,{align:"right"});
+  doc.setTextColor(100,116,139);doc.text("Subtotal before GST:",totalsX+4,totalsY+18);
+  doc.setTextColor(15,23,42);doc.text(subtotalFormatted,totalsX+totalsW-4,totalsY+18,{align:"right"});
+  doc.setTextColor(100,116,139);doc.text("GST on platform fee:",totalsX+4,totalsY+24);
+  doc.setTextColor(15,23,42);doc.text(gstFormatted,totalsX+totalsW-4,totalsY+24,{align:"right"});
   // Total Line Divider
   doc.setDrawColor(226, 232, 240);
-  doc.line(totalsX + 3, totalsY + 22, totalsX + totalsW - 3, totalsY + 22);
+  doc.line(totalsX + 3, totalsY + 28, totalsX + totalsW - 3, totalsY + 28);
 
   // Total Net
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text(isCreditNote ? "Total Refunded:" : isEscrowReceipt ? "Total Credited:" : "Total Invoice Amount:", totalsX + 4, totalsY + 29);
+  doc.text("Total recorded:", totalsX + 4, totalsY + 35);
   doc.setTextColor(234, 88, 12);
-  doc.text(totalFormatted, totalsX + totalsW - 4, totalsY + 29, { align: "right" });
+  doc.text(totalFormatted, totalsX + totalsW - 4, totalsY + 35, { align: "right" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6.5);
   doc.setTextColor(16, 185, 129);
   doc.text(
-    isCreditNote ? "Credited back to Facility Wallet" : isEscrowReceipt ? "Held in RBI Compliant Nodal Escrow" : "Settled via RBI Compliant Escrow",
+    data.status !== "Completed" && data.status !== "Refunded" ? "Not proof of payment or receipt of funds" : "Recorded wallet transaction",
     totalsX + totalsW - 4,
-    totalsY + 34,
+    totalsY + 42,
     { align: "right" }
   );
 
@@ -375,17 +343,8 @@ export function buildHospitalInvoiceDoc(data: HospitalInvoicePdfData): jsPDF {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
-  if (isCreditNote) {
-    doc.text("Issued for unused shift hours or dispute mediation refund.", margin, totalsY + 24);
-    doc.text("No Input Tax Credit (ITC) claimed on reversed escrow funds.", margin, totalsY + 29);
-  } else if (isEscrowReceipt) {
-    doc.text("Escrow funds held in RBI-compliant nodal custody.", margin, totalsY + 24);
-    doc.text("Tax invoice is issued upon shift settlement or credit purchase.", margin, totalsY + 29);
-  } else {
-    doc.text("Input Tax Credit (ITC) Eligible under Section 16 of CGST Act.", margin, totalsY + 24);
-    doc.text("Reverse Charge Mechanism (RCM) Not Applicable.", margin, totalsY + 29);
-  }
-
+  doc.text("GST is recorded on the platform fee only.",margin,totalsY+24);
+  doc.text(data.canonicalDocument ? "Saved transaction record" : "Historical record: reconciliation may not be recorded.",margin,totalsY+29,{maxWidth:totalsX-margin-8});
   // Statutory Footer & Cryptographic Seal
   const footerY = 250;
   doc.setDrawColor(226, 232, 240);
@@ -395,7 +354,7 @@ export function buildHospitalInvoiceDoc(data: HospitalInvoicePdfData): jsPDF {
   doc.setFontSize(6.5);
   doc.setTextColor(100, 116, 139);
   doc.text(
-    "This is a system-generated electronic tax invoice issued under Rule 48 of the CGST Rules, 2017. Issued by The Fale Healthcare Private Limited (GSTIN: 29AABCT1332L1Z4, PAN: AABCT1332L). Valid without a physical signature under the Information Technology Act, 2000.",
+    "System-generated settlement statement showing recorded wallet amounts. This is not a statutory tax invoice. Formal invoicing requires verified issuer and supply details.",
     margin,
     footerY + 5,
     { maxWidth: 125 }
@@ -411,29 +370,25 @@ export function buildHospitalInvoiceDoc(data: HospitalInvoicePdfData): jsPDF {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
   doc.setTextColor(234, 88, 12);
-  doc.text("FALE ESCROW SECURE", sealX + sealWidth / 2, footerY + 8.5, { align: "center" });
+  doc.text("FALE WALLET RECORD", sealX + sealWidth / 2, footerY + 8.5, { align: "center" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6);
   doc.setTextColor(100, 116, 139);
-  doc.text("Cryptographically Verified", sealX + sealWidth / 2, footerY + 13, { align: "center" });
+  doc.text("System-generated record", sealX + sealWidth / 2, footerY + 13, { align: "center" });
 
   return doc;
 }
 
 export function generateHospitalInvoicePdf(data: HospitalInvoicePdfData) {
   const doc = buildHospitalInvoiceDoc(data);
-  const filename = `FALE-Tax-Invoice-${data.invoiceId}.pdf`;
+  const filename = `FALE-Wallet-Statement-${data.invoiceId}.pdf`;
   doc.save(filename);
 }
 
 export function printHospitalInvoicePdf(data: HospitalInvoicePdfData) {
-  const doc = buildHospitalInvoiceDoc(data);
-  doc.autoPrint();
-  const blobUrl = doc.output("bloburl");
-  const printWindow = window.open(blobUrl, "_blank");
-  if (!printWindow) {
-    window.print();
-  }
+  const doc = buildHospitalInvoiceDoc(data); doc.autoPrint();
+  const url = URL.createObjectURL(doc.output("blob")); const tab = window.open("about:blank", "_blank");
+  if (!tab) { URL.revokeObjectURL(url); throw new Error("Allow pop-ups to print this statement."); }
+  tab.opener = null; tab.location.href = url; setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-

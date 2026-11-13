@@ -68,10 +68,10 @@ const candidateNav = [
 
 const facilityNav = [
   { to: "/employer", label: "Dashboard", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: 0 },
-  { to: "/employer/postings", label: "Active Roles", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
+  { to: "/employer/postings", label: "Jobs & Shifts", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
   { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
   { to: "/employer/post", label: "Post Opening", icon: HiOutlinePlusCircle, active: HiPlusCircle, badge: 0 },
-  { to: "/employer/applicants", label: "Shortlisted", icon: HiOutlineUserGroup, active: HiUserGroup, badge: 0 },
+  { to: "/employer/applicants", label: "Applications", icon: HiOutlineUserGroup, active: HiUserGroup, badge: 0 },
   { to: "/employer/wallet", label: "Wallet & Escrow", shortLabel: "Wallet", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
   { to: "/huddle", label: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: 0 },
 ] as const;
@@ -595,10 +595,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const dynamicFacilityNav = [
     { to: "/employer", label: "Dashboard", icon: HiOutlineSquares2X2, active: HiSquares2X2, badge: 0 },
-    { to: "/employer/postings", label: "Active Roles", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
+    { to: "/employer/postings", label: "Jobs & Shifts", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
     { to: "/employer/candidates", label: "Candidates", icon: HiOutlineMagnifyingGlass, active: HiMagnifyingGlass, badge: 0 },
     { to: "/employer/post", label: "Post Opening", icon: HiOutlinePlusCircle, active: HiPlusCircle, badge: 0 },
-    { to: "/employer/applicants", label: "Shortlisted", icon: HiOutlineUserGroup, active: HiUserGroup, badge: facilityShortlistedBadge },
+    { to: "/employer/applicants", label: "Applications", icon: HiOutlineUserGroup, active: HiUserGroup, badge: facilityShortlistedBadge },
     { to: "/employer/wallet", label: "Wallet & Escrow", shortLabel: "Wallet", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
     { to: "/huddle", label: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: 0 },
   ] as const;

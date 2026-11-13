@@ -1,3 +1,5 @@
+import { ShiftCheckIn } from "@/components/fale/ShiftCheckIn";
+import { ShiftRequirements, ShiftArrivalInstructions } from "@/components/fale/ShiftDetailsFields";
 import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { usePageLoad } from "@/hooks/use-page-load";
 import { RequestError } from "@/components/fale/RequestError";
@@ -550,29 +552,6 @@ function Shifts() {
     setCheckInPinInput("");
   };
 
-  const handleConfirmPinCheckIn = async () => { await pageAction.run(async () => {
-    if (!pinModalData) return;
-    const pin = checkInPinInput.trim();
-    if (!/^\d{4}$/.test(pin)) {
-      toast.error("Enter the 4-digit Floor Check-In PIN provided by hospital HR/ward supervisor");
-      return;
-    }
-    setSubmittingPin(true);
-    try {
-      const updated = await checkInShift(pinModalData.claimId, pin);
-      setMyClaims((prev) => prev.map((c) => (c.id === pinModalData.claimId ? updated : c)));
-      toast.success("Checked in on hospital floor!", {
-        description: `Duty started for "${pinModalData.shiftTitle}". Payout escrow is locked.`,
-      });
-      setPinModalData(null);
-      setCheckInPinInput("");
-    } catch (err: any) {
-      toast.error("Check-in failed", { description: err?.message });
-    } finally {
-      setSubmittingPin(false);
-    }
-  }); };
-
   const handleSubmitDispute = async () => {
     if (!disputeModalData) return;
     if (!disputeReasonInput.trim()) {
@@ -720,7 +699,7 @@ function Shifts() {
             {confirmedCount}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {confirmedCount > 0 ? "Clock-in opens 15m prior to start time" : "Awaiting facility confirmation"}
+            {confirmedCount > 0 ? "Clock-in opens 2 hours before the scheduled start" : "Awaiting facility confirmation"}
           </p>
         </div>
 
@@ -744,7 +723,7 @@ function Shifts() {
           </div>
             <p className="mt-1.5 text-xs text-primary font-bold flex items-start gap-1.5 leading-snug">
               <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-              <span>Escrow payout released within 24h of duty sign-off</span>
+              <span>Payout is queued after hospital timesheet approval</span>
             </p>
         </div>
       </div>
@@ -949,7 +928,7 @@ function Shifts() {
                         !activeClaim
                       ) || ["BOOKED", "FILLED"].includes((sh.status || "").toUpperCase());
                       const applied = Boolean(activeClaim) || ((Boolean(sh.hasClaimed) || claimedShiftIds.includes(sh.id)) && !isClaimCancelled && !isClaimRejected && !isSlotFilled && !isClaimNoShow);
-                      const feePercent = activeClaim?.platformFeePercent ?? (validFeeClaimCount === 0 ? 0 : 5);
+                      const feePercent = activeClaim?.platformFeePercent ?? 0;
                       const rateNumber = typeof sh.rate === "number"
                         ? sh.rate
                         : (sh.rateNumber || parseFloat(String(sh.rate).replace(/[^0-9.]/g, "")) || 0);
@@ -1017,7 +996,7 @@ function Shifts() {
                                     : "bg-muted/70 text-muted-foreground border-border"
                                 )}
                               >
-                                {feePercent === 0 ? "0% Fee (1st Shift Waiver)" : `${feePercent}% Platform Fee`}
+                                {feePercent === 0 ? "No clinician platform fee" : `${feePercent}% Platform Fee`}
                               </span>
                             </div>
 
@@ -1061,6 +1040,8 @@ function Shifts() {
                             )}
                           </div>
 
+                          <ShiftRequirements details={sh.details} />
+                          <ShiftArrivalInstructions details={activeClaim?.arrivalInstructions} />
                           {/* Bottom Earnings & Action Dock */}
                           <div className="mt-5 flex flex-col gap-3 rounded-2xl bg-muted/30 p-3.5 sm:p-4 border border-border/60">
                             <div className="flex flex-wrap items-center justify-between gap-2.5">
@@ -1190,7 +1171,7 @@ function Shifts() {
                                             className="rounded-xl px-3 h-8 font-bold text-xs bg-primary hover:bg-primary-hover text-white shadow-2xs cursor-pointer gap-1.5"
                                           >
                                             <KeyRound className="h-3.5 w-3.5" />
-                                            Check In (PIN)
+                                            Check In (PIN / QR)
                                           </Button>
                                         </div>
                                         <Button
@@ -1374,7 +1355,7 @@ function Shifts() {
                         <HiOutlineSparkles className="h-4 w-4 text-primary shrink-0" />
                       </h2>
                       <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed max-w-xl">
-                        Hospital payments are pre-funded into FALE Escrow before shift publish. Once you complete your shift hours and clinical sign-off, funds are disbursed directly to your bank account or UPI within 24 hours.
+                        Hospital payments are pre-funded into FALE Escrow before shift publish. Once you complete your shift hours and clinical sign-off, payout is queued for disbursement and its transfer status appears in Earnings.
                       </p>
                     </div>
                   </div>
@@ -1514,7 +1495,7 @@ function Shifts() {
                 </Dialog>
               )}
 
-              {/* ================= 4-DIGIT FLOOR PIN CHECK-IN MODAL ================= */}
+              {/* ================= GPS, SELFIE AND SIX-DIGIT PIN / QR CHECK-IN ================= */}
               {pinModalData && (
                 <Dialog open={true} onOpenChange={(open) => { if (!open) setPinModalData(null); }}>
                   <DialogContent className="flex flex-col gap-4 sm:max-w-md rounded-2xl border border-border bg-card p-5 sm:p-6">
@@ -1534,44 +1515,11 @@ function Shifts() {
                       </div>
                     </DialogHeader>
 
-                    <div className="w-full space-y-3">
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Ask the hospital duty supervisor or HR desk for the 4-digit check-in PIN to verify on-floor arrival.
-                      </p>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="shift-checkin-pin" className="text-xs font-bold text-foreground">
-                          4-Digit Hospital PIN
-                        </Label>
-                        <Input
-                          id="shift-checkin-pin"
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={4}
-                          value={checkInPinInput}
-                          onChange={(e) => setCheckInPinInput(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                          placeholder="e.g. 4829"
-                          className="w-full h-12 text-center text-xl font-black tracking-[0.4em] rounded-xl"
-                        />
-                      </div>
-                    </div>
-
-                    <DialogFooter className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5 sm:space-x-0 pt-1">
-                      <Button
-                        variant="outline"
-                        disabled={submittingPin}
-                        onClick={() => setPinModalData(null)}
-                        className="h-9 px-4 rounded-xl font-bold text-xs w-full sm:w-auto"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        disabled={pageAction.isPending || (submittingPin || checkInPinInput.trim().length !== 4)}
-                        onClick={handleConfirmPinCheckIn}
-                        className="h-9 px-4 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer w-full sm:w-auto"
-                      >
-                        {submittingPin ? "Verifying PIN..." : "Verify & Clock In"}
-                      </Button>
-                    </DialogFooter>
+                    <ShiftCheckIn claimId={pinModalData.claimId} onCancel={() => setPinModalData(null)} onSubmit={async evidence => {
+                      const updated = await checkInShift(pinModalData.claimId, evidence);
+                      setMyClaims(previous => previous.map(claim => claim.id === updated.id ? updated : claim));
+                      setPinModalData(null); toast.success("Checked in - attendance evidence recorded");
+                    }} />
                   </DialogContent>
                 </Dialog>
               )}

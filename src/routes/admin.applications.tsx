@@ -1,3 +1,4 @@
+import { FinanceReviewPanel } from "@/components/fale/FinanceReviewPanel";
 import { AllyReviewNote } from "@/components/fale/AllyReviewNote";
 import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { usePageLoad } from "@/hooks/use-page-load";
@@ -139,7 +140,7 @@ function ApplicationsAdmin() {
   const pageLoad = usePageLoad();
   const pageAction = useConfirmedAction();
   const s = useApp();
-  const [filter, setFilter] = useState<"all" | "pending_admin" | "shortlisted" | "rejected" | "payouts" | "disputes">("pending_admin");
+  const [filter, setFilter] = useState<"all" | "pending_admin" | "shortlisted" | "rejected" | "payouts" | "disputes" | "finance">("pending_admin");
   const [apiPayouts, setApiPayouts] = useState<ShiftClaimDto[]>([]);
   const [apiDisputes, setApiDisputes] = useState<ShiftClaimDto[]>([]);
   const [selectedDispute, setSelectedDispute] = useState<ShiftClaimDto | null>(null);
@@ -630,9 +631,10 @@ function ApplicationsAdmin() {
     if (!selectedPayout) return;
     setDisbursing(true);
     try {
-      const finalUtr = utrInput.trim() || `CFUTR${Date.now()}`;
+      const finalUtr = utrInput.trim();
+      if (!/^[A-Za-z0-9]{8,30}$/.test(finalUtr)) { toast.error("Enter the actual 8-30 character bank payment reference."); return; }
       await disbursePayout(selectedPayout.id, finalUtr);
-      toast.success("Shift Escrow Payout Disbursed!", {
+      toast.success("Bank payment recorded", {
         description: `₹${paiseToRupees(selectedPayout.netAmountPaise || 0)} credited to ${selectedPayout.candidateName || "Clinician"} (UTR: ${finalUtr}).`,
       });
       setDisburseModalOpen(false);
@@ -821,6 +823,7 @@ function ApplicationsAdmin() {
             {[
               { id: "pending_admin" as const, label: "Pending Screening", count: pendingCount },
               { id: "shortlisted" as const, label: "Shortlisted", count: shortlistedCount },
+              { id: "finance" as const, label: "Finance Review", count: undefined },
               { id: "payouts" as const, label: "Escrow Payout Releases", count: apiPayouts.length },
               { id: "disputes" as const, label: "Disputed Shifts", count: apiDisputes.length },
               { id: "rejected" as const, label: "Ineligible", count: rejectedCount },
@@ -872,12 +875,12 @@ function ApplicationsAdmin() {
         </div>
 
         {/* Desktop Data Table */}
-        {filter === "payouts" ? (
+        {filter === "finance" ? <FinanceReviewPanel /> : filter === "payouts" ? (
           <div className="p-4 sm:p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-border gap-2">
               <div>
                 <h4 className="text-sm font-extrabold text-foreground">Completed Shifts Awaiting Escrow Payout Release</h4>
-                <p className="text-xs text-muted-foreground">Disburse verified clinician payouts with official banking UTR reference numbers.</p>
+                <p className="text-xs text-muted-foreground">Record a completed external bank transfer using its real reference. The payout destination must have verified ownership.</p>
               </div>
               <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full border border-primary/20 w-fit">
                 {apiPayouts.length} Pending Disbursement
@@ -928,7 +931,7 @@ function ApplicationsAdmin() {
                           size="sm"
                           onClick={() => {
                             setSelectedPayout(p);
-                            setUtrInput(`CFUTR${Date.now().toString().slice(-8)}`);
+                            setUtrInput("");
                             setDisburseModalOpen(true);
                           }}
                           className="h-9 px-4 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-white shadow-none gap-1.5 cursor-pointer"
@@ -1831,7 +1834,7 @@ function ApplicationsAdmin() {
               <span>Confirm Escrow Payout Release</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Release held hospital escrow funds to clinician verified banking / UPI destination.
+              Record a bank transfer already completed outside this portal. Enter its actual reference after checking the paid amount and destination.
             </DialogDescription>
           </DialogHeader>
 
@@ -1859,7 +1862,7 @@ function ApplicationsAdmin() {
                 <input
                   value={utrInput}
                   onChange={(e) => setUtrInput(e.target.value)}
-                  placeholder="Enter 12-digit UTR number"
+                  placeholder="Actual bank reference (8-30 letters or digits)"
                   className="w-full h-9 rounded-xl border border-border bg-background px-3 font-mono text-xs outline-none focus:border-primary"
                 />
               </div>
@@ -1877,12 +1880,14 @@ function ApplicationsAdmin() {
             </Button>
             <Button
               size="sm"
-              disabled={disbursing}
+              disabled={disbursing || !/^[A-Za-z0-9]{8,30}$/.test(utrInput.trim())}
+              isLoading={disbursing}
+              loadingText="Recording payment..."
               onClick={handleConfirmDisburse}
               className="rounded-xl text-xs font-bold bg-primary hover:bg-primary-hover text-white gap-1.5"
             >
               <HiCheck className="h-3.5 w-3.5" />
-              <span>{disbursing ? "Disbursing..." : "Confirm & Disburse Payment"}</span>
+              <span>Record completed bank payment</span>
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -152,6 +152,8 @@ export interface Applicant {
   scheduledHours?: number;
   hourlyRate?: number;
   checkInPin?: string;
+  checkInQrToken?: string;
+  attendanceRecorded?: boolean;
   disputeReason?: string;
   hospitalRating?: number;
   hospitalReview?: string;

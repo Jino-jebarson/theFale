@@ -1,8 +1,10 @@
+import { walletDocumentTitle, includeStatement } from "@/lib/walletDocuments";
+import { recordedBaseAmount, recordedBillingAmounts } from "@/lib/shiftCharges";
 import { copyText } from "@/lib/copyText";
 import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { usePageLoad } from "@/hooks/use-page-load";
 import { RequestError } from "@/components/fale/RequestError";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   HiOutlineBanknotes,
@@ -73,7 +75,7 @@ export const Route = createFileRoute("/employer/wallet")({
       { title: "Wallet & Escrow — The Fale Hospital Portal" },
       {
         name: "description",
-        content: "Hospital escrow reserve balance, shift disbursements, sourcing credits, linked bank account, and GST tax invoices.",
+        content: "Hospital escrow reserve balance, shift disbursements, sourcing credits, linked bank account, and GST billing statements.",
       },
     ],
   }),
@@ -98,6 +100,7 @@ function EmployerWalletPage() {
 
   // Modals
   const [topUpModalOpen, setTopUpModalOpen] = useState(false);
+  const [depositReference, setDepositReference] = useState("");
   const [buyCreditsModalOpen, setBuyCreditsModalOpen] = useState(false);
   const [bankModalOpen, setBankModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<HospitalInvoicePdfData | null>(null);
@@ -123,14 +126,14 @@ function EmployerWalletPage() {
         setApiBank(bank);
         if (prof) {
           setApiProfile(prof);
-          if (prof.hospitalName && store.profile?.org !== prof.hospitalName) {
+          if (prof.hospitalName && store.profile?.["org"] !== prof.hospitalName) {
             setState((s) => ({
               ...s,
               profile: {
                 ...s.profile,
                 org: prof.hospitalName,
                 hospitalName: prof.hospitalName,
-                city: prof.city || s.profile.city,
+                city: prof.city || String(s.profile["city"] || ""),
               },
             }));
           }
@@ -158,150 +161,61 @@ function EmployerWalletPage() {
   const [selectedPkg, setSelectedPkg] = useState(creditPackages[1]);
 
   // Bank Form State
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const orgName = apiProfile?.hospitalName || String(store.profile["org"] || store.profile["hospitalName"] || (store as any)?.facilityProfile?.hospitalName || "Healthcare Facility");
-  const defaultHolder = store.hospitalBankAccount?.accountHolderName && !store.hospitalBankAccount.accountHolderName.includes("Apollo")
-    ? store.hospitalBankAccount.accountHolderName
-    : `${orgName} Private Limited`;
+  const defaultHolder = orgName;
 
-  const currentBank: HospitalBankAccount | null = apiBank && (apiBank.accountNumber || apiBank.accountNumberMasked || apiBank.accountNumberLast4) ? {
+  const currentBank: HospitalBankAccount | null = apiBank && (apiBank.accountNumberMasked || apiBank.accountNumberLast4) ? {
     bankName: apiBank.bankName || "Current Bank",
-    accountNumber: apiBank.accountNumber || apiBank.accountNumberMasked || (apiBank.accountNumberLast4 ? `•••• •••• ${apiBank.accountNumberLast4}` : ""),
+    accountNumber: apiBank.accountNumberMasked || (apiBank.accountNumberLast4 ? `•••• •••• ${apiBank.accountNumberLast4}` : ""),
     ifsc: apiBank.ifsc || apiBank.ifscCode || "",
     accountType: (apiBank.accountType as any) || "Current",
     accountHolderName: apiBank.accountHolderName || defaultHolder,
-    branch: apiBank.branch || "Central Corporate Branch",
+    branch: apiBank.branch || "Not recorded",
     status: (apiBank.status || apiBank.verificationStatus || "Under Review") as HospitalBankAccount["status"],
     documentName: "",
     documentDate: apiBank.verifiedAt ? new Date(apiBank.verifiedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Active",
     verifiedAt: apiBank.verifiedAt || "",
-  } : store.hospitalBankAccount || null;
+  } : null;
 
   const hasLinkedBank = Boolean(currentBank && currentBank.accountNumber && currentBank.accountNumber.length > 3);
 
   const [formHolderName, setFormHolderName] = useState(defaultHolder);
-  const [formBankName, setFormBankName] = useState(currentBank?.bankName || "HDFC Bank Ltd");
-  const [formAccNumber, setFormAccNumber] = useState(currentBank?.accountNumber || "");
-  const [formConfirmAcc, setFormConfirmAcc] = useState(currentBank?.accountNumber || "");
+  const [formBankName, setFormBankName] = useState(currentBank?.bankName || "");
+  const [formAccNumber, setFormAccNumber] = useState("");
+  const [formConfirmAcc, setFormConfirmAcc] = useState("");
   const [formIfsc, setFormIfsc] = useState(currentBank?.ifsc || "");
   const [formBranch, setFormBranch] = useState(currentBank?.branch || "");
   const [formAccType, setFormAccType] = useState<"Current" | "Escrow Sub-Account">(currentBank?.accountType || "Current");
-  const [formChequeFile, setFormChequeFile] = useState<string>(currentBank?.documentName || "Cancelled_Cheque_Hospital.pdf");
-  const [isVerifyingPenny, setIsVerifyingPenny] = useState(false);
+  const [isSavingBank, setIsSavingBank] = useState(false);
 
   const escrowBalance = (apiWallet ? paiseToRupees(apiWallet.availableBalancePaise) : 0);
   const lockedEscrow = (apiWallet ? paiseToRupees(apiWallet.lockedEscrowBalancePaise) : 0);
   const candidateCredits = (apiWallet ? apiWallet.candidateCredits : 0);
   const totalDisbursed = (apiWallet ? paiseToRupees(apiWallet.totalDisbursedPaise || 0) : 0);
 
-  const lockedShiftCount = (lockedEscrow > 0 ? Math.max(1, Math.round(lockedEscrow / 5000)) : 0);
-
-  const hospitalCode = (store.profile?.hospitalCode || store.profile?.id || "99418290")
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(0, 8)
-    .toUpperCase();
+  const lockedShiftCount = new Set(apiTransactions.filter(t => t.type === "disbursement" && t.status === "Processing" && t.claimId).map(t => t.claimId)).size;
 
   const virtualAccount = apiWallet?.facilityId
-    ? `FALEHOSP${apiWallet.facilityId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase()}`
-    : `FALEHOSP${hospitalCode}`;
+    ? `WALLET-${apiWallet.facilityId}`
+    : "Not available";
 
-  const resolveInvoiceBreakdown = (total: number, rawType?: string, invId?: string) => {
-    const t = (rawType || "").toLowerCase();
-    const idUpper = (invId || "").toUpperCase();
-    if (t.includes("refund") || idUpper.startsWith("CRN-")) {
-      return {
-        docType: "CREDIT_NOTE" as const,
-        subtotal: total,
-        gst: 0,
-        statusLabel: "Refunded",
-      };
-    }
-    if (t.includes("topup") || t.includes("escrow")) {
-      return {
-        docType: "ESCROW_RECEIPT" as const,
-        subtotal: total,
-        gst: 0,
-        statusLabel: "Escrow Credited",
-      };
-    }
-    const subtotal = Math.round((total / 1.18) * 100) / 100;
-    const gst = Math.round((total - subtotal) * 100) / 100;
-    return {
-      docType: "TAX_INVOICE" as const,
-      subtotal,
-      gst,
-      statusLabel: t.includes("disburs") ? "Settled" : "Paid",
-    };
+  const resolveInvoiceBreakdown = (total: number, rawType?: string, invId?: string, feePaise?: number | null, gstPaise?: number | null) => {
+    const type = (rawType || "").toLowerCase();
+    const docType = type.includes("refund") || invId?.startsWith("CRN-") ? "CREDIT_NOTE" as const
+      : type.includes("topup") || type.includes("escrow") ? "ESCROW_RECEIPT" as const : "TAX_INVOICE" as const;
+    return { ...recordedBillingAmounts(total, feePaise, gstPaise), docType, statusLabel: "Recorded" };
   };
-
-  const dynamicInvoices = useMemo(() => {
-    // 1. If backend API transactions exist, derive real tax invoices & credit notes
-    if (apiTransactions.length > 0) {
-      const billable = apiTransactions.filter(
-        (tx) => tx.invoiceId || tx.type?.toLowerCase().includes("credit") || tx.type?.toLowerCase().includes("topup") || tx.type?.toLowerCase().includes("refund") || tx.type?.toLowerCase().includes("disburs")
-      );
-      if (billable.length > 0) {
-        return billable.map((tx) => {
-          const totalPaise = Math.abs(tx.amountPaise || 0);
-          const total = totalPaise > 0 ? paiseToRupees(totalPaise) : 1999;
-          const rawType = (tx.type || "").toLowerCase();
-          const defaultPrefix = rawType.includes("refund") ? "CRN" : "INV";
-          const invId = tx.invoiceId || `${defaultPrefix}-2026-${tx.id.replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
-          const { docType, subtotal, gst, statusLabel } = resolveInvoiceBreakdown(total, tx.type, invId);
-          const dateObj = tx.createdAt ? new Date(tx.createdAt) : new Date();
-          const month = dateObj.toLocaleDateString("en-IN", { month: "short", year: "numeric" });
-          const dateStr = dateObj.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-          return {
-            id: invId,
-            month,
-            desc: tx.title || "Clinical Staffing & Escrow Settlement",
-            subtotal,
-            gst,
-            total,
-            date: dateStr,
-            status: tx.status?.toUpperCase() === "PENDING" ? "Processing" : statusLabel,
-            docType,
-            txType: tx.type,
-            refNumber: tx.refNumber || tx.utr || "CRD-FALE-TXN",
-            utr: tx.utr,
-            subtitle: tx.subtitle || "Institutional clinical staffing, sourcing credits & escrow custody services",
-          };
-        });
-      }
-    }
-
-    // 2. If store transactions exist in client state
-    if (store.walletTransactions && store.walletTransactions.length > 0) {
-      const billable = store.walletTransactions.filter(
-        (tx) => tx.invoiceId || tx.type === "credit_purchase" || tx.type === "topup" || tx.type === "refund" || tx.type === "disbursement"
-      );
-      if (billable.length > 0) {
-        return billable.map((tx) => {
-          const total = Math.max(1, Math.abs(tx.amount || 0));
-          const defaultPrefix = tx.type === "refund" ? "CRN" : "INV";
-          const invId = tx.invoiceId || `${defaultPrefix}-2026-${(tx.id || "").replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
-          const { docType, subtotal, gst, statusLabel } = resolveInvoiceBreakdown(total, tx.type, invId);
-          return {
-            id: invId,
-            month: new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" }),
-            desc: tx.title || "Clinical Staffing & Escrow Settlement",
-            subtotal,
-            gst,
-            total,
-            date: tx.date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-            status: tx.status === "Pending" ? "Processing" : statusLabel,
-            docType,
-            txType: tx.type,
-            refNumber: tx.refNumber || tx.utr || "CRD-FALE-TXN",
-            utr: tx.utr,
-            subtitle: tx.subtitle || "Institutional clinical staffing, sourcing credits & escrow custody services",
-          };
-        });
-      }
-    }
-
-    return [];
-  }, [isApiEnabled, apiTransactions, store.walletTransactions]);
+  const dynamicInvoices = useMemo(() => apiTransactions.filter(tx => includeStatement(tx) && (tx.invoiceId || ["topup", "refund", "disbursement", "escrow_hold", "credit_purchase"].includes(tx.type || "")))
+    .map(tx => {
+      const total = Math.abs(paiseToRupees(tx.amountPaise));
+      const id = tx.invoiceId || tx.refNumber || tx.id;
+      const breakdown = resolveInvoiceBreakdown(total, tx.type, id, tx.platformFeePaise, tx.platformFeeGstPaise);
+      const date = tx.createdAt ? new Date(tx.createdAt) : null;
+      return { id, month: date ? date.toLocaleDateString("en-IN", { month: "short", year: "numeric" }) : "Date unavailable",
+        date: date ? date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Date unavailable",
+        desc: tx.title || "Wallet transaction", ...breakdown, platformFee: tx.platformFeePaise == null ? undefined : breakdown.platformFee, total, status: tx.status || "Recorded", txType: tx.type,
+        refNumber: tx.refNumber || tx.id, utr: tx.utr, subtitle: tx.subtitle || "", canonicalDocument: tx.canonicalDocument, destinationSnapshot: tx.destinationSnapshot, bankDisbursedAt: tx.bankDisbursedAt };
+    }), [apiTransactions]);
 
   const filteredInvoices = useMemo(() => {
     if (!searchQuery.trim()) return dynamicInvoices;
@@ -325,7 +239,7 @@ function EmployerWalletPage() {
         else if (rawType.includes("refund")) mappedType = "refund" as any;
         else if (rawType.includes("disburs")) mappedType = "disbursement";
 
-        const invId = tx.invoiceId || `INV-2026-${tx.id.replace(/[^0-9a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "8483"}`;
+        const invId = tx.invoiceId || tx.refNumber || tx.id;
 
         return {
           id: tx.id,
@@ -339,10 +253,12 @@ function EmployerWalletPage() {
               month: "short",
               year: "numeric",
             })
-            : "Recent",
-          status: (tx.status?.toUpperCase() === "COMPLETED" ? "Completed" : tx.status?.toUpperCase() === "PENDING" ? "Processing" : "Completed") as any,
-          refNumber: tx.refNumber || tx.utr || "TXN-FALE-99214",
+            : "Not recorded",
+          status: (tx.status || "Unknown") as any,
+          refNumber: tx.refNumber || tx.id,
           invoiceId: invId,
+          platformFeePaise: tx.platformFeePaise, platformFeeGstPaise: tx.platformFeeGstPaise,
+          canonicalDocument: tx.canonicalDocument, destinationSnapshot: tx.destinationSnapshot, bankDisbursedAt: tx.bankDisbursedAt,
           utr: tx.utr,
         };
       });
@@ -385,36 +301,40 @@ function EmployerWalletPage() {
       : "amount" in invOrTx
         ? invOrTx.amount
         : invOrTx.total;
-    const total = Math.max(1, Math.abs(Number(rawAmount) || 0));
-    const rawType = invOrTx.txType || invOrTx.type || "";
+    const total = Math.abs(Number(rawAmount) || 0);
+    const rawType = invOrTx.transactionType || invOrTx.txType || invOrTx.type || "";
     const defaultPrefix = String(rawType).toLowerCase().includes("refund") ? "CRN" : "INV";
-    const invId = invOrTx.invoiceId || invOrTx.id || `${defaultPrefix}-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    const invId = invOrTx.invoiceId || invOrTx.refNumber || invOrTx.id;
     const hasPrecomputed = invOrTx.docType && invOrTx.subtotal !== undefined && invOrTx.gst !== undefined;
     const breakdown = hasPrecomputed
       ? {
-          docType: invOrTx.docType as HospitalInvoicePdfData["docType"],
+          docType: invOrTx.docType as NonNullable<HospitalInvoicePdfData["docType"]>,
           subtotal: Number(invOrTx.subtotal),
           gst: Number(invOrTx.gst),
-          statusLabel: invOrTx.status || "Paid",
+          statusLabel: invOrTx.status || "Recorded",
         }
-      : resolveInvoiceBreakdown(total, rawType, invId);
+      : resolveInvoiceBreakdown(total, rawType, invId, invOrTx.platformFeePaise, invOrTx.platformFeeGstPaise);
 
     return {
       invoiceId: invId,
-      date: invOrTx.date || new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-      period: invOrTx.month || invOrTx.period || new Date().toLocaleDateString("en-IN", { month: "short", year: "numeric" }),
+      date: invOrTx.date || "Not recorded",
+      period: invOrTx.month || invOrTx.period || "Not recorded",
       hospitalName: String(store.profile["org"] || ("Healthcare Facility")),
-      facilityAddress: "Accredited Hospital Network & Clinical Campus, India",
-      gstin: "29AABCT1332L1Z4",
-      refNumber: invOrTx.refNumber || invOrTx.utr || "CRD-FALE-TXN",
+      facilityAddress: apiProfile?.addressLine || apiProfile?.city || "Address not provided",
+      gstin: apiProfile?.gst || "Not provided",
+      refNumber: invOrTx.refNumber || invOrTx.utr || "Not recorded",
       utr: invOrTx.utr,
       description: invOrTx.title || invOrTx.desc || invOrTx.description || "Clinical Staffing & Escrow Settlement",
       subtitle: invOrTx.subtitle || "Institutional clinical staffing, sourcing credits & escrow custody services",
+      platformFee: invOrTx.platformFee ?? (invOrTx.platformFeePaise == null ? undefined : invOrTx.platformFeePaise / 100),
       subtotal: breakdown.subtotal,
       gst: breakdown.gst,
       total,
-      status: (invOrTx.status || breakdown.statusLabel).toUpperCase() === "PENDING" ? "Processing" : breakdown.statusLabel,
-      nodalAccount: virtualAccount,
+      status: invOrTx.status || breakdown.statusLabel,
+      nodalAccount: invOrTx.destinationSnapshot || "Historical destination not recorded",
+      transactionType: String(rawType),
+      disbursedAt: invOrTx.bankDisbursedAt || invOrTx.disbursedAt,
+      canonicalDocument: !!invOrTx.canonicalDocument,
       docType: breakdown.docType,
     };
   };
@@ -428,11 +348,7 @@ function EmployerWalletPage() {
     try {
       const invData = prepareInvoiceData(invOrTx);
       generateHospitalInvoicePdf(invData);
-      const label = invData.docType === "CREDIT_NOTE"
-        ? "Credit note"
-        : invData.docType === "ESCROW_RECEIPT"
-          ? "Escrow receipt"
-          : "Tax invoice";
+      const label = walletDocumentTitle(invData.transactionType, invData.status);
       toast.success(`${label} ${invData.invoiceId} downloaded successfully!`);
     } catch (err: any) {
       toast.error("Failed to download document", {
@@ -445,7 +361,7 @@ function EmployerWalletPage() {
   const handleOpenTopUp = () => {
     if (!hasLinkedBank) {
       toast.error("Hospital Settlement Bank Account Required", {
-        description: "Please link and verify your hospital bank account before topping up escrow. This is required for RBI escrow custody and automated refunds.",
+        description: "Link your institutional bank account and complete ownership review before submitting a deposit reference.",
       });
       setBankModalOpen(true);
       return;
@@ -456,7 +372,7 @@ function EmployerWalletPage() {
   const handleOpenBuyCredits = () => {
     if (!hasLinkedBank) {
       toast.error("Hospital Settlement Bank Account Required", {
-        description: "Please link and verify your hospital bank account before purchasing sourcing credits. This is required for tax invoices and payment reconciliation.",
+        description: "Please link and verify your hospital bank account before purchasing sourcing credits. This is required for billing statements and payment reconciliation.",
       });
       setBankModalOpen(true);
       return;
@@ -485,12 +401,14 @@ function EmployerWalletPage() {
 
     {
       try {
-        const utrGen = `UTR${Date.now().toString().slice(-10)}`;
+        const utrGen = depositReference.trim().toUpperCase();
+        if (!/^[A-Za-z0-9]{8,30}$/.test(utrGen)) { toast.error("Enter the actual bank transfer reference (8-30 letters or digits)."); setIsProcessing(false); return; }
         await topUpWallet(rupeesToPaise(finalAmount), utrGen, paymentMethod.toUpperCase());
         setIsProcessing(false);
         setTopUpModalOpen(false);
         setCustomTopUpInput("");
-        toast.success(`₹${finalAmount.toLocaleString("en-IN")} deposited to Escrow Reserve`);
+        toast.success("Deposit reference submitted", { description: "Your available balance stays unchanged until an admin verifies receipt of funds." });
+        setDepositReference("");
         fetchWalletData();
       } catch (err: any) {
       pageLoad.fail(err);
@@ -521,7 +439,7 @@ function EmployerWalletPage() {
 
     {
       try {
-        await buyCandidateCredits(selectedPkg.id, selectedPkg.credits, rupeesToPaise(priceNum));
+        await buyCandidateCredits(selectedPkg?.id, selectedPkg.credits, rupeesToPaise(priceNum));
         setIsProcessing(false);
         setBuyCreditsModalOpen(false);
         toast.success(`${selectedPkg.credits} Sourcing Credits activated`);
@@ -539,18 +457,9 @@ function EmployerWalletPage() {
 
   }); };
 
-    // Cheque Upload Trigger
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setFormChequeFile(file.name);
-      toast.success(`Attached cancelled cheque: ${file.name}`);
-    }
-  };
-
-  // Penny Drop Verification
+  // Saving details starts manual ownership review.
   const handleSaveBankAccount = async (e: React.FormEvent) => { e.preventDefault(); await pageAction.run(async () => {
-    if (!formAccNumber || formAccNumber.length < 8) {
+    if (!/^\d{9,18}$/.test(formAccNumber)) {
       toast.error("Please enter a valid bank account number");
       return;
     }
@@ -558,16 +467,13 @@ function EmployerWalletPage() {
       toast.error("Account numbers do not match");
       return;
     }
-    if (!formIfsc || formIfsc.length < 11) {
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(formIfsc.toUpperCase())) {
       toast.error("Please enter a valid 11-character IFSC code");
       return;
     }
-    if (!formChequeFile) {
-      toast.error("Please upload a cancelled cheque or bank mandate document");
-      return;
-    }
 
-    setIsVerifyingPenny(true);
+
+    setIsSavingBank(true);
 
     {
       try {
@@ -576,11 +482,11 @@ function EmployerWalletPage() {
           bankName: formBankName,
           accountNumber: formAccNumber,
           ifsc: formIfsc.toUpperCase(),
-          branch: formBranch || "Central Corporate Branch",
+          branch: formBranch || "",
           accountType: formAccType,
         });
         setApiBank(savedDto);
-        setIsVerifyingPenny(false);
+        setIsSavingBank(false);
         setBankModalOpen(false);
         toast.success("Hospital bank account details saved", {
           description: `Pending ownership verification: ${formHolderName} (${formBankName})`,
@@ -589,7 +495,7 @@ function EmployerWalletPage() {
         window.dispatchEvent(new CustomEvent("fale:wallet-updated"));
       } catch (err: any) {
       pageLoad.fail(err);
-        setIsVerifyingPenny(false);
+        setIsSavingBank(false);
         toast.error("Bank account verification failed", {
           description: err?.message || "Please check details and IFSC code.",
         });
@@ -612,7 +518,7 @@ function EmployerWalletPage() {
               Wallet &amp; Escrow
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Escrow custody, shift payouts, sourcing credits, linked bank account, and tax invoices for {orgName}
+              Escrow custody, shift payouts, sourcing credits, linked bank account, and billing statements for {orgName}
             </p>
           </div>
 
@@ -669,7 +575,7 @@ function EmployerWalletPage() {
                 <HiOutlineLockClosed className="h-5 w-5" />
               </span>
               <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
-                {lockedShiftCount} {lockedShiftCount === 1 ? "shift" : "shifts"}
+                {lockedShiftCount} awaiting bank payment
               </span>
             </div>
             <div>
@@ -680,7 +586,7 @@ function EmployerWalletPage() {
                 ₹{lockedEscrow.toLocaleString("en-IN")}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Disbursing &lt; 24h
+                Includes reserved duties and pending settlements
               </p>
             </div>
           </div>
@@ -719,7 +625,7 @@ function EmployerWalletPage() {
                 <HiOutlineArrowTrendingUp className="h-5 w-5" />
               </span>
               <span className="rounded-md bg-primary-soft px-2 py-0.5 text-[10px] font-black text-primary uppercase tracking-wider shrink-0 border border-primary/20">
-                100% on-time
+                Recorded total
               </span>
             </div>
             <div>
@@ -754,7 +660,7 @@ function EmployerWalletPage() {
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                    Link your hospital's official current account to enable automated shift payouts, security deposits, and escrow refunds.
+                    Link your hospital's official current account to enable reviewed institutional payments and wallet refunds.
                   </p>
                 </div>
               </div>
@@ -892,7 +798,7 @@ function EmployerWalletPage() {
                   { id: "all", label: "All Transactions" },
                   { id: "shifts", label: "Shift Escrow & Payouts" },
                   { id: "credits", label: "Sourcing Credits" },
-                  { id: "invoices", label: "Tax Invoices" },
+                  { id: "invoices", label: "Statements" },
                   { id: "bank", label: "Linked Hospital Bank" },
                 ].map((tab) => (
                   <button
@@ -927,7 +833,7 @@ function EmployerWalletPage() {
                 <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder={activeTab === "invoices" ? "Filter tax invoices..." : "Filter transactions..."}
+                  placeholder={activeTab === "invoices" ? "Filter billing statements..." : "Filter transactions..."}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="h-8.5 w-full rounded-xl border border-input bg-card pl-8 pr-3 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring/20"
@@ -1005,7 +911,7 @@ function EmployerWalletPage() {
                                   type="button"
                                   onClick={() => handleOpenInvoice(tx)}
                                   className="text-primary hover:underline font-mono text-[11px] font-bold cursor-pointer"
-                                  title="View tax invoice preview"
+                                  title="View wallet statement"
                                 >
                                   {tx.invoiceId}
                                 </button>
@@ -1031,11 +937,11 @@ function EmployerWalletPage() {
             </div>
           )}
 
-          {/* TAB 2: Clean Dynamic Tax Invoices Table */}
+          {/* TAB 2: Clean Dynamic Statements Table */}
           {activeTab === "invoices" && (
             <div>
               <div className="px-4 py-3 bg-muted/20 border-b border-border/60 flex items-center justify-between text-xs text-muted-foreground">
-                <span>GSTIN: <strong className="font-mono text-foreground">29AABCT1332L1Z4</strong> (18% GST with full ITC eligibility)</span>
+                <span>GST is shown from recorded transaction amounts. Shift GST applies to the platform fee only.</span>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1053,8 +959,8 @@ function EmployerWalletPage() {
                       <th className="py-3 px-4">Invoice #</th>
                       <th className="py-3 px-4">Period</th>
                       <th className="py-3 px-4">Service Description</th>
-                      <th className="py-3 px-4 text-right">Taxable</th>
-                      <th className="py-3 px-4 text-right">GST (18%)</th>
+                      <th className="py-3 px-4 text-right">Amount before GST</th>
+                      <th className="py-3 px-4 text-right">GST recorded</th>
                       <th className="py-3 px-4 text-right">Total</th>
                       <th className="py-3 px-4 text-right">Action</th>
                     </tr>
@@ -1063,7 +969,7 @@ function EmployerWalletPage() {
                     {filteredInvoices.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="py-12 text-center text-muted-foreground font-medium">
-                          No tax invoices match your filter.
+                          No billing statements match your filter.
                         </td>
                       </tr>
                     ) : (
@@ -1074,7 +980,7 @@ function EmployerWalletPage() {
                               type="button"
                               onClick={() => handleOpenInvoice(inv)}
                               className="font-mono font-bold text-primary hover:underline cursor-pointer"
-                              title="Click to preview official tax invoice"
+                              title="Click to preview settlement statement"
                             >
                               {inv.id}
                             </button>
@@ -1112,7 +1018,7 @@ function EmployerWalletPage() {
                                 type="button"
                                 onClick={() => handleDownloadInvoice(inv)}
                                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-white text-xs font-bold cursor-pointer transition-all shadow-2xs"
-                                title="Download PDF Tax Invoice"
+                                title="Download wallet statement"
                               >
                                 <HiOutlineDocumentArrowDown className="h-3.5 w-3.5" />
                                 <span>PDF</span>
@@ -1139,7 +1045,7 @@ function EmployerWalletPage() {
                   <div className="max-w-md mx-auto space-y-1">
                     <h3 className="text-base font-bold text-foreground">No Settlement Bank Account Linked</h3>
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      Link your hospital's official current account to enable automated escrow refunds, standby reimbursements, and bank mandates.
+                      Link your hospital's official current account to enable reviewed institutional payments and wallet refunds.
                     </p>
                   </div>
                   <div>
@@ -1172,7 +1078,7 @@ function EmployerWalletPage() {
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5 max-w-2xl leading-relaxed">
-                      Linked current account for automated escrow refunds, standby reimbursements, and bank mandates.
+                      Linked current account for reviewed institutional payments and wallet refunds.
                     </p>
                   </div>
                 </div>
@@ -1220,22 +1126,7 @@ function EmployerWalletPage() {
                             ? currentBank.accountNumber
                             : `•••• •••• ${currentBank.accountNumber.slice(-4)}`}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => setShowFullAcc(!showFullAcc)}
-                          className="text-muted-foreground hover:text-foreground cursor-pointer"
-                          title={showFullAcc ? "Hide Account" : "Show Account"}
-                        >
-                          {showFullAcc ? <HiOutlineEyeSlash className="h-3.5 w-3.5" /> : <HiOutlineEye className="h-3.5 w-3.5" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(currentBank.accountNumber, "bankacc", "Account number")}
-                          className="text-muted-foreground hover:text-foreground cursor-pointer"
-                          title="Copy Account Number"
-                        >
-                          {copiedKey === "bankacc" ? <HiOutlineCheck className="h-3.5 w-3.5 text-emerald-600" /> : <HiOutlineDocumentDuplicate className="h-3.5 w-3.5" />}
-                        </button>
+
                       </div>
                     </div>
 
@@ -1250,61 +1141,16 @@ function EmployerWalletPage() {
 
                   <div className="pt-2 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
                     <span>Verification status: <strong>{currentBank.status}</strong></span>
-                    <span className="font-mono text-[10px]">Ref: CF_PD_9918241029</span>
+                    <span className="font-mono text-[10px]">Verification evidence is recorded by the reviewing admin.</span>
                   </div>
                 </div>
 
                 {/* Right (5 cols): Uploaded Cancelled Cheque / Bank Mandate Document */}
                 <div className="md:col-span-5 rounded-2xl border border-border/70 bg-card p-5 space-y-4 flex flex-col justify-between">
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b border-border/50 pb-3">
-                      <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                        KYC Bank Mandate
-                      </span>
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        {currentBank.documentDate || "Active"}
-                      </span>
-                    </div>
-
-                    {/* Document Preview Card */}
-                    <div className="p-3.5 rounded-xl border border-border/80 bg-muted/20 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                          <HiOutlineDocumentText className="h-5 w-5" />
-                        </span>
-                        <div className="min-w-0">
-                          <span className="text-xs font-bold text-foreground truncate block">
-                            {currentBank.documentName || "Cancelled_Cheque.pdf"}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground block">
-                            PDF Document · Verified Cheque
-                          </span>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => toast.info("This action is unavailable until the service is connected. No changes were made.")}
-                        className="text-xs font-bold text-primary hover:underline shrink-0 cursor-pointer"
-                      >
-                        View
-                      </button>
-                    </div>
-
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      This verified document is required by RBI Nodal regulations to safeguard escrow disbursements against unauthorized account changes.
-                    </p>
+                    <div className="rounded-xl border p-4 text-sm"><p className="font-semibold">Ownership review</p><p className="mt-2 text-xs text-muted-foreground">Current status: {currentBank.status}. Verification evidence is checked by an admin. No cheque document is available to preview here.</p></div>
                   </div>
 
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setBankModalOpen(true)}
-                    className="w-full rounded-xl text-xs font-semibold h-9 gap-1.5 cursor-pointer"
-                  >
-                    <HiOutlineArrowUpTray className="h-3.5 w-3.5" />
-                    <span>Upload New Cancelled Cheque</span>
-                  </Button>
                 </div>
               </div>
             </>
@@ -1323,7 +1169,7 @@ function EmployerWalletPage() {
               Top Up Escrow Reserve
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Funds are ring-fenced for verified shift payouts for {orgName}.
+              Submit a real bank transfer arranged with billing. An admin must reconcile receipt before funds become available to {orgName}.
             </DialogDescription>
           </DialogHeader>
 
@@ -1398,6 +1244,10 @@ function EmployerWalletPage() {
             </div>
           </div>
 
+          <label className="block text-xs font-semibold">Actual bank transfer reference
+            <input aria-label="Bank transfer reference" value={depositReference} onChange={event => setDepositReference(event.target.value)} autoComplete="off" maxLength={30} className="mt-1 w-full rounded-xl border bg-background p-2.5" />
+          </label>
+          <p className="text-xs text-muted-foreground">Submitting a reference does not credit your wallet or initiate a transfer.</p>
           {/* Modal Actions */}
           <div className="pt-2 border-t border-border/60 flex items-center justify-between">
             <div className="text-xs">
@@ -1422,7 +1272,7 @@ function EmployerWalletPage() {
                 onClick={handleConfirmTopUp}
                 className="rounded-xl text-xs font-semibold h-9 px-4 cursor-pointer bg-primary hover:bg-primary-hover shadow-2xs"
               >
-                {isProcessing ? "Processing..." : "Confirm Deposit"}
+                {isProcessing ? "Processing..." : "Submit for reconciliation"}
               </Button>
             </div>
           </div>
@@ -1443,7 +1293,7 @@ function EmployerWalletPage() {
 
           <div className="space-y-2">
             {creditPackages.map((pkg) => {
-              const isSelected = selectedPkg.id === pkg.id;
+              const isSelected = selectedPkg?.id === pkg.id;
               return (
                 <div
                   key={pkg.id}
@@ -1515,11 +1365,11 @@ function EmployerWalletPage() {
                 <HiOutlineBuildingLibrary className="h-4.5 w-4.5" />
               </span>
               <DialogTitle className="text-lg font-bold text-foreground">
-                Hospital Bank Mandate &amp; Cancelled Cheque
+                Hospital settlement account
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-muted-foreground">
-              Authorized institutional account for escrow refunds and Cashfree B2B validation.
+              Enter your institutional account details for manual ownership review.
             </DialogDescription>
           </DialogHeader>
 
@@ -1646,89 +1496,13 @@ function EmployerWalletPage() {
                 </div>
               </div>
 
-              {/* Cancelled Cheque / Bank Mandate Document Upload */}
-              <div className="space-y-2 pt-0.5">
-                <label className="text-xs font-semibold text-foreground flex items-center justify-between">
-                  <span>Upload Cancelled Cheque / Passbook <span className="text-destructive">*</span></span>
-                  <span className="text-[10px] text-muted-foreground font-normal">PDF, JPG, PNG (Max 5MB)</span>
-                </label>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.png,.jpg,.jpeg"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-
-                {formChequeFile ? (
-                  <div className="p-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-500/10 text-emerald-600">
-                        <HiOutlineDocumentText className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <span className="text-xs font-bold text-foreground truncate block">
-                          {formChequeFile}
-                        </span>
-                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium block">
-                          Save bank account details
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="h-7 text-xs text-primary font-semibold hover:bg-muted cursor-pointer px-2"
-                      >
-                        Change
-                      </Button>
-                      <button
-                        type="button"
-                        onClick={() => setFormChequeFile("")}
-                        className="p-1 text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
-                        title="Remove file"
-                      >
-                        <HiOutlineTrash className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-3.5 rounded-xl border border-dashed border-border hover:border-primary/50 bg-muted/20 hover:bg-muted/30 transition-all text-center cursor-pointer space-y-1"
-                  >
-                    <HiOutlineArrowUpTray className="h-4.5 w-4.5 mx-auto text-primary" />
-                    <span className="text-xs font-bold text-foreground block">
-                      Click to browse or drop Cancelled Cheque
-                    </span>
-                    <span className="text-[10px] text-muted-foreground block">
-                      Must show Account No, IFSC &amp; Entity Name
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Cashfree Penny Drop Info Alert */}
-              <div className="p-2.5 rounded-xl border border-primary/20 bg-primary/5 text-xs text-muted-foreground space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-foreground text-[11px]">
-                  <HiOutlineShieldCheck className="h-4 w-4 text-primary" />
-                  <span>Cashfree ₹1 Penny Drop Verification</span>
-                </div>
-                <p className="text-[10px] leading-relaxed">
-                  A live ₹1 deposit will verify account holder match with <strong>{formHolderName || orgName}</strong>.
-                </p>
-              </div>
+              <p className="rounded-xl border p-3 text-xs text-muted-foreground">Saving details starts a manual ownership review. An admin checks supporting evidence separately before marking the account verified.</p>
             </div>
 
             {/* Sticky Modal Actions Bar (Always Visible!) */}
             <div className="p-4 border-t border-border/60 bg-muted/20 shrink-0 flex items-center justify-between gap-3">
               <span className="text-[11px] text-muted-foreground font-medium hidden sm:inline-block">
-                Secure RBI Escrow Mandate
+                Account ownership review
               </span>
 
               <div className="flex items-center gap-2 ml-auto">
@@ -1744,12 +1518,12 @@ function EmployerWalletPage() {
                 <Button
                   type="submit"
                   size="sm"
-                  isLoading={isVerifyingPenny}
-                  loadingText="Verifying Penny Drop..."
+                  isLoading={isSavingBank}
+                  loadingText="Saving bank details..."
                   className="rounded-xl text-xs font-semibold h-9 px-4.5 cursor-pointer bg-primary hover:bg-primary-hover shadow-2xs gap-1.5"
                 >
                   <HiOutlineCheck className="h-4 w-4" />
-                  <span>Verify &amp; Save Bank</span>
+                  <span>Save for review</span>
                 </Button>
               </div>
             </div>
@@ -1767,11 +1541,7 @@ function EmployerWalletPage() {
               </span>
               <div className="min-w-0">
                 <h3 className="text-xs sm:text-sm font-bold text-foreground truncate">
-                  {selectedInvoice?.docType === "CREDIT_NOTE"
-                    ? "Escrow Credit Note & Refund Receipt"
-                    : selectedInvoice?.docType === "ESCROW_RECEIPT"
-                      ? "Escrow Funding Receipt"
-                      : "Official Tax Invoice & Settlement Receipt"}
+                  {walletDocumentTitle(selectedInvoice?.transactionType,selectedInvoice?.status)}
                 </h3>
                 <span className="text-[10px] text-muted-foreground font-mono truncate block">
                   {selectedInvoice?.docType === "CREDIT_NOTE" ? "Credit Note #:" : "Invoice #:"} {selectedInvoice?.invoiceId}
@@ -1799,7 +1569,7 @@ function EmployerWalletPage() {
                 className="h-8 rounded-xl text-xs font-bold gap-1.5 bg-primary text-primary-foreground shadow-xs cursor-pointer"
               >
                 <HiOutlineDocumentArrowDown className="h-3.5 w-3.5" />
-                <span>Download PDF Receipt</span>
+                <span>Download PDF</span>
               </Button>
             </div>
           </div>
@@ -1812,10 +1582,10 @@ function EmployerWalletPage() {
                   <div className="space-y-1">
                     <Logo />
                     <div className="text-[10px] text-muted-foreground leading-relaxed pt-1">
-                      <p className="font-bold text-foreground/90">THE FALE HEALTHCARE PRIVATE LIMITED</p>
-                      <p>Healthcare Staffing &amp; 24-Hour Nodal Escrow Platform</p>
-                      <p>CIN: U85100KA2025PTC189210 • GSTIN: 29AABCT1332L1Z4</p>
-                      <p>Bengaluru, Karnataka - 560001 • billing@thefale.com</p>
+                      <p className="font-bold text-foreground/90">THE FALE</p>
+                      <p>Healthcare Staffing &amp; Wallet Records</p>
+                      <p>Recorded wallet amounts and fee/GST breakdown</p>
+                      <p>Issuer particulars available from billing • billing@thefale.com</p>
                     </div>
                   </div>
 
@@ -1825,20 +1595,16 @@ function EmployerWalletPage() {
                         ? "bg-amber-500/10 text-amber-700 border-amber-500/20"
                         : "bg-primary/10 text-primary border-primary/20"
                     }`}>
-                      {selectedInvoice.docType === "CREDIT_NOTE"
-                        ? "ESCROW CREDIT NOTE"
-                        : selectedInvoice.docType === "ESCROW_RECEIPT"
-                          ? "ESCROW FUNDING RECEIPT"
-                          : "OFFICIAL TAX INVOICE"}
+                      {walletDocumentTitle(selectedInvoice.transactionType,selectedInvoice.status)}
                     </span>
-                    <div className="font-mono text-xs font-bold text-foreground mt-1">
+                    <div className="font-mono text-xs font-bold text-foreground mt-1 break-all">
                       {selectedInvoice.invoiceId}
                     </div>
                     <p className="text-[10px] text-muted-foreground">
                       Date: <span className="font-medium text-foreground">{selectedInvoice.date}</span>
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      Route: <span className="font-medium text-foreground">ICICI Nodal Escrow</span>
+                      Route: <span className="font-medium text-foreground">Hospital wallet</span>
                     </p>
                   </div>
                 </div>
@@ -1857,18 +1623,10 @@ function EmployerWalletPage() {
                     }`} />
                     <div>
                       <span className="font-bold block">
-                        {selectedInvoice.docType === "CREDIT_NOTE"
-                          ? "REFUNDED TO HOSPITAL WALLET"
-                          : selectedInvoice.docType === "ESCROW_RECEIPT"
-                            ? "CREDITED TO NODAL ESCROW RESERVE"
-                            : "PAID & SETTLED VIA ESCROW RESERVE"}
+                        {selectedInvoice.status}
                       </span>
                       <span className="text-[11px] opacity-85">
-                        {selectedInvoice.docType === "CREDIT_NOTE"
-                          ? "Timesheet / Dispute escrow reversal • Credited to Available Balance"
-                          : selectedInvoice.docType === "ESCROW_RECEIPT"
-                            ? "RBI Nodal Escrow Custody • Tax invoice issued upon settlement"
-                            : "Rule 48 CGST Rules, 2017 • Valid electronic tax invoice"}
+                        {selectedInvoice.status === "Completed" || selectedInvoice.status === "Refunded" ? "Recorded wallet transaction" : "Not proof of payment or receipt of funds"}
                       </span>
                     </div>
                   </div>
@@ -1884,31 +1642,31 @@ function EmployerWalletPage() {
                   <div className="p-3.5 rounded-xl bg-muted/30 border border-border/60 space-y-1">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Billed To (Hospital)</span>
                     <p className="text-sm font-bold text-foreground">{selectedInvoice.hospitalName}</p>
-                    <p className="text-[11px] text-muted-foreground">GSTIN: {selectedInvoice.gstin || "29AABCT1332L1Z4"}</p>
+                    <p className="text-[11px] text-muted-foreground">GSTIN: {selectedInvoice.gstin || "Not provided"}</p>
                     <p className="text-[11px] text-muted-foreground">{selectedInvoice.facilityAddress}</p>
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-muted/30 border border-border/60 space-y-1">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Settlement Account</span>
                     <p className="text-xs font-mono font-bold text-foreground">
-                      {currentBank ? `${currentBank.bankName} (•••• ${currentBank.accountNumber.slice(-4)})` : (selectedInvoice.nodalAccount ? `Virtual A/C: ${selectedInvoice.nodalAccount}` : "Escrow Wallet Linked")}
+                      {selectedInvoice.nodalAccount || "Historical destination not recorded"}
                     </p>
                     <p className="text-[11px] text-muted-foreground">
-                      {currentBank ? `IFSC: ${currentBank.ifsc}` : "Automated Escrow Reconciliation"}
+                      {selectedInvoice.disbursedAt ? `Bank disbursed: ${new Date(selectedInvoice.disbursedAt).toLocaleString("en-IN")}` : "Bank disbursement date not recorded"}
                     </p>
                     <p className="text-[11px] text-muted-foreground">Period: {selectedInvoice.period}</p>
                   </div>
                 </div>
 
                 {/* Itemized Table */}
-                <div className="border border-border/70 rounded-xl overflow-hidden">
+                <div className="border border-border/70 rounded-xl overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-muted/50 border-b border-border/60 font-semibold text-muted-foreground">
                       <tr>
                         <th className="py-2.5 px-3">Service Description</th>
-                        <th className="py-2.5 px-3">SAC</th>
-                        <th className="py-2.5 px-3 text-right">Taxable</th>
-                        <th className="py-2.5 px-3 text-right">GST (18%)</th>
+                        <th className="py-2.5 px-3">Platform fee</th>
+                        <th className="py-2.5 px-3 text-right">Subtotal</th>
+                        <th className="py-2.5 px-3 text-right">GST on fee</th>
                         <th className="py-2.5 px-3 text-right">Total</th>
                       </tr>
                     </thead>
@@ -1918,7 +1676,7 @@ function EmployerWalletPage() {
                           <p className="font-bold text-foreground">{selectedInvoice.description}</p>
                           <p className="text-[10px] text-muted-foreground">{selectedInvoice.subtitle}</p>
                         </td>
-                        <td className="py-3 px-3 font-mono text-muted-foreground">998311</td>
+                        <td className="py-3 px-3 font-mono text-muted-foreground">{selectedInvoice.platformFee == null ? "Not recorded" : selectedInvoice.platformFee.toLocaleString("en-IN", {minimumFractionDigits:2})}</td>
                         <td className="py-3 px-3 text-right font-mono text-muted-foreground">
                           ₹{selectedInvoice.subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                         </td>
@@ -1936,44 +1694,21 @@ function EmployerWalletPage() {
                 {/* Financial Totals */}
                 <div className="flex flex-col sm:flex-row justify-between gap-4 pt-2">
                   <div className="space-y-1 text-[11px] text-muted-foreground max-w-xs">
-                    {selectedInvoice.docType === "CREDIT_NOTE" ? (
-                      <>
-                        <p className="font-semibold text-foreground">Escrow Refund Credit Note</p>
-                        <p>Credited back to your Hospital Available Balance. No Input Tax Credit is claimed on reversed escrow amounts.</p>
-                      </>
-                    ) : selectedInvoice.docType === "ESCROW_RECEIPT" ? (
-                      <>
-                        <p className="font-semibold text-foreground">Nodal Escrow Custody Receipt</p>
-                        <p>Funds are held in RBI-compliant nodal escrow. Official GST tax invoices are issued upon shift settlement or credit purchase.</p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="font-semibold text-foreground">Input Tax Credit (ITC) Eligible</p>
-                        <p>This invoice is fully eligible for GST input tax credit under Section 16 of the CGST Act.</p>
-                      </>
-                    )}
+                    <p className="font-semibold text-foreground">Recorded fee and GST</p>
+                    <p>GST is recorded on the platform fee only. This wallet statement is not a statutory tax invoice.</p>
+                    {!selectedInvoice.canonicalDocument && <p>Historical record: reconciliation may not be recorded.</p>}
+                    {selectedInvoice.disbursedAt && <p>Bank disbursed: {new Date(selectedInvoice.disbursedAt).toLocaleString("en-IN")}</p>}
+
                   </div>
 
-                  <div className="w-full sm:w-64 space-y-1.5 p-3 rounded-xl bg-muted/20 border border-border/60 font-mono text-xs">
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>{selectedInvoice.docType === "CREDIT_NOTE" ? "Refund Subtotal:" : "Subtotal:"}</span>
-                      <span>₹{selectedInvoice.subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-                    </div>
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>CGST ({selectedInvoice.docType === "TAX_INVOICE" ? "9%" : "N/A"}):</span>
-                      <span>₹{(selectedInvoice.gst / 2).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-                    </div>
-                    <div className="flex justify-between text-muted-foreground">
-                      <span>SGST ({selectedInvoice.docType === "TAX_INVOICE" ? "9%" : "N/A"}):</span>
-                      <span>₹{(selectedInvoice.gst / 2).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
-                    </div>
+                  <div className="w-full sm:w-72 space-y-1.5 p-3 rounded-xl bg-muted/20 border border-border/60 font-mono text-xs">
+                    <div className="flex justify-between gap-3 text-muted-foreground"><span>{selectedInvoice.transactionType === "disbursement" || selectedInvoice.transactionType === "escrow_hold" ? "Base shift amount:" : "Base amount:"}</span><span className="text-right whitespace-nowrap">{recordedBaseAmount(selectedInvoice.subtotal, selectedInvoice.platformFee)?.toLocaleString("en-IN", {style:"currency",currency:"INR"}) ?? "Not recorded"}</span></div>
+                    <div className="flex justify-between gap-3 text-muted-foreground"><span>Platform fee:</span><span className="text-right whitespace-nowrap">{selectedInvoice.platformFee == null ? "Not recorded" : selectedInvoice.platformFee.toLocaleString("en-IN",{style:"currency",currency:"INR"})}</span></div>
+                    <div className="flex justify-between gap-3 text-muted-foreground"><span>Subtotal before GST:</span><span className="text-right whitespace-nowrap">{selectedInvoice.subtotal.toLocaleString("en-IN",{style:"currency",currency:"INR"})}</span></div>
+                    <div className="flex justify-between gap-3 text-muted-foreground"><span>GST on platform fee:</span><span className="text-right whitespace-nowrap">{selectedInvoice.gst.toLocaleString("en-IN",{style:"currency",currency:"INR"})}</span></div>
                     <div className="border-t border-border/70 pt-1.5 flex justify-between font-bold text-sm text-foreground">
                       <span>
-                        {selectedInvoice.docType === "CREDIT_NOTE"
-                          ? "Total Refunded:"
-                          : selectedInvoice.docType === "ESCROW_RECEIPT"
-                            ? "Total Credited:"
-                            : "Total Paid:"}
+                        Total recorded:
                       </span>
                       <span className="text-primary">₹{selectedInvoice.total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                     </div>
@@ -1982,9 +1717,9 @@ function EmployerWalletPage() {
 
                 {/* Footer Legal & Seal */}
                 <div className="pt-4 border-t border-border/70 flex items-center justify-between text-[10px] text-muted-foreground">
-                  <p>Valid without physical signature under the IT Act, 2000.</p>
+                  <p>System-generated wallet statement. Formal tax invoice available from billing.</p>
                   <span className="font-bold text-primary px-2 py-0.5 rounded bg-primary/10 border border-primary/20">
-                    FALE ESCROW SECURE
+                    FALE WALLET RECORD
                   </span>
                 </div>
               </div>

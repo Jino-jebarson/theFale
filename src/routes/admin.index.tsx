@@ -90,7 +90,7 @@ function AdminDashboard() {
   const [metrics, setMetrics] = useState<AdminDashboardMetricsDto | null>(null);
   const [loading, setLoading] = useState(isApiEnabled);
 
-  // AI Operations Brief & Demand Surge Forecast State
+  // AI Operations Brief & Demand Staffing Outlook State
   const [briefText, setBriefText] = useState<string | null>(null);
   const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
 
@@ -338,7 +338,7 @@ function AdminDashboard() {
     if (list.length > 0) {
       return list.slice(0, 3).join(", ");
     }
-    return "Bengaluru & Chennai Corridors";
+    return "Location not provided";
   }, [apiJobs, apiFacilities, apiCandidates]);
 
   const topCadres = useMemo(() => {
@@ -364,15 +364,12 @@ function AdminDashboard() {
     if (entries.length > 0) {
       return entries.map(([name, count]) => ({ name, rawName: name, count }));
     }
-    return [
-      { name: "Duty Doctors & ICU Specialists", rawName: "Doctor", count: 1 },
-      { name: "Emergency Care Nurses", rawName: "Nurse", count: 1 },
-    ];
+    return [];
   }, [metrics?.cadreBreakdown, isApiEnabled, apiCandidates, s.candidateKYC, apiJobs, s.jobApprovals]);
 
-  const topSurgeName = topCadres[0]?.name || "Duty Doctors";
+  const topSurgeName = topCadres[0]?.name || "No cadre data";
   const secondarySurgeName = topCadres[1]?.name || "Emergency Care Clinicians";
-  const surgePercent = 25 + ((locumCount * 5) % 20);
+
 
   const handleGenerateBrief = async (overrideMetrics?: any) => {
     setIsGeneratingBrief(true);
@@ -380,14 +377,13 @@ function AdminDashboard() {
       const pKyc = overrideMetrics?.pendingKyc ?? pendingCandidateKYC.length;
       const pJobs = overrideMetrics?.pendingJobs ?? pendingJobApprovals.length;
       const pFac = overrideMetrics?.pendingFacilities ?? pendingFacilityKYC.length;
-      const aShifts = overrideMetrics?.activeShifts ?? locumCount;
+      const aShifts = overrideMetrics?.activeShifts;
 
       const res = await getDailyMorningBriefWithAi({
         pendingKyc: pKyc,
         pendingJobs: pJobs,
         pendingFacilities: pFac,
-        activeShifts: aShifts,
-        disputes: 0,
+        ...(typeof aShifts === "number" ? { activeShifts: aShifts } : {}),
       });
       const text = res.response || res.content || "";
       if (text) {
@@ -409,8 +405,7 @@ function AdminDashboard() {
       const res = await getDemandForecastWithAi({
         metro: metroCorridors,
         topSpecialties: topCadres.map((c) => c.name),
-        surgeWeekendMultiplier: 1 + surgePercent / 100,
-        activeShifts: locumCount,
+        loadedShiftPostings: locumCount,
       });
       const text = res.response || res.content || "";
       if (text) {
@@ -1380,7 +1375,7 @@ function AdminDashboard() {
                 </div>
               ) : (
                 <p className="leading-relaxed">
-                  Anticipating a <strong className="text-foreground font-bold">{surgePercent}% weekend surge</strong> in <strong className="text-foreground font-bold">{topSurgeName}</strong> and <strong className="text-foreground font-bold">{secondarySurgeName}</strong> across <span className="font-semibold text-foreground/90">{metroCorridors}</span>. <strong className="text-foreground font-bold">{locumCount} locum shift broadcasts active</strong> with instant escrow guarantee.
+                  {locumCount} shift postings are loaded for review. Request a staffing outlook based on the supplied records. A numeric demand forecast needs historical bookings and cancellations.
                 </p>
               )}
             </div>
@@ -1388,7 +1383,7 @@ function AdminDashboard() {
             {/* 3 Telemetry Mini-Chips */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
               <div className="p-3 rounded-xl bg-muted/30 border border-border/70 flex flex-col justify-between gap-1.5">
-                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Top Surge Cadre</span>
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Top Recorded Cadre</span>
                 <span className="text-xs sm:text-sm font-bold text-foreground truncate flex items-center gap-1.5">
                   <HiOutlineArrowTrendingUp className="h-4 w-4 text-primary shrink-0" />
                   <span className="truncate">{topSurgeName}</span>
@@ -1396,18 +1391,18 @@ function AdminDashboard() {
               </div>
 
               <div className="p-3 rounded-xl bg-muted/30 border border-border/70 flex flex-col justify-between gap-1.5">
-                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Active Locum Shifts</span>
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Loaded Shift Postings</span>
                 <span className="text-xs sm:text-sm font-bold text-foreground truncate flex items-center gap-1.5">
                   <HiOutlineClock className="h-4 w-4 text-primary shrink-0" />
-                  <span>{locumCount} broadcasts</span>
+                  <span>{locumCount} postings</span>
                 </span>
               </div>
 
               <div className="p-3 rounded-xl bg-muted/30 border border-border/70 flex flex-col justify-between gap-1.5">
-                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Escrow Guarantee SLA</span>
+                <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Forecast Evidence</span>
                 <span className="text-xs sm:text-sm font-bold text-primary truncate flex items-center gap-1.5">
                   <HiOutlineShieldCheck className="h-4 w-4 text-primary shrink-0" />
-                  <span>100% Instant</span>
+                  <span>History not supplied</span>
                 </span>
               </div>
             </div>

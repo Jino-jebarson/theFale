@@ -39,7 +39,7 @@ export interface AiTaskRequest {
   context?: string;
   language?: "en" | "kn" | "ml" | "hi" | "ta";
   role?: "clinician" | "hospital" | "admin" | "guest" | "student" | string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, any> | undefined;
   history?: AiChatTurn[];
 }
 
@@ -238,7 +238,7 @@ export async function getInterviewPracticeWithAi(role: string) {
 export async function evaluateInterviewAnswerWithAi(question: string, answer: string, role?: string) {
   return executeAiTask({
     task: "interview_practice",
-    prompt: `Candidate's clinical answer: "${answer}" for the scenario: "${question}". Role: ${role || "Healthcare Professional"}. Evaluate clinical accuracy, patient safety, and provide readiness score. Zero emojis.`,
+    prompt: `Candidate's clinical answer: "${answer}" for the scenario: "${question}". Role: ${role || "Healthcare Professional"}. Evaluate clinical accuracy, patient safety, and give specific strengths, missing points and one next practice step. Do not certify competence or invent a readiness percentage. Zero emojis.`,
     metadata: { question, answer, role },
   });
 }
@@ -612,10 +612,11 @@ export async function getDemandForecastWithAi(context?: {
   topSpecialties?: string[];
   surgeWeekendMultiplier?: number;
   activeShifts?: number;
+  loadedShiftPostings?: number;
 }) {
   const metro = context?.metro || "Not provided";
   const specialties = context?.topSpecialties?.join(", ") || "Not provided";
   const activeShifts = context?.activeShifts ?? "Not provided";
-  const prompt = `Region: ${metro}, Monitored Specialties: ${specialties}, Active Locum Shifts: ${activeShifts}. Give a qualitative staffing outlook. If historical bookings and cancellations are not supplied, state that a numeric 7-day forecast and surge percentage cannot be calculated. Offer actionable deployment advice for hospital staffing coordinators. Strictly zero emojis.`;
+  const prompt = `Region: ${metro}, Monitored Specialties: ${specialties}, Active Locum Shifts: ${activeShifts}. Loaded shift postings: ${context?.loadedShiftPostings ?? "Not provided"} (not an active-shift count). Give a qualitative staffing outlook. If historical bookings and cancellations are not supplied, state that a numeric 7-day forecast and surge percentage cannot be calculated. Offer actionable deployment advice for hospital staffing coordinators. Strictly zero emojis.`;
   return executeAiTask({ task: "demand_forecast", prompt, metadata: context });
 }
