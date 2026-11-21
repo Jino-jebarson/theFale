@@ -65,6 +65,7 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
     s.profile["level"] === "student";
   const isInternship = job.kind === "internship" || job.type === "Internship";
   const isRestrictedForStudent = isStudent && !isInternship;
+  const isCandidateVerified = !isApiEnabled || String(s.profile["kycStatus"] || "").toUpperCase() === "VERIFIED";
 
   const p = (s.profile || {}) as Record<string, unknown>;
   const candLoc = {
@@ -126,6 +127,7 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
   const quickApply = async (event: React.MouseEvent) => {
     event.preventDefault(); event.stopPropagation();
     if (isRestrictedForStudent) { toast.info("Students can apply for internships only."); return; }
+    if (!isCandidateVerified) { toast.info("Verify your profile before applying for jobs."); return; }
     await jobAction.run(async () => {
       await applyForJob(job.id);
       setState((previous) => ({ applied: [{ jobId: job.id, status: "Applied", date: new Date().toLocaleDateString("en-IN") }, ...previous.applied.filter((item) => item.jobId !== job.id)] }));
@@ -324,6 +326,14 @@ export function JobCard({ job, compact }: { job: Job; compact?: boolean }) {
               <HiOutlineLockClosed className="h-3.5 w-3.5" />
               <span>Internships only for students</span>
             </span>
+          ) : !isCandidateVerified ? (
+            <Link
+              to="/profile"
+              onClick={(event) => event.stopPropagation()}
+              className="inline-flex items-center gap-1 rounded-xl border border-primary/25 bg-primary/5 px-3 py-1.5 text-xs font-bold text-primary"
+            >
+              Verify to apply
+            </Link>
           ) : (
             <button
               type="button"

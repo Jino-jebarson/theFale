@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   HiArrowRight,
+  HiArrowLeft,
   HiOutlineSparkles,
   HiOutlineClock,
   HiOutlineAcademicCap,
@@ -27,6 +28,10 @@ import {
   HiOutlineSquares2X2,
   HiOutlineLockClosed,
   HiOutlineArrowPath,
+  HiOutlineCalendarDays,
+  HiOutlineChatBubbleLeftRight,
+  HiOutlineDocumentText,
+  HiOutlineArrowUpRight,
 } from "react-icons/hi2";
 import { RiVerifiedBadgeFill, RiChatVoiceLine } from "react-icons/ri";
 import { toast } from "sonner";
@@ -37,11 +42,13 @@ import { Switch } from "@/components/ui/switch";
 import { jobs, shifts, type Job } from "@/lib/data";
 import { setState, useApp } from "@/lib/store";
 import { getRoleIllustration } from "@/lib/roleImages";
+import { calculateCandidateProfileStrength } from "@/lib/profileStrength";
 import { cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
 import { getJobs, applyForJob, saveJob, unsaveJob } from "@/lib/adapters/jobAdapter";
 import { getOpenShifts, claimShift, getMyClaims, type UiShiftItem, type ShiftClaimDto } from "@/lib/adapters/shiftAdapter";
-import { getMyApplications, type JobApplicationDto } from "@/lib/adapters/applicationAdapter";
+import { getMyApplications, type UiApplicationItem } from "@/lib/adapters/applicationAdapter";
+import { getHuddlePosts, type HuddlePostDto } from "@/lib/adapters/huddleAdapter";
 import {
   getCandidateProfile,
   exportCandidateCv,
@@ -78,6 +85,8 @@ function Home() {
   const jobAction = useConfirmedAction();
   const s = useApp();
   const [filter, setFilter] = useState<FilterTab>("All");
+  const [selectedWeekDay, setSelectedWeekDay] = useState(0);
+  const [weekOffset, setWeekOffset] = useState(0);
   const [claimedShifts, setClaimedShifts] = useState<Record<string, boolean>>({});
   const [downloadingCv, setDownloadingCv] = useState(false);
   const [liveCandidateProfile, setLiveCandidateProfile] = useState<CandidateProfile | null>(null);
@@ -95,8 +104,12 @@ function Home() {
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [apiJobs, setApiJobs] = useState<Job[]>([]);
   const [apiShifts, setApiShifts] = useState<UiShiftItem[]>([]);
-  const [apiApplications, setApiApplications] = useState<JobApplicationDto[]>([]);
+  const [apiApplications, setApiApplications] = useState<UiApplicationItem[]>([]);
+  const [applicationsLoadState, setApplicationsLoadState] = useState<"loading" | "loaded" | "error">("loading");
   const [apiClaims, setApiClaims] = useState<ShiftClaimDto[]>([]);
+  const [huddlePosts, setHuddlePosts] = useState<HuddlePostDto[]>([]);
+  const [huddleLoadState, setHuddleLoadState] = useState<"loading" | "loaded" | "error">("loading");
+  const [huddleRetryKey, setHuddleRetryKey] = useState(0);
   const [apiAppliedCount, setApiAppliedCount] = useState<number>(0);
   const [loading, setLoading] = useState(isApiEnabled);
   const [viewStats, setViewStats] = useState<CandidateViewStats>({
@@ -129,7 +142,8 @@ function Home() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
+    setApplicationsLoadState("loading");
+    Promise.allSettled([
       getJobs(),
       getOpenShifts(),
       getMyApplications(),
@@ -137,18 +151,26 @@ function Home() {
       getCandidateProfile(),
       getCandidateViewStats(),
     ])
-      .then(([jobsData, shiftsData, myApps, myClaimsData, profileData, viewStatsData]) => {
-        setApiJobs(jobsData as Job[]);
-        setApiShifts(shiftsData as UiShiftItem[]);
-        setApiApplications((myApps as JobApplicationDto[]) || []);
-        setApiClaims((myClaimsData as ShiftClaimDto[]) || []);
-        setApiAppliedCount((myApps as any[])?.length || 0);
+      .then((results) => {
+        const [jobsResult, shiftsResult, applicationsResult, claimsResult, profileResult, statsResult] = results;
+        if (jobsResult.status === "fulfilled") setApiJobs(jobsResult.value as Job[]);
+        if (shiftsResult.status === "fulfilled") setApiShifts(shiftsResult.value as UiShiftItem[]);
+        if (applicationsResult.status === "fulfilled") {
+          const applications = (applicationsResult.value as UiApplicationItem[]) || [];
+          setApiApplications(applications);
+          setApiAppliedCount(applications.length);
+          setApplicationsLoadState("loaded");
+        } else {
+          setApplicationsLoadState("error");
+        }
+        if (claimsResult.status === "fulfilled") setApiClaims((claimsResult.value as ShiftClaimDto[]) || []);
 
-        if (viewStatsData && viewStatsData.totalViews != null) {
-          setViewStats(viewStatsData);
+        if (statsResult.status === "fulfilled" && statsResult.value && statsResult.value.totalViews != null) {
+          setViewStats(statsResult.value);
         }
 
-        if (profileData) {
+        if (profileResult.status === "fulfilled" && profileResult.value) {
+          const profileData = profileResult.value;
           setLiveCandidateProfile(profileData);
           const openVal = profileData.openToWork != null ? Boolean(profileData.openToWork) : true;
           setIsOpenToWork(openVal);
@@ -161,7 +183,7 @@ function Home() {
               email: profileData.email || prev.profile["email"],
               mobile: profileData.phone || prev.profile["mobile"],
               city: profileData.city || prev.profile["city"],
-              area: profileData.city || prev.profile["city"] || prev.profile["area"],
+              area: profileData.locality || prev.profile["area"],
               addressLine: profileData.addressLine || prev.profile["addressLine"],
               state: profileData.state || prev.profile["state"],
               role: profileData.profession || (profileData.isStudent ? profileData.course : "Doctor"),
@@ -185,11 +207,30 @@ function Home() {
               : prev.docs,
           }));
         }
+        const firstFailure = results.find((result) => result.status === "rejected");
+        if (firstFailure?.status === "rejected") pageLoad.fail(firstFailure.reason);
       }).catch(pageLoad.fail)
       .finally(() => {
         setLoading(false);
       });
   }, [pageLoad.retryKey]);
+
+  useEffect(() => {
+    let active = true;
+    setHuddleLoadState("loading");
+    getHuddlePosts().then((posts) => {
+      if (active) {
+        setHuddlePosts(posts.filter((post) => !post.status || !["REVIEW", "PENDING", "REJECTED", "REMOVED"].includes(post.status.toUpperCase())).slice(0, 3));
+        setHuddleLoadState("loaded");
+      }
+    }).catch(() => {
+      if (active) {
+        setHuddlePosts([]);
+        setHuddleLoadState("error");
+      }
+    });
+    return () => { active = false; };
+  }, [huddleRetryKey]);
 
   const candidateLevel =
     s.candidateLevel ||
@@ -197,11 +238,26 @@ function Home() {
     (s.profile["cadreLevel"] as any) ||
     (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
+  const candidateKycStatus = String(liveCandidateProfile?.kycStatus || s.profile["kycStatus"] || "PENDING").toUpperCase();
+  const isCandidateVerified = candidateKycStatus === "VERIFIED";
+  const isCandidateRejected = candidateKycStatus === "REJECTED";
+  const hasCandidateRegistrationInfo = Boolean(liveCandidateProfile?.regNumber || liveCandidateProfile?.documents?.some((doc) => doc.documentType === "REGISTRATION_CERTIFICATE"));
+  const hasCandidateEducationInfo = Boolean(liveCandidateProfile?.qualification || liveCandidateProfile?.course || liveCandidateProfile?.documents?.some((doc) => ["DEGREE_CERTIFICATE", "STUDENT_ID", "BONAFIDE"].includes(doc.documentType)));
+  const candidateVerificationDocs = liveCandidateProfile?.documents?.filter((doc) => ["ID_PROOF", "REGISTRATION_CERTIFICATE", "DEGREE_CERTIFICATE", "BONAFIDE", "STUDENT_ID"].includes(doc.documentType)) || [];
+  const hasStudentVerificationProof = Boolean(liveCandidateProfile?.universityRegNo || candidateVerificationDocs.some((doc) => ["STUDENT_ID", "BONAFIDE"].includes(doc.documentType)));
+  const requiredGraduateDocumentTypes = ["ID_PROOF", "REGISTRATION_CERTIFICATE", "DEGREE_CERTIFICATE"];
+  const hasRequiredVerificationDocuments = isStudent
+    ? hasStudentVerificationProof
+    : requiredGraduateDocumentTypes.every((type) => candidateVerificationDocs.some((doc) => doc.documentType === type));
+  const isCandidateReviewInProgress = candidateKycStatus === "PENDING" && hasRequiredVerificationDocuments;
 
   const courseName = String(s.profile["course"] || "Allied Health Sciences");
   const collegeName = String(s.profile["college"] || "Healthcare Academy");
   const studyYear = String(s.profile["studyYear"] || "Final Year");
-  const candidateLocation = String(s.profile["city"] || s.profile["area"] || "").trim();
+  const candidateLocation = [s.profile["city"], s.profile["state"]]
+    .map((value) => String(value || "").trim())
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .join(", ");
 
   const fullName = String(s.profile["name"] || (isStudent ? "Healthcare Student" : "Healthcare Professional")).trim();
   const firstName = fullName.split(" ")[0]?.replace(",", "") || "there";
@@ -209,21 +265,39 @@ function Home() {
   const specialty = isStudent ? `${courseName} · ${collegeName}` : String(s.profile["specialty"] || "General medicine");
   const roleIllustration = getRoleIllustration(isStudent ? courseName : roleName);
 
-  // Dynamic Profile Completeness
+  // Keep dashboard completeness in sync with the candidate profile page.
   const completeness = useMemo(() => {
-    let score = 50;
-    if (s.profile["name"]) score += 5;
-    if (s.profile["email"]) score += 5;
-    if (s.profile["mobile"] || s.profile["phone"]) score += 5;
-    if (s.profile["city"]) score += 5;
-    if (s.profile["role"] || s.profile["profession"]) score += 5;
-    if (s.profile["specialty"]) score += 5;
-    if (s.profile["qual"] || s.profile["qualification"]) score += 5;
-    if (s.profile["regNo"] || s.profile["council"]) score += 5;
-    if (s.profile["kycStatus"] === "VERIFIED") score += 5;
-    if (s.docs && Object.keys(s.docs).length > 0) score += 5;
-    return Math.min(100, Math.max(70, score));
-  }, [s.profile, s.docs]);
+    const candidate = liveCandidateProfile;
+    const profileValue = (key: string) => String(s.profile[key] || "");
+    const experienceLevel = candidate?.experienceYears || profileValue("exp");
+    const candidateLevelValue = String(candidate?.candidateLevel?.toLowerCase() || s.profile["level"] || s.profile["cadreLevel"] || (experienceLevel.toLowerCase() === "fresher" ? "fresher" : "professional"));
+    const skills = candidate?.skills || (Array.isArray(s.profile["skills"]) ? s.profile["skills"] as string[] : []);
+    const languages = candidate?.languages || (Array.isArray(s.profile["languages"]) ? s.profile["languages"] as string[] : []);
+    const preferredCities = candidate?.preferredCities || (Array.isArray(s.profile["preferredCities"])
+      ? s.profile["preferredCities"] as string[]
+      : Array.isArray(s.profile["preferredCity"])
+        ? s.profile["preferredCity"] as string[]
+        : typeof s.profile["preferredCity"] === "string" ? s.profile["preferredCity"].split(",").map((city) => city.trim()).filter(Boolean) : []);
+
+    return calculateCandidateProfileStrength({
+      name: candidate?.name || profileValue("name"),
+      city: candidate?.city || profileValue("city"),
+      email: candidate?.email || profileValue("email"),
+      profession: candidate?.profession || (candidate?.isStudent ? candidate.course : "") || profileValue("role") || profileValue("profession"),
+      specialty: candidate?.specialty || profileValue("specialty"),
+      qualification: candidate?.qualification || profileValue("qual") || profileValue("qualification"),
+      college: candidate?.college || profileValue("college") || profileValue("institution"),
+      skills,
+      languages,
+      experienceHistory: candidate?.experienceHistory || (Array.isArray(s.profile["exps"]) ? s.profile["exps"] : []),
+      preferredCities,
+      employmentType: candidate?.employmentType || profileValue("employmentType"),
+      availability: candidate?.availability || profileValue("availability") || profileValue("notice"),
+      bio: candidate?.bio || profileValue("bio") || profileValue("about"),
+      isStudent: candidate?.isStudent ?? isStudent,
+      isFresher: candidateLevelValue === "fresher" || experienceLevel.toLowerCase().includes("fresher"),
+    });
+  }, [liveCandidateProfile, s.profile, isStudent]);
 
   // Clinical Candidate profile input for matching calculation
   const candidateInput: MatchCandidateInput = useMemo(() => ({
@@ -359,12 +433,77 @@ const urgentShiftsCount = useMemo(() => {
 }, [effectiveShifts]);
 
 const totalSubmissionsCount = apiApplications.length;
-const activeApplicationsCount = useMemo(() => {
-  {
-    return apiApplications.filter((a) => !["REJECTED", "WITHDRAWN"].includes((a.status || "").toUpperCase())).length;
-  }
+const activeApplicationsCount = useMemo(() =>
+  apiApplications.filter((a) => !["NOT SELECTED", "WITHDRAWN", "HIRED"].includes((a.status || "").toUpperCase())).length,
+  [isApiEnabled, apiApplications, s.applied]
+);
 
-}, [isApiEnabled, apiApplications, s.applied]);
+const recentApplications = [...apiApplications]
+  .sort((a, b) => Date.parse(b.updatedAt || b.appliedAt || "") - Date.parse(a.updatedAt || a.appliedAt || ""))
+  .slice(0, 3);
+const interviewApplications = apiApplications.filter((application) =>
+  application.status.toLowerCase().includes("interview") && application.interviewScheduledAt
+);
+const upcomingItems = [
+  ...apiClaims
+    .filter((claim) => {
+      const start = claim.shiftStartAt || claim.startAt;
+      return start && ["CONFIRMED", "CHECKED_IN", "IN_PROGRESS", "COMPLETED"].includes(claim.status.toUpperCase());
+    })
+    .map((claim) => ({
+      id: `shift-${claim.id}`,
+      title: claim.shiftTitle || "Clinical shift",
+      subtitle: claim.facilityName || "Hospital shift",
+      when: claim.shiftStartAt || claim.startAt || "",
+      kind: "Shift" as const,
+    })),
+  ...interviewApplications.map((application) => ({
+    id: `interview-${application.id}`,
+    title: application.title || "Hospital interview",
+    subtitle: application.org || "Interview",
+    when: application.interviewScheduledAt || "",
+    kind: "Interview" as const,
+  })),
+].sort((a, b) => new Date(a.when).getTime() - new Date(b.when).getTime());
+const weekDays = Array.from({ length: 7 }, (_, offset) => {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + weekOffset * 7 + offset);
+  const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const events = upcomingItems.filter((item) => {
+    const eventDate = new Date(item.when);
+    return !Number.isNaN(eventDate.getTime())
+      && `${eventDate.getFullYear()}-${String(eventDate.getMonth() + 1).padStart(2, "0")}-${String(eventDate.getDate()).padStart(2, "0")}` === key;
+  });
+  return { date, key, events };
+});
+const selectedDay = weekDays[selectedWeekDay] || weekDays[0];
+const weekRangeLabel = `${weekDays[0].date.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} – ${weekDays[6].date.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
+const weekNavLabel = weekOffset === 0 ? "Next 7 days" : weekOffset === 1 ? "Following 7 days" : weekOffset === -1 ? "Previous 7 days" : `Week ${weekOffset > 0 ? `+${weekOffset}` : weekOffset}`;
+const hasPayoutDestination = Boolean(liveCandidateProfile?.payoutMethod?.upiId || liveCandidateProfile?.payoutMethod?.accountNumber || liveCandidateProfile?.payoutMethod?.accountNumberLast4);
+const needsPayoutSetup = !isStudent
+  && !hasPayoutDestination
+  && apiClaims.some((claim) => ["COMPLETED", "APPROVED"].includes(claim.status.toUpperCase())
+    && !["PAID", "DISBURSED"].includes((claim.payoutStatus || "").toUpperCase()));
+const hasUploadedResume = Boolean(liveCandidateProfile?.documents?.some((document) => ["RESUME", "CV"].includes(document.documentType.toUpperCase())));
+const nextInterview = interviewApplications
+  .filter((application) => new Date(application.interviewScheduledAt || "").getTime() >= Date.now())
+  .sort((a, b) => Date.parse(a.interviewScheduledAt || "") - Date.parse(b.interviewScheduledAt || ""))[0];
+const nextStep = isCandidateRejected
+  ? { title: "Update your verification documents", detail: "Review the team's feedback and replace any requested documents.", label: "Review documents", to: "/profile" as const }
+  : nextInterview
+    ? { title: "Prepare for your hospital interview", detail: `${nextInterview.org} · ${new Date(nextInterview.interviewScheduledAt!).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}`, label: "View interview details", to: "/applications" as const }
+    : needsPayoutSetup
+      ? { title: "Add payout details", detail: "A completed shift is awaiting payment. Add a UPI ID or bank account to receive eligible payouts.", label: "Set up payouts", to: "/earnings" as const }
+      : !isCandidateVerified
+        ? { title: isCandidateReviewInProgress ? "Track your credential review" : "Submit documents for verification", detail: isCandidateReviewInProgress ? "Your required documents are with our credentialing team." : "Complete verification to unlock the full candidate experience.", label: isCandidateReviewInProgress ? "View verification" : "Upload documents", to: "/profile" as const }
+        : completeness < 80
+          ? { title: "Strengthen your profile", detail: "Add skills, experience and work preferences to improve your matches.", label: "Complete profile", to: "/profile" as const }
+          : !hasUploadedResume
+            ? { title: "Add your resume", detail: "Upload your latest CV so hospitals can review your experience.", label: "Add resume", to: "/profile" as const }
+            : activeApplicationsCount > 0
+              ? { title: "Stay on top of your applications", detail: "Review the latest updates from hospitals and follow your application progress.", label: "View applications", to: "/applications" as const }
+              : { title: isStudent ? "Find an internship" : "Explore your matches", detail: "See opportunities matched to your clinical profile and preferences.", label: isStudent ? "Explore internships" : "Explore matches", to: "/jobs" as const };
 
 const filteredJobs = useMemo(() => {
   return effectiveJobs
@@ -395,6 +534,10 @@ const filteredJobs = useMemo(() => {
 }, [effectiveJobs, isStudent, filter]);
 
 const handleClaimShift = async (shiftId: string, title: string, org: string) => {
+  if (!isCandidateVerified) {
+    toast.info("Verify your profile before claiming shifts.");
+    return;
+  }
   if (isStudent) {
     toast.info("Shift duty locked for active students", {
       description: "Patient duty shifts require State Council Registration. Explore clinical internships!",
@@ -520,7 +663,18 @@ const handleQuickApply = async (job: Job) => {
     if (appliedJobIds.has(job.id)) return;
     return jobAction.run(async () => {
       const saved = await applyForJob(job.id);
-      setApiApplications((previous) => [...previous, saved as any]);
+      const appliedAt = (saved as any)?.appliedAt || new Date().toISOString();
+      setApiApplications((previous) => [...previous, {
+        id: (saved as any)?.id || job.id,
+        jobId: job.id,
+        title: (saved as any)?.jobTitle || job.title,
+        org: (saved as any)?.facilityName || job.org,
+        city: job.city,
+        dept: job.dept,
+        status: "Applied",
+        date: new Date(appliedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+        appliedAt,
+      }]);
       setState((previous) => ({ applied: [{ jobId: job.id, status: "Applied", date: new Date().toLocaleDateString("en-IN") }, ...previous.applied.filter((item) => item.jobId !== job.id)] }));
       setApiAppliedCount((count) => count + 1);
       toast.success("Application submitted");
@@ -544,7 +698,7 @@ return (
           {/* Left: Avatar + Identity + Clinical Status */}
           <div className="flex items-center gap-3.5 sm:gap-5 min-w-0">
             <div className="relative shrink-0">
-              <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl border-2 border-border/80 bg-primary-soft flex items-center justify-center text-xl sm:text-2xl font-black text-primary overflow-hidden shadow-xs">
+              <div className="h-14 w-14 sm:h-20 sm:w-20 rounded-2xl border-2 border-border/80 bg-primary-soft flex items-center justify-center text-xl sm:text-2xl font-black text-primary overflow-hidden shadow-xs">
                 {roleIllustration ? (
                   <img
                     src={roleIllustration}
@@ -555,27 +709,24 @@ return (
                   <span>{initials(fullName)}</span>
                 )}
               </div>
-              <span
-                title="DigiLocker & Council Verified"
-                className="absolute -bottom-1 -right-1 grid h-5 w-5 sm:h-5.5 sm:w-5.5 place-items-center rounded-full bg-emerald-600 text-white ring-2 ring-card shadow-xs"
-              >
-                <RiVerifiedBadgeFill className="h-3.5 w-3.5" />
-              </span>
+              {isCandidateVerified && (
+                <span title="Credentials verified" className="absolute -bottom-1 -right-1 grid h-5 w-5 sm:h-5.5 sm:w-5.5 place-items-center rounded-full bg-emerald-600 text-white ring-2 ring-card shadow-xs">
+                  <RiVerifiedBadgeFill className="h-3.5 w-3.5" />
+                </span>
+              )}
             </div>
 
             <div className="flex flex-col justify-center space-y-2 min-w-0 flex-1">
               <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground leading-none">
+                <h1 className="text-base sm:text-2xl font-black tracking-tight text-foreground leading-tight sm:leading-none">
                   Welcome back, {firstName}
                 </h1>
-                <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft border border-primary/20 px-2.5 py-0.5 text-xs font-bold text-primary shrink-0">
-                  {isStudent ? (
-                    <HiOutlineAcademicCap className="h-3.5 w-3.5 text-primary shrink-0" />
-                  ) : (
-                    <HiCheckBadge className="h-3.5 w-3.5 text-primary shrink-0" />
-                  )}
-                  <span>{isStudent ? `Verified Student · ${studyYear}` : `Verified ${roleName}`}</span>
-                </span>
+                {isCandidateVerified && (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                    {isStudent ? <HiOutlineAcademicCap className="h-3.5 w-3.5 shrink-0" /> : <HiCheckBadge className="h-3.5 w-3.5 shrink-0" />}
+                    <span>{isStudent ? `Verified Student · ${studyYear}` : `Verified ${roleName}`}</span>
+                  </span>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-x-2.5 sm:gap-x-3 gap-y-1.5 text-xs sm:text-sm text-muted-foreground">
@@ -589,11 +740,31 @@ return (
                     </span>
                   </>
                 )}
-                <span className="hidden sm:inline-block h-1 w-1 rounded-full bg-muted-foreground/35 shrink-0" />
-                <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                  <span>{isStudent ? "Internship & Mentorship Track Active" : "Fast-Track Placement Active"}</span>
-                </span>
+                {!isCandidateVerified && (
+                  <>
+                    <span className="hidden sm:inline-block h-1 w-1 rounded-full bg-muted-foreground/35 shrink-0" />
+                    <span className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                      isCandidateRejected
+                        ? "border-destructive/25 bg-destructive/5 text-destructive"
+                        : isCandidateReviewInProgress
+                          ? "border-blue-500/25 bg-blue-500/5 text-blue-700 dark:text-blue-300"
+                          : "border-amber-500/25 bg-amber-500/5 text-amber-700 dark:text-amber-300",
+                    )}>
+                      <HiOutlineClock className="h-3.5 w-3.5 shrink-0" />
+                      <span>{isCandidateRejected ? "Update needed" : isCandidateReviewInProgress ? "Under review" : isStudent ? "Proof required" : "Documents required"}</span>
+                    </span>
+                  </>
+                )}
+                {isCandidateVerified && (
+                  <>
+                    <span className="hidden sm:inline-block h-1 w-1 rounded-full bg-muted-foreground/35 shrink-0" />
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                      <span>{isStudent ? "Internship & Mentorship Track Active" : "Fast-Track Placement Active"}</span>
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -672,6 +843,44 @@ return (
         </div>
       </section>
 
+      {!isCandidateVerified && !loading && (
+        <section
+          role="status"
+          className={cn(
+            "flex items-start gap-3 rounded-2xl border p-4 sm:p-5",
+            isCandidateRejected ? "border-destructive/25 bg-destructive/5" : "border-amber-500/25 bg-amber-500/5",
+          )}
+        >
+          <span className={cn("mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl", isCandidateRejected ? "bg-destructive/10 text-destructive" : "bg-amber-500/10 text-amber-700 dark:text-amber-400")}>
+            {isCandidateRejected ? <HiOutlineShieldCheck className="h-5 w-5" /> : <HiOutlineClock className="h-5 w-5" />}
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-foreground">
+              {isCandidateRejected
+                ? "Action needed to complete verification"
+                : isCandidateReviewInProgress
+                  ? "Verification in progress"
+                  : isStudent ? "Submit proof of study for review" : "Submit your credentials for verification"}
+            </h2>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {isCandidateRejected
+                  ? liveCandidateProfile?.kycNotes || "Review the note below and replace or update the requested information to continue verification."
+                  : isCandidateReviewInProgress
+                    ? isStudent
+                      ? "Your submitted proof is with our credentialing team. We’ll update your status here when the review is complete. Huddle posting unlocks after approval."
+                      : "Your submitted credentials are with our credentialing team. We’ll update your status here when the review is complete."
+                    : isStudent
+                      ? "Submit a college ID, bonafide certificate, or university registration number. We’ll start the review after you submit proof; Huddle posting unlocks after approval."
+                      : "Upload a government-issued photo ID, your current council registration certificate, and your degree or provisional certificate. We’ll begin reviewing your profile once all three documents are submitted."}
+            </p>
+            <Link to="/profile" className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3.5 text-xs font-bold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+              <span>{isCandidateRejected ? "Review requested changes" : isCandidateReviewInProgress ? "Track verification status" : isStudent ? "Submit proof of study" : "Upload required documents"}</span>
+              <HiArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        </section>
+      )}
+
       {/* ========================================================================= */}
       {/* 2. FOUR KEY CLINICAL METRIC TILES                                         */}
       {/* ========================================================================= */}
@@ -708,7 +917,7 @@ return (
             <span>
               {viewStats.totalViews > 0
                 ? `• ${viewStats.hospitalsViewedToday} Hospital${viewStats.hospitalsViewedToday === 1 ? "" : "s"} viewed today`
-                : "• Profile active in recruiter searches"}
+                : isCandidateVerified ? "• Profile active in recruiter searches" : "• Search visibility follows credential review"}
             </span>
           </div>
         </Link>
@@ -1185,6 +1394,10 @@ return (
                             <HiOutlineLockClosed className="h-3.5 w-3.5" />
                             <span>Internships only for students</span>
                           </span>
+                        ) : !isCandidateVerified ? (
+                          <Button asChild size="sm" variant="outline" className="h-9 rounded-xl px-3 text-xs font-bold">
+                            <Link to="/profile">Verify to apply</Link>
+                          </Button>
                         ) : (
                           <Button
                             size="sm"
@@ -1217,32 +1430,120 @@ return (
               </Button>
             </div>
           )}
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 items-stretch gap-5 pt-1">
+            <section className="h-full rounded-3xl border border-border/80 bg-card p-5 shadow-xs xl:min-h-[330px]">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2"><HiOutlineCalendarDays className="h-4 w-4 text-primary" /><h2 className="text-sm font-extrabold text-foreground">Your week</h2></div>
+                <Link to={isStudent ? "/applications" : "/shifts"} className="inline-flex shrink-0 items-center gap-1 text-xs font-bold text-primary transition-colors hover:text-primary-hover">View all<HiArrowRight className="h-3.5 w-3.5" /></Link>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">Scheduled interviews and confirmed shifts</p>
+                <div className="inline-flex items-center rounded-full border border-border/80 bg-muted/30 p-0.5">
+                  <button type="button" aria-label="Previous 7 days" title="Previous 7 days" onClick={() => { setWeekOffset((offset) => offset - 1); setSelectedWeekDay(0); }} className="grid h-7 w-7 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-card hover:text-foreground"><HiArrowLeft className="h-3.5 w-3.5" /></button>
+                  <div className="min-w-[96px] px-1 text-center leading-tight"><span className="block text-[10px] font-bold text-foreground">{weekNavLabel}</span><span className="mt-0.5 block text-[9px] font-medium text-muted-foreground">{weekRangeLabel}</span></div>
+                  <button type="button" aria-label="Next 7 days" title="Next 7 days" onClick={() => { setWeekOffset((offset) => offset + 1); setSelectedWeekDay(0); }} className="grid h-7 w-7 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-card hover:text-foreground"><HiArrowRight className="h-3.5 w-3.5" /></button>
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-7 gap-1.5 max-sm:-mx-1 max-sm:flex max-sm:gap-2 max-sm:overflow-x-auto max-sm:overflow-y-hidden max-sm:px-1 max-sm:pb-2 max-sm:pt-2 max-sm:snap-x max-sm:snap-mandatory max-sm:no-scrollbar max-sm:[scrollbar-width:none] max-sm:[-ms-overflow-style:none] max-sm:[&::-webkit-scrollbar]:hidden" role="group" aria-label="Choose a day this week">
+                {weekDays.map((day, index) => <button key={day.key} type="button" onClick={() => setSelectedWeekDay(index)} aria-pressed={selectedWeekDay === index} className={cn("relative mt-1 flex min-w-0 cursor-pointer flex-col items-center gap-1 rounded-xl border px-1 pb-2 pt-5 shadow-sm transition-all after:absolute after:left-2 after:right-2 after:top-4 after:border-t after:border-dashed after:border-current after:opacity-20 after:content-[''] max-sm:mt-1 max-sm:w-14 max-sm:min-w-14 max-sm:shrink-0 max-sm:snap-start", selectedWeekDay === index ? "border-primary bg-primary text-primary-foreground shadow-md" : "border-border/70 bg-amber-50/70 text-muted-foreground hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary-soft/30 hover:shadow-md dark:bg-card")}><span aria-hidden="true" className={cn("absolute -top-1 left-1/2 z-10 h-2 w-2 -translate-x-1/2 rounded-full border shadow-inner", selectedWeekDay === index ? "border-white bg-white ring-2 ring-primary/30" : "border-stone-300 bg-stone-300 ring-2 ring-amber-50")} /><span className="text-[10px] font-semibold">{index === 0 ? "Today" : day.date.toLocaleDateString("en-IN", { weekday: "short" })}</span><span className="text-sm font-extrabold">{day.date.getDate()}</span><span className="flex h-1.5 items-center gap-0.5">{day.events.slice(0, 3).map((event) => <i key={event.id} aria-label={event.kind} className={cn("h-1 w-1 rounded-full", selectedWeekDay === index ? "bg-primary-foreground" : event.kind === "Interview" ? "bg-sky-500" : "bg-emerald-500")} />)}</span></button>)}
+              </div>
+              <div className="mt-4 border-t border-border/70 pt-3">
+                <h3 className="text-xs font-bold text-foreground">{weekOffset === 0 && selectedWeekDay === 0 ? "Today" : selectedDay.date.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}{selectedDay.events.length > 0 && <span className="ml-2 font-medium text-muted-foreground">{selectedDay.events.length} item{selectedDay.events.length === 1 ? "" : "s"}</span>}</h3>
+                {selectedDay.events.length ? <div className="mt-2 space-y-2">{selectedDay.events.map((item) => <Link key={item.id} to={item.kind === "Interview" ? "/applications" : "/shifts"} className="flex items-start gap-3 rounded-xl bg-muted/40 p-3 transition-colors hover:bg-muted/70"><span className={cn("mt-0.5 rounded-lg px-2 py-1 text-[10px] font-bold", item.kind === "Interview" ? "bg-sky-500/10 text-sky-700" : "bg-emerald-500/10 text-emerald-700")}>{item.kind}</span><div className="min-w-0"><p className="truncate text-xs font-bold text-foreground">{item.title}</p><p className="truncate text-[11px] text-muted-foreground">{item.subtitle}</p><p className="mt-1 text-[11px] font-semibold text-foreground">{new Date(item.when).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}<span className="ml-2 font-medium text-primary">View details →</span></p></div></Link>)}</div> : <div className="mt-3 rounded-xl bg-muted/30 px-4 py-3 text-xs leading-relaxed text-muted-foreground">You’re clear for this day. Scheduled events will appear here.</div>}
+              </div>
+            </section>
+
+            <section className="flex h-full flex-col rounded-3xl border border-border/80 bg-card p-5 shadow-xs xl:min-h-[330px]">
+              <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-2"><HiOutlineDocumentText className="h-4 w-4 shrink-0 text-primary" /><h2 className="text-sm font-extrabold leading-5 text-foreground">Applications</h2></div><Link to="/applications" className="shrink-0 whitespace-nowrap text-xs font-bold leading-5 text-primary hover:underline">View all</Link></div>
+              <p className="mt-1 text-xs text-muted-foreground">Recent status updates from hospitals.</p>
+              {applicationsLoadState === "loading" ? <div className="mt-3 flex flex-1 items-center justify-center rounded-2xl bg-muted/20 p-5 text-xs text-muted-foreground">Loading your applications…</div> : applicationsLoadState === "error" ? <div className="mt-3 flex flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-border/80 bg-muted/15 px-5 py-6 text-center"><p className="text-sm font-bold text-foreground">Applications couldn’t be loaded</p><p className="mt-1 text-xs text-muted-foreground">Your saved applications are unchanged. Try again.</p><Button type="button" variant="outline" size="sm" onClick={pageLoad.retry} className="mt-3 h-9 rounded-xl px-3.5 text-xs font-bold">Retry</Button></div> : recentApplications.length ? <div className="mt-3 flex-1 divide-y divide-border/70">{recentApplications.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 py-3 first:pt-1 last:pb-1"><div className="min-w-0"><p className="truncate text-xs font-bold text-foreground">{item.title}</p><p className="truncate text-[11px] text-muted-foreground">{item.org} · {item.updatedAt ? `Updated ${new Date(item.updatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : `Applied ${item.date}`}</p></div><span className="shrink-0 rounded-full bg-primary-soft px-2 py-1 text-[10px] font-bold text-primary">{item.status}</span></div>)}</div> : <div className="mt-3 flex flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-border/80 bg-muted/15 px-5 py-6 text-center"><span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><HiOutlineDocumentCheck className="h-5 w-5" /></span><p className="mt-3 text-sm font-bold text-foreground">Your applications will show here</p><p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">Apply to a matched role to follow its status and hospital updates in one place.</p><Button asChild variant="outline" size="sm" className="mt-4 h-9 rounded-xl px-3.5 text-xs font-bold"><Link to="/jobs">Explore matched roles<HiArrowRight className="ml-1.5 h-3.5 w-3.5" /></Link></Button></div>}
+            </section>
+
+            <section className="rounded-3xl border border-border/80 bg-card p-5 shadow-xs xl:col-span-2">
+              <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><HiOutlineChatBubbleLeftRight className="h-4 w-4 text-primary" /><h2 className="text-sm font-extrabold text-foreground">From Huddle</h2></div><Link to="/huddle" className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">Open Huddle<HiOutlineArrowUpRight className="h-3.5 w-3.5" /></Link></div>
+              {huddleLoadState === "loading" ? <div className="mt-3 rounded-xl bg-muted/30 p-4 text-xs text-muted-foreground">Loading recent Huddle discussions…</div> : huddleLoadState === "error" ? <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border/80 bg-muted/15 p-4"><p className="text-xs text-muted-foreground">Huddle discussions couldn’t be loaded.</p><Button type="button" variant="outline" size="sm" onClick={() => setHuddleRetryKey((key) => key + 1)} className="h-8 rounded-lg px-3 text-xs font-bold">Retry</Button></div> : huddlePosts.length ? <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">{huddlePosts.map((post) => {
+                const isGenericVoiceNote = post.title?.trim().toLowerCase() === "voice note" && post.body?.trim().toLowerCase() === "clinical voice discussion";
+                const duration = post.audioDuration ? `${Math.floor(post.audioDuration / 60)}:${String(post.audioDuration % 60).padStart(2, "0")}` : "";
+                const postedAt = post.createdAt ? new Date(post.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : post.timeAgo || "Recent";
+                return <Link to="/huddle" key={post.id} className="block rounded-xl bg-muted/40 p-3 transition-colors hover:bg-muted/70"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-bold uppercase tracking-wide text-primary">{post.type} · {post.field}</span><span className="shrink-0 text-[10px] text-muted-foreground">{postedAt}</span></div><p className="mt-1 line-clamp-2 text-xs font-semibold text-foreground">{isGenericVoiceNote ? `Voice note${duration ? ` · ${duration}` : ""}` : post.title || post.body}</p><p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{isGenericVoiceNote ? `Audio discussion shared by ${post.anon || post.isAnonymous ? "an anonymous member" : post.authorName || "a Huddle member"}.` : post.body}</p></Link>;
+              })}</div> : <p className="mt-3 rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground">No recent discussions to show. Visit Huddle to explore the community.</p>}
+            </section>
+          </div>
         </section>
 
         {/* ======================================================================= */}
         {/* RIGHT RAIL: READINESS, INSTANT SHIFTS & ASSISTANT (4 COLUMNS ~33%)     */}
         {/* ======================================================================= */}
-        <aside className="lg:col-span-4 w-full min-w-0 space-y-5 lg:sticky lg:top-20">
+        <aside className="lg:col-span-4 w-full min-w-0 space-y-5">
+          {/* Personalized action keeps the most useful next step visible. */}
+          <section className="rounded-3xl border border-primary/20 bg-primary-soft/30 p-5 shadow-xs">
+            <div className="flex items-start gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><HiOutlineSparkles className="h-4 w-4" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">Your next step</p>
+                <h2 className="mt-1 text-sm font-extrabold text-foreground">{nextStep.title}</h2>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{nextStep.detail}</p>
+                <Button asChild size="sm" className="mt-3 h-9 rounded-xl px-3.5 text-xs font-bold shadow-none">
+                  <Link to={nextStep.to}>
+                    {nextStep.label}<HiArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          </section>
+
+          {!isStudent && (
+            <section className="rounded-3xl border border-border/80 bg-card p-5 shadow-xs">
+              <div className="flex items-center gap-2">
+                <HiOutlineBolt className="h-4 w-4 text-primary" />
+                <h2 className="text-sm font-extrabold text-foreground">Priority Pool readiness</h2>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Reach 80% profile completion and keep Open to Work enabled to meet the profile criteria. Credential verification is tracked separately.</p>
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
+                <span className={cn("rounded-full px-2.5 py-1", completeness >= 80 ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground")}>{completeness >= 80 ? "Profile criteria met" : `${completeness}% profile`}</span>
+                <span className={cn("rounded-full px-2.5 py-1", isOpenToWork ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground")}>{isOpenToWork ? "Open to Work" : "Turn on Open to Work"}</span>
+                <span className={cn("rounded-full px-2.5 py-1", isCandidateVerified ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700")}>{isCandidateVerified ? "Credentials verified" : "Verification needed"}</span>
+              </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">This shows profile readiness; it doesn’t confirm Priority Pool membership.</p>
+              <Link to="/profile" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">Review profile<HiArrowRight className="h-3.5 w-3.5" /></Link>
+            </section>
+          )}
+
+          {needsPayoutSetup && (
+            <section className="flex items-start gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4">
+              <HiOutlineCurrencyRupee className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+              <div className="min-w-0 flex-1"><h2 className="text-xs font-extrabold text-foreground">Add payout details</h2><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Add a UPI ID or bank account to receive eligible shift payments.</p><Link to="/earnings" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">Set up payouts<HiArrowRight className="h-3.5 w-3.5" /></Link></div>
+            </section>
+          )}
+
           {/* 1. Placement Readiness & Open to Work Card */}
           <div className="rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col items-start gap-3">
+              <div className="flex min-w-0 items-start gap-2">
                 <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
                   <HiOutlineSparkles className="h-4 w-4" />
                 </span>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-sm font-bold text-foreground">
-                    {isStudent ? "Student Profile Status" : "Placement Profile"}
+                    {isStudent ? "Student profile" : "Professional profile"}
                   </h3>
                   <p className="text-[11px] text-muted-foreground">
-                    {isStudent ? "Verified academic account" : "NABH Fast-Track Verified"}
+                    {isStudent ? "Profile completion and study proof" : "Profile completion and credential review"}
                   </p>
                 </div>
               </div>
 
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Active
+              <span className={cn(
+                "inline-flex max-w-full items-center gap-1.5 self-start rounded-full border px-2.5 py-1 text-[11px] font-bold leading-tight",
+                isCandidateVerified
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                  : isCandidateRejected
+                    ? "bg-destructive/10 border-destructive/20 text-destructive"
+                    : "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-300",
+              )}>
+                <span className={cn("h-1.5 w-1.5 rounded-full", isCandidateVerified ? "bg-emerald-500" : isCandidateRejected ? "bg-destructive" : "bg-amber-500")} />
+                {isCandidateVerified ? "Verified" : isCandidateRejected ? "Action needed" : isCandidateReviewInProgress ? "In review" : candidateVerificationDocs.length > 0 ? "Documents incomplete" : candidateKycStatus === "DOCUMENTS_REQUIRED" ? "Documents required" : "Verification not started"}
               </span>
             </div>
 
@@ -1264,21 +1565,21 @@ return (
             <div className="space-y-2 pt-2 border-t border-border/60">
               <div className="flex items-center justify-between text-xs py-1">
                 <span className="text-muted-foreground flex items-center gap-1.5">
-                  <HiOutlineShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                  <span>{isStudent ? "College Bonafide" : "Council Registration"}</span>
+                  <HiOutlineShieldCheck className={cn("h-4 w-4", isCandidateVerified ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")} />
+                  <span>{isStudent ? "Proof of study" : "Council registration"}</span>
                 </span>
                 <span className="font-semibold text-foreground truncate max-w-[150px] text-right">
-                  {s.profile["regNo"] || s.profile["council"] || s.docs["REGISTRATION"] || s.docs["RESUME"] || "Verified"}
+                  {isCandidateVerified ? s.profile["regNo"] || s.profile["council"] || s.docs["REGISTRATION"] || "Verified" : isCandidateRejected ? "Action needed" : hasCandidateRegistrationInfo ? "Under review" : "Not submitted"}
                 </span>
               </div>
 
               <div className="flex items-center justify-between text-xs py-1">
                 <span className="text-muted-foreground flex items-center gap-1.5">
-                  <HiOutlineDocumentCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                  <span>{isStudent ? "Academic ID Card" : "Degree Certificate"}</span>
+                  <HiOutlineDocumentCheck className={cn("h-4 w-4", isCandidateVerified ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")} />
+                  <span>{isStudent ? "College ID or bonafide" : "Degree certificate"}</span>
                 </span>
                 <span className="font-semibold text-foreground truncate max-w-[150px] text-right">
-                  {s.profile["qual"] || s.docs["DEGREE"] || s.docs["STUDENT_ID"] || ""}
+                  {isCandidateVerified ? s.profile["qual"] || s.docs["DEGREE"] || s.docs["STUDENT_ID"] || "Verified" : isCandidateRejected ? "Action needed" : hasCandidateEducationInfo ? "Under review" : "Not submitted"}
                 </span>
               </div>
 
@@ -1437,7 +1738,16 @@ return (
                               </div>
                             </div>
 
-                            <button
+                            {isStudent ? (
+                              <span className="shrink-0 rounded-xl border border-border bg-muted px-3 py-1.5 text-[11px] font-semibold text-muted-foreground">Clinicians only</span>
+                            ) : !isCandidateVerified ? (
+                              <Link
+                                to="/profile"
+                                className="shrink-0 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-bold text-primary"
+                              >
+                                Verify to claim
+                              </Link>
+                            ) : <button
                               type="button"
                               onClick={() => handleClaimShift(sh.id, sh.title, sh.org)}
                               disabled={isClaimed}
@@ -1449,7 +1759,7 @@ return (
                               )}
                             >
                               {isClaimed ? "Claimed" : "Claim"}
-                            </button>
+                            </button>}
                           </div>
                         </div>
                       );

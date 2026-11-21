@@ -148,6 +148,7 @@ function JobDetail() {
   const app = s.applied.find((a) => a.jobId === job.id);
   const isApplied = Boolean(app && app.status !== "Withdrawn");
   const isWithdrawn = Boolean(app && app.status === "Withdrawn");
+  const isCandidateVerified = !isApiEnabled || String(s.profile["kycStatus"] || "").toUpperCase() === "VERIFIED";
   const saved = s.saved.includes(job.id);
 
   const toggleSaveRole = async () => jobAction.run(async () => {
@@ -157,6 +158,7 @@ function JobDetail() {
   });
   const apply = async () => {
     if (isApplied) return;
+    if (!isCandidateVerified) { toast.info("Verify your profile before applying for jobs."); return; }
     return jobAction.run(async () => {
       await applyForJob(job.id);
       const date = new Date().toLocaleDateString("en-IN");
@@ -256,12 +258,24 @@ function JobDetail() {
                     <HiOutlineArrowUturnLeft className="h-4 w-4" />
                     <span>Withdrawn on {app.date}</span>
                   </div>
-                  <Button size="lg" disabled={jobAction.isPending} onClick={apply} className="gap-2">
-                    <HiOutlineArrowPath className="h-4 w-4" /> Re-apply
-                  </Button>
+                  {isCandidateVerified ? (
+                    <Button size="lg" disabled={jobAction.isPending} onClick={apply} className="gap-2">
+                      <HiOutlineArrowPath className="h-4 w-4" /> Re-apply
+                    </Button>
+                  ) : (
+                    <Button asChild size="lg" variant="outline" className="gap-2">
+                      <Link to="/profile">Verify to re-apply</Link>
+                    </Button>
+                  )}
                 </>
               ) : (
-                <Button size="lg" onClick={apply} className="flex-1 sm:flex-initial">{isStudent ? "Apply for Internship" : "Easy apply"}</Button>
+                isCandidateVerified ? (
+                  <Button size="lg" onClick={apply} className="flex-1 sm:flex-initial">{isStudent ? "Apply for Internship" : "Easy apply"}</Button>
+                ) : (
+                  <Button asChild size="lg" variant="outline" className="flex-1 sm:flex-initial">
+                    <Link to="/profile">Verify to apply</Link>
+                  </Button>
+                )
               )}
               <Button
                 variant="outline"

@@ -144,6 +144,7 @@ function PostShiftScreen() {
   const [availableEscrow, setAvailableEscrow] = useState<number>(0);
   const [hasLinkedBank, setHasLinkedBank] = useState<boolean>(false);
   const [shiftPolicy, setShiftPolicy] = useState<FacilityShiftPolicyDto | null>(null);
+  const isFacilityVerified = !isApiEnabled || (shiftPolicy ? shiftPolicy.kycVerified : String(store.profile["kycStatus"] || "").toUpperCase() === "VERIFIED");
   const [editingShift, setEditingShift] = useState<UiShiftItem | null>(null);
   const [publishedStatus, setPublishedStatus] = useState<string>("PENDING_APPROVAL");
 
@@ -542,7 +543,12 @@ function PostShiftScreen() {
   };
 
   // Submit Shift
-  const handlePublishShift = async () => { await pageAction.run(async () => {
+  const handlePublishShift = async () => {
+    if (!isFacilityVerified) {
+      toast.info("Hospital verification is required before publishing shifts.");
+      return;
+    }
+    await pageAction.run(async () => {
     const check = validateShiftForm();
     if (!check.valid || !check.startDate || !check.endDate || !check.effectiveHours) {
       return;
@@ -692,6 +698,13 @@ function PostShiftScreen() {
             </span>
           </div>
         </div>
+
+        {!isFacilityVerified && (
+          <div role="status" className="flex flex-col gap-3 rounded-2xl border border-amber-300/70 bg-amber-50/70 p-4 text-sm dark:border-amber-700/50 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
+            <div><p className="font-bold text-foreground">Shift publishing is locked until hospital verification</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Complete hospital verification to publish shifts and reach verified clinicians.</p></div>
+            <Button asChild variant="outline" size="sm" className="shrink-0 rounded-xl"><Link to="/employer/profile">Complete verification</Link></Button>
+          </div>
+        )}
 
         {/* ========================================================= */}
         {/* 2-COLUMN MAIN LAYOUT: FORM + LIVE CANDIDATE PREVIEW */}
@@ -1226,7 +1239,7 @@ function PostShiftScreen() {
             <div className="flex lg:hidden items-center gap-3 pt-2">
               <Button
                 type="button"
-                disabled={pageAction.isPending} onClick={handlePublishShift}
+                disabled={!isFacilityVerified || pageAction.isPending} onClick={handlePublishShift}
                 isLoading={submitting}
                 loadingText="Publishing shift..."
                 className="w-full rounded-xl font-bold text-xs h-11 gap-1.5 shadow-sm bg-primary hover:bg-primary-hover text-primary-foreground cursor-pointer"
@@ -1409,7 +1422,7 @@ function PostShiftScreen() {
               <Button
                 type="button"
                 size="lg"
-                disabled={pageAction.isPending} onClick={handlePublishShift}
+                disabled={!isFacilityVerified || pageAction.isPending} onClick={handlePublishShift}
                 isLoading={submitting}
                 loadingText="Publishing & Dispatching..."
                 className="w-full rounded-xl h-11 text-sm font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer flex items-center justify-center gap-2"

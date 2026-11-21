@@ -23,6 +23,7 @@ import { FlowAIFloatingButton } from "./FlowAIFloatingButton";
 import { useApp, setState, Portal, setUnreadNotificationCount } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { calculateCandidateProfileStrength } from "@/lib/profileStrength";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -60,7 +61,7 @@ const candidateNav = [
   { to: "/home", label: "Home", icon: HiOutlineHome, active: HiHome, badge: 0 },
   { to: "/jobs", label: "Jobs", icon: HiOutlineBriefcase, active: HiBriefcase, badge: 0 },
   { to: "/shifts", label: "Shifts", icon: HiOutlineClock, active: HiClock, badge: 0 },
-  { to: "/applications", label: "Applications", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
+  { to: "/applications", label: "Applications", shortLabel: "Applied", icon: HiOutlineClipboardDocumentList, active: HiClipboardDocumentList, badge: 0 },
   { to: "/earnings", label: "Earnings", icon: HiOutlineBanknotes, active: HiBanknotes, badge: 0 },
   { to: "/learning", label: "Learning", icon: HiOutlineAcademicCap, active: HiAcademicCap, badge: 0 },
   { to: "/huddle", label: "Huddle", icon: HiOutlineChatBubbleLeftRight, active: HiChatBubbleLeftRight, badge: 0 },
@@ -78,6 +79,43 @@ const facilityNav = [
 
 export function initials(name?: string) {
   return (name || "FALE User").split(" ").map((x) => x[0]).slice(0, 2).join("").toUpperCase();
+}
+
+function ProfileProgressAvatar({
+  avatarUrl,
+  name,
+  portal,
+  completion,
+}: {
+  avatarUrl?: string;
+  name: string;
+  portal: Portal;
+  completion?: number;
+}) {
+  if (portal !== "candidate" || completion == null) {
+    return <UserAvatar avatarUrl={avatarUrl} name={name} portal={portal} size="md" />;
+  }
+
+  const percent = Math.max(0, Math.min(100, Math.round(completion)));
+  return (
+    <span
+      className="relative grid h-11 w-11 shrink-0 place-items-center"
+      title={`Profile ${percent}% complete`}
+      aria-label={`Profile ${percent}% complete`}
+    >
+      <span
+        className="grid h-10 w-10 place-items-center rounded-full p-[2.5px] shadow-sm"
+        style={{ background: `conic-gradient(#ff4f14 ${percent}%, #e9e7e5 ${percent}%)` }}
+      >
+        <span className="grid h-full w-full place-items-center rounded-full bg-card p-[2px]">
+          <UserAvatar avatarUrl={avatarUrl} name={name} portal={portal} size="sm" className="border-0 shadow-none ring-0" />
+        </span>
+      </span>
+      <span className="absolute -bottom-1 -right-1 rounded-full border-2 border-card bg-primary px-1 py-0.5 text-[8px] font-extrabold leading-none tracking-tight text-primary-foreground shadow-md">
+        {percent}%
+      </span>
+    </span>
+  );
 }
 
 export function UserAvatar({
@@ -629,6 +667,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           if (!profileData) return;
           const photoDoc = profileData.documents?.find((d) => d.documentType === "PHOTO")?.fileUrl;
           const openVal = profileData.openToWork != null ? Boolean(profileData.openToWork) : true;
+          const avatarUrl = photoDoc || s.profile["avatar"] || "";
+          const profileCompletion = calculateCandidateProfileStrength({
+            name: profileData.name,
+            city: profileData.city,
+            email: profileData.email,
+            profession: profileData.profession || (profileData.isStudent ? profileData.course : ""),
+            specialty: profileData.specialty,
+            qualification: profileData.qualification,
+            college: profileData.college,
+            skills: profileData.skills,
+            languages: profileData.languages,
+            experienceHistory: profileData.experienceHistory,
+            preferredCities: profileData.preferredCities,
+            employmentType: profileData.employmentType,
+            availability: profileData.availability,
+            bio: profileData.bio,
+            isStudent: profileData.isStudent,
+            isFresher: profileData.candidateLevel?.toUpperCase() === "FRESHER" || profileData.experienceYears?.toLowerCase().includes("fresher") === true,
+          });
           setState((prev) => ({
             candidateLevel: profileData.isStudent ? "student" : (profileData.candidateLevel?.toLowerCase() as any),
             profile: {
@@ -651,6 +708,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               level: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
               cadreLevel: profileData.isStudent ? "student" : profileData.candidateLevel?.toLowerCase(),
               kycStatus: profileData.kycStatus || prev.profile["kycStatus"],
+              profileCompletion: String(profileCompletion),
               notice: profileData.noticePeriod || prev.profile["notice"] || "",
               availability: profileData.availability || prev.profile["availability"] || "",
               avatar: photoDoc || prev.profile["avatar"],
@@ -669,6 +727,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               recruiter: facData.contactPersonName || prev.profile["recruiter"],
               email: facData.contactEmail || prev.profile["email"],
               phone: facData.contactPhone || prev.profile["phone"],
+              kycStatus: facData.kycStatus || prev.profile["kycStatus"],
               logoUrl: facData.logoUrl || prev.profile["logoUrl"],
               avatar: facData.logoUrl || prev.profile["avatar"],
             },
@@ -837,11 +896,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                     aria-label="Open profile menu"
                     className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer hover:opacity-90 transition-opacity"
                   >
-                    <UserAvatar
+                    <ProfileProgressAvatar
                       avatarUrl={s.profile["avatar"] || s.profile["logoUrl"] || s.profile["photoUrl"]}
                       name={name}
                       portal={activePortal}
-                      size="md"
+                      completion={typeof s.profile["profileCompletion"] === "string" ? Number(s.profile["profileCompletion"]) : undefined}
                     />
                   </button>
                 </DropdownMenuTrigger>
@@ -869,11 +928,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                     aria-label="Open profile menu"
                     className="flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer hover:opacity-90 transition-opacity"
                   >
-                    <UserAvatar
+                    <ProfileProgressAvatar
                       avatarUrl={s.profile["avatar"] || s.profile["logoUrl"] || s.profile["photoUrl"]}
                       name={name}
                       portal={activePortal}
-                      size="md"
+                      completion={typeof s.profile["profileCompletion"] === "string" ? Number(s.profile["profileCompletion"]) : undefined}
                     />
                   </button>
                 </SheetTrigger>

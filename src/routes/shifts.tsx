@@ -145,6 +145,7 @@ function Shifts() {
     (s.profile["cadreLevel"] as any) ||
     (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
+  const isCandidateVerified = !isApiEnabled || String(s.profile["kycStatus"] || "").toUpperCase() === "VERIFIED";
 
   const [q, setQ] = useState("");
   const [cityF, setCityF] = useState("All Cities");
@@ -180,6 +181,7 @@ function Shifts() {
                 role: profile.profession || prev.profile["role"],
                 specialty: profile.specialty || prev.profile["specialty"],
                 city: profile.city || prev.profile["city"],
+                kycStatus: profile.kycStatus || prev.profile["kycStatus"],
               },
             }));
           }
@@ -423,7 +425,12 @@ function Shifts() {
     }, 0);
   }, [isApiEnabled, myClaims, appliedShiftObjects]);
 
-  const handleApply = async (id: string, title: string, org: string) => { await pageAction.run(async () => {
+  const handleApply = async (id: string, title: string, org: string) => {
+    if (!isCandidateVerified) {
+      toast.info("Verify your profile before claiming shifts.");
+      return;
+    }
+    await pageAction.run(async () => {
     if (applyingId === id) return;
 
     setApplyingId(id);
@@ -445,7 +452,7 @@ function Shifts() {
         appliedDate: "Today",
         regNumber: s.profile?.regNo || (isStudent ? "College Verified" : "Council Verified"),
         phone: s.profile?.phone || "",
-        email: s.profile?.email || "candidate@fale.care",
+        email: s.profile?.email || "",
         summary: `Applied for ${title} locum shift duty coverage.`,
       };
       setState((x) => ({
@@ -1138,6 +1145,12 @@ function Shifts() {
                                     Shift Full
                                   </span>
                                 </div>
+                              ) : isStudent ? (
+                                <span className="inline-flex h-10 items-center rounded-xl border border-border bg-muted px-3 text-xs font-semibold text-muted-foreground">Clinicians only</span>
+                              ) : !isCandidateVerified ? (
+                                <Button asChild size="sm" variant="outline" className="w-full sm:w-auto rounded-xl px-4 font-bold h-10 shrink-0">
+                                  <Link to="/profile">Verify to claim</Link>
+                                </Button>
                               ) : (
                                 <Button
                                   size="sm"

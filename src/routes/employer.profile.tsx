@@ -478,7 +478,7 @@ function HospitalProfileScreen() {
 
                 <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 px-2.5 py-1 text-xs font-bold backdrop-blur-md">
                   <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                  <span>{isVerified ? "Regulatory Approved" : "State Health Authority Registered"}</span>
+                  <span>{isVerified ? "Verified by The Fale" : "Verification pending"}</span>
                 </span>
               </div>
             </div>
@@ -556,10 +556,10 @@ function HospitalProfileScreen() {
                   <h1 className="text-xl sm:text-3xl font-black text-foreground tracking-tight break-words">
                     {hospitalName}
                   </h1>
-                  <RiVerifiedBadgeFill
+                  {isVerified && <RiVerifiedBadgeFill
                     className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 shrink-0"
-                    title="State Health Authority & FALE Council Verified"
-                  />
+                    title="Verified by The Fale"
+                  />}
 
                   {/* Clean non-interactive badge pills beside name */}
                   <span className="rounded-full bg-primary-soft text-primary border border-primary/25 px-2.5 py-0.5 text-xs font-bold pointer-events-none transition-none select-none">
@@ -568,7 +568,7 @@ function HospitalProfileScreen() {
 
                   <span className="rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 px-2.5 py-0.5 text-xs font-bold pointer-events-none transition-none select-none flex items-center gap-1">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    <span>State Registered</span>
+                    <span>{isVerified ? "Verified" : "Verification pending"}</span>
                   </span>
                 </div>
 
@@ -585,7 +585,7 @@ function HospitalProfileScreen() {
                   <span className="hidden sm:inline text-muted-foreground/40">•</span>
                   <span className="text-primary font-bold flex items-center gap-1">
                     <HiOutlineShieldCheck className="h-3.5 w-3.5 shrink-0" />
-                    License: {licenseNumber || "CEA-VERIFIED"}
+                    License: {licenseNumber || "Not provided"}
                   </span>
                 </div>
               </div>
@@ -631,7 +631,7 @@ function HospitalProfileScreen() {
                   {accreditationLevel.includes("NABH") ? "NABH Standard" : accreditationLevel.slice(0, 16)}
                 </span>
                 <span className="text-[10px] text-muted-foreground block mt-0.5 truncate">
-                  {isVerified ? "Audited & Verified" : "Council Registered"}
+                  {isVerified ? "Verified" : "Verification pending"}
                 </span>
               </div>
             </div>
@@ -672,12 +672,29 @@ function HospitalProfileScreen() {
                   </Badge>
                 </div>
 
+                {!isVerified && <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-2">
+                  <p className="text-xs font-bold text-foreground">Complete facility verification</p>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Add your state clinical establishment registration number and upload the matching license or registration certificate. GST and accreditation documents can be added when applicable.
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button type="button" size="sm" onClick={() => handleDocumentReplace("FACILITY_REGISTRATION", "Facility registration certificate")} className="h-8 rounded-xl text-[11px] font-bold">
+                      <HiOutlineArrowUpTray className="mr-1.5 h-3.5 w-3.5" /> Upload registration certificate
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setEditSection("credentials")} className="h-8 rounded-xl text-[11px] font-bold">
+                      Add registration number
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => handleDocumentReplace("GST_CERTIFICATE", "GST certificate")} className="h-8 rounded-xl text-[11px] font-bold">
+                      Upload GST certificate
+                    </Button>
+                  </div>
+                </div>}
                 <div className="space-y-3">
                   {docVaultList.length === 0 ? (
                     <div className="p-6 text-center rounded-2xl border border-dashed border-border bg-muted/10 space-y-2">
                       <p className="text-xs font-bold text-foreground">No statutory verification documents attached</p>
                       <p className="text-[11px] text-muted-foreground">
-                        Upload state clinical registration and statutory licenses during onboarding or profile audit.
+                        Upload the facility registration certificate above so the FALE team can review your account.
                       </p>
                     </div>
                   ) : (
@@ -934,10 +951,10 @@ function HospitalProfileScreen() {
                       </span>
                     </div>
                     <p className="text-xs font-mono font-bold text-foreground">
-                      {licenseNumber || "CEA-REG-PENDING"}
+                      {licenseNumber || "Not provided"}
                     </p>
                     <span className="text-[10px] text-muted-foreground block">
-                      State Health Authority Verified
+                      {isVerified ? "Verified by The Fale" : "Awaiting verification"}
                     </span>
                   </div>
 

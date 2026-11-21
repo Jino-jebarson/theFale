@@ -44,11 +44,49 @@ export interface ParsedResumeData {
   confidenceScore?: number;
 }
 
+type OcrWorker = { recognize: (image: Blob | HTMLCanvasElement) => Promise<{ data: { text: string } }>; terminate: () => Promise<unknown> };
+type OcrLibrary = { createWorker: (language: string, mode: number, options: Record<string, string>) => Promise<OcrWorker> };
+let ocrLibrary: Promise<OcrLibrary> | undefined;
+
+function loadOcr(): Promise<OcrLibrary> {
+  if (!ocrLibrary) ocrLibrary = new Promise<OcrLibrary>((resolve, reject) => {
+    const existing = (window as Window & { Tesseract?: OcrLibrary }).Tesseract;
+    if (existing) { resolve(existing); return; }
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+    script.onload = () => {
+      const library = (window as Window & { Tesseract?: OcrLibrary }).Tesseract;
+      if (library) resolve(library); else reject(new Error("Text recognition is unavailable."));
+    };
+    script.onerror = () => reject(new Error("Text recognition could not be loaded."));
+    document.head.appendChild(script);
+  }).catch((error) => { ocrLibrary = undefined; throw error; });
+  return ocrLibrary!;
+}
+
+async function recognizeImages(images: (Blob | HTMLCanvasElement)[]): Promise<string> {
+  const library = await loadOcr();
+  const worker = await library.createWorker("eng", 1, {
+    workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js",
+    corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1/",
+    langPath: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int",
+  });
+  try {
+    const pages: string[] = [];
+    for (const image of images) pages.push((await worker.recognize(image)).data.text);
+    return pages.join("\n");
+  } finally { await worker.terminate(); }
+}
+
 /**
  * Extracts plain text from PDF, DOCX, or text files in browser
  */
 export async function extractTextFromFile(file: File): Promise<string> {
   const fileExt = file.name.split(".").pop()?.toLowerCase();
+
+  if (file.type.startsWith("image/") || /^(png|jpe?g|webp)$/i.test(fileExt || "")) {
+    return recognizeImages([file]);
+  }
 
   if (fileExt === "pdf") {
     try {
@@ -65,11 +103,22 @@ export async function extractTextFromFile(file: File): Promise<string> {
           .join(" ");
         text += pageText + "\n";
       }
-      return text;
+      if (text.trim().length >= 40) return text;
+      const canvases: HTMLCanvasElement[] = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Could not read the scanned resume.");
+        await page.render({ canvasContext: context, canvas, viewport }).promise;
+        canvases.push(canvas);
+      }
+      return recognizeImages(canvases);
     } catch (err) {
       console.warn("PDF.js worker extraction fallback:", err);
-      // Fallback: read text via slice or blob text
-      return await file.text();
+      throw new Error("Could not read this PDF. Try another file or enter your details manually.");
     }
   }
 
@@ -465,17 +514,35 @@ function extractEducation(text: string): { qual?: string; year?: string; institu
 
   // Degrees
   const degrees = [
-    "MBBS", "MD", "MS", "B.Sc Nursing", "M.Sc Nursing", "GNM", "ANM",
-    "Post Basic B.Sc Nursing", "B.Pharm", "M.Pharm", "Pharm.D", "BPT", "MPT",
-    "BDS", "MDS", "B.Sc MLT", "DMLT", "B.Sc Radiography",
+    "Post Basic B.Sc Nursing", "B.Sc Nursing", "M.Sc Nursing", "B.Sc Radiography", "B.Sc Anaesthesia Technology",
+    "B.Sc MLT", "B.Optom", "M.Optom", "B.Pharm", "M.Pharm", "Pharm.D", "MBBS", "BAMS", "BHMS", "BUMS",
+    "BSMS", "BNYS", "BASLP", "MASLP", "BPT", "MPT", "BOT", "MOT", "BDS", "MDS", "DMLT", "GNM", "ANM", "MD", "MS",
   ];
 
   for (const deg of degrees) {
-    const reg = new RegExp(`\\b${deg.replace(".", "\\.")}\\b`, "i");
+    const pattern = deg
+      .split(/[\s.]+/)
+      .filter(Boolean)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\s.-]*");
+    const reg = new RegExp(`\\b${pattern}\\b`, "i");
     if (reg.test(text)) {
       result.qual = deg;
       break;
     }
+  }
+  if (!result.qual) {
+    const expandedDegreeNames: Array<[string, RegExp]> = [
+      ["MBBS", /\bBachelor\s+of\s+Medicine\s+(?:and\s+)?Bachelor\s+of\s+Surgery\b/i],
+      ["B.Sc Nursing", /\bBachelor\s+of\s+Science\s+(?:in\s+)?Nursing\b/i],
+      ["M.Sc Nursing", /\bMaster\s+of\s+Science\s+(?:in\s+)?Nursing\b/i],
+      ["BDS", /\bBachelor\s+of\s+Dental\s+Surgery\b/i],
+      ["BPT", /\bBachelor\s+of\s+Physiotherapy\b/i],
+      ["B.Pharm", /\bBachelor\s+of\s+Pharmacy\b/i],
+      ["B.Sc MLT", /\bBachelor\s+of\s+Science\s+(?:in\s+)?(?:Medical\s+)?Laboratory\s+Technology\b/i],
+    ];
+    const expandedDegree = expandedDegreeNames.find(([, pattern]) => pattern.test(text));
+    if (expandedDegree) result.qual = expandedDegree[0];
   }
 
   // Year of completion (4 digits between 1980 and current year)

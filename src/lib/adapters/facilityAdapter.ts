@@ -19,6 +19,11 @@ export interface FacilityProfileDto {
   beds?: number;
   icuBeds?: number;
   licenseNumber?: string;
+  groupName?: string;
+  branchName?: string;
+  agreementAcceptedAt?: string;
+  agreementVersion?: string;
+  agreementAcceptedBy?: string;
   gst?: string;
   nabhNumber?: string;
   accreditationLevel?: string;
@@ -150,7 +155,11 @@ export interface FacilityOnboardPayload {
   addressLine?: string;
   beds: number;
   icuBeds?: number;
-  licenseNumber: string;
+  licenseNumber?: string;
+  groupName?: string;
+  branchName?: string;
+  agreementAccepted?: boolean;
+  agreementOtp?: string;
   gst?: string;
   nabhNumber?: string;
   accreditationLevel?: string;

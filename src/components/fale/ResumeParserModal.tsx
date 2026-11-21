@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
   extractTextFromFile,
-  parseResumeText,
   type ParsedResumeData,
 } from "@/lib/resumeParser";
 import { cn } from "@/lib/utils";
@@ -44,12 +43,12 @@ function mapAiDataToParsedResume(aiData: Record<string, any>, rawText: string): 
     qual: aiData.qualification || undefined,
     institution: aiData.institution || undefined,
     year: aiData.graduationYear ? String(aiData.graduationYear) : undefined,
-    exp: aiData.totalExperienceYears !== undefined ? `${aiData.totalExperienceYears} Years` : undefined,
+    exp: aiData.totalExperienceYears != null && aiData.totalExperienceYears !== "" && Number.isFinite(Number(aiData.totalExperienceYears))
+      ? `${aiData.totalExperienceYears} Years` : undefined,
     employer: aiData.currentEmployer || undefined,
     designation: aiData.designation || undefined,
     notice: aiData.noticePeriod || undefined,
     skills: Array.isArray(aiData.skills) ? aiData.skills : [],
-    confidenceScore: 98,
     rawText,
   };
 }
@@ -66,8 +65,8 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
   if (!open) return null;
 
   const handleProcessFile = async (file: File) => {
-    if (!/\.(pdf|docx|txt)$/i.test(file.name)) {
-      toast.error("Please upload a PDF, DOCX, or TXT resume.");
+    if (!/\.(pdf|docx|txt|png|jpe?g|webp)$/i.test(file.name)) {
+      toast.error("Please upload a PDF, DOCX, TXT, or image resume.");
       return;
     }
     if (file.size > 15 * 1024 * 1024) {
@@ -76,22 +75,26 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
     }
 
     setCurrentFile(file.name);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setCurrentFileDataUrl(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    setCurrentFileDataUrl("");
 
     setStage("reading");
     setProgressStep(1);
 
     try {
+      const fileDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Could not read the selected file."));
+        reader.readAsDataURL(file);
+      });
+      setCurrentFileDataUrl(fileDataUrl);
       // Step 1: Ingest & read
       await new Promise((r) => setTimeout(r, 450));
       setProgressStep(2);
       setStage("analyzing");
 
       const text = await extractTextFromFile(file);
+      if (!text.trim()) throw new Error("No readable text was found.");
 
       // Step 2: Live AI Clinical Extraction (Primary)
       await new Promise((r) => setTimeout(r, 500));
@@ -113,9 +116,8 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
         console.warn("AI resume extraction error:", aiErr);
       }
 
-      // If AI succeeded, use it 100%! Only fallback to local regex if AI was offline
       if (!parsedResult) {
-        parsedResult = parseResumeText(text);
+        throw new Error("Ally could not read this resume. Please try another file or enter your details manually.");
       }
 
       await new Promise((r) => setTimeout(r, 400));
@@ -123,9 +125,7 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
 
       setParsedData(parsedResult);
       setStage("preview");
-      toast.success("Profile Extracted by Ally", {
-        description: `Extracted credentials & experience with ${parsedResult.confidenceScore ?? 96}% confidence.`,
-      });
+      toast.success("Profile extracted by Ally", { description: "Please review the extracted details." });
     } catch (err) {
       console.error("Resume parse failure:", err);
       toast.error("Could not parse this resume format. Please try another file or enter details manually.");
@@ -227,7 +227,7 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,.docx,.txt"
+                  accept=".pdf,.docx,.txt,image/png,image/jpeg,image/webp"
                   className="hidden"
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
@@ -247,7 +247,7 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
                   </span>
                 </h4>
                 <p className="mt-1.5 text-xs text-slate-500 max-w-sm">
-                  Supports PDF or Word (.docx) format up to 15 MB. We will extract your medical degrees, experience, council registration, and clinical skills.
+                  Supports PDF, Word (.docx), text or a photo up to 15 MB. Ally extracts your details for you to review.
                 </p>
 
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[11px] font-semibold text-slate-500">
@@ -342,7 +342,7 @@ export function ResumeParserModal({ open, onClose, onApplyData }: ResumeParserMo
                       Successfully Extracted Candidate Profile
                     </h4>
                     <p className="text-[11px] sm:text-xs text-emerald-800 mt-1 leading-normal">
-                      From <span className="font-semibold break-all">{currentFile}</span> ({parsedData.confidenceScore ?? 85}% match confidence)
+                      From <span className="font-semibold break-all">{currentFile}</span>. Check each detail before continuing.
                     </p>
                   </div>
                 </div>

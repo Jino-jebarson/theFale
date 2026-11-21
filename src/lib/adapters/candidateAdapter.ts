@@ -11,7 +11,30 @@ export interface CandidateDocument {
   fileSizeBytes: number;
   mimeType: string;
   verified: boolean;
+  reviewStatus?: "PENDING" | "VERIFIED" | "REJECTED" | "NOT_REQUIRED";
+  reviewNotes?: string;
+  reviewedAt?: string;
   createdAt: string;
+}
+
+export interface CandidateExperience {
+  id: string;
+  organization: string;
+  title: string;
+  startDate: string;
+  endDate?: string;
+  current: boolean;
+  description?: string;
+}
+
+export interface CandidateCertification {
+  id: string;
+  name: string;
+  issuer: string;
+  credentialId?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  documentId: string;
 }
 
 export interface CandidatePayoutMethod {
@@ -48,6 +71,7 @@ export interface CandidateProfile {
   gender?: string;
   dob?: string;
   city: string;
+  locality?: string;
   state?: string;
   pincode?: string;
   addressLine?: string;
@@ -58,6 +82,7 @@ export interface CandidateProfile {
   studyYear?: string;
   universityRegNo?: string;
   expectedGraduationYear?: number;
+  expectedGraduationMonth?: string;
   profession?: string;
   specialty?: string;
   subSpecialties?: string[];
@@ -67,11 +92,14 @@ export interface CandidateProfile {
   regNumber?: string;
   regYear?: string;
   experienceYears?: string;
+  experienceHistory?: CandidateExperience[];
+  certifications?: CandidateCertification[];
   bio?: string;
   expectedSalaryMinPaise?: number;
   expectedSalaryMaxPaise?: number;
   expectedSalaryMinRupees?: number;
   expectedSalaryMaxRupees?: number;
+  updateExpectedSalary?: boolean;
   currentSalary?: string;
   noticePeriod?: string;
   employmentType?: string;
@@ -81,7 +109,7 @@ export interface CandidateProfile {
   preferredCities?: string[];
   openToWork?: boolean;
   relocate?: boolean;
-  kycStatus: "PENDING" | "VERIFIED" | "REJECTED";
+  kycStatus: "DOCUMENTS_REQUIRED" | "PENDING" | "VERIFIED" | "REJECTED";
   kycNotes?: string;
   isMentor?: boolean;
   mentorStatus?: string;
@@ -96,12 +124,38 @@ export interface CandidateProfile {
   activeUpgradeRequest?: StudentUpgradeRequest;
 }
 
+export interface CandidateReferralEntry {
+  id: string;
+  candidateName: string;
+  status: "JOINED" | "VERIFIED" | "WORKED" | "HIRED";
+  rewardType?: "FIRST_SHIFT" | "HIRED";
+  rewardAmount?: number;
+  rewardStatus: "NONE" | "DUE" | "HELD" | "PAID";
+  rewardReason?: string;
+  joinedAt?: string;
+  qualifiedAt?: string;
+  paidAt?: string;
+}
+
+export interface CandidateReferralDashboard {
+  referralCode: string;
+  firstShiftRewardRupees: number;
+  hireRewardRupees: number;
+  monthlyRewardLimit: number;
+  invitedCount: number;
+  earnedAmount: number;
+  paidAmount: number;
+  dueAmount: number;
+  referrals: CandidateReferralEntry[];
+}
+
 export interface CandidateOnboardingPayload {
   fullName: string;
   email?: string;
   gender?: string;
   dob?: string;
   city: string;
+  locality?: string;
   state?: string;
   pincode?: string;
   addressLine?: string;
@@ -111,6 +165,7 @@ export interface CandidateOnboardingPayload {
   studyYear?: string;
   universityRegNo?: string;
   expectedGraduationYear?: number;
+  expectedGraduationMonth?: string;
   profession?: string;
   primarySpecialty?: string;
   subSpecialties?: string[];
@@ -132,6 +187,7 @@ export interface CandidateOnboardingPayload {
   preferredCities?: string[];
   skills?: string[];
   languages?: string[];
+  referralCode?: string;
   profilePhotoUrl?: string;
   profilePhotoFileName?: string;
   resumeUrl?: string;
@@ -148,6 +204,17 @@ export interface CandidateOnboardingPayload {
   studentIdCardFileName?: string;
 }
 
+export async function getCandidateReferrals(): Promise<CandidateReferralDashboard> {
+  return apiFetch<CandidateReferralDashboard>("/candidates/me/referrals");
+}
+
+export async function applyCandidateReferralCode(referralCode: string): Promise<CandidateReferralEntry> {
+  return apiFetch<CandidateReferralEntry>("/candidates/me/referrals/apply", {
+    method: "POST",
+    body: JSON.stringify({ referralCode }),
+  });
+}
+
 function normalizeCandidateProfile(profile: CandidateProfile): CandidateProfile {
   return {
     ...profile,
@@ -160,7 +227,7 @@ function normalizeCandidateProfile(profile: CandidateProfile): CandidateProfile 
  * Fetch candidate profile from Spring Boot backend.
  */
 export async function getCandidateProfile(): Promise<CandidateProfile> {
-  const profile = await apiFetch<CandidateProfile>("/candidates/me/profile", { cacheMs: 60000 });
+  const profile = await apiFetch<CandidateProfile>("/candidates/me/profile", { cacheMs: 0 });
   return normalizeCandidateProfile(profile);
 }
 
@@ -216,16 +283,16 @@ export async function updateCandidateProfile(data: Partial<CandidateOnboardingPa
     primarySpecialty: data.primarySpecialty || (data as any).specialty,
     collegeName: data.collegeName || (data as any).college,
     councilRegistrationNumber: data.councilRegistrationNumber || (data as any).regNumber,
-    expectedSalaryMinPaise: data.expectedSalaryMinRupees
+    expectedSalaryMinPaise: data.expectedSalaryMinRupees != null
       ? rupeesToPaise(data.expectedSalaryMinRupees)
-      : undefined,
-    expectedSalaryMaxPaise: data.expectedSalaryMaxRupees
+      : data.expectedSalaryMinPaise,
+    expectedSalaryMaxPaise: data.expectedSalaryMaxRupees != null
       ? rupeesToPaise(data.expectedSalaryMaxRupees)
-      : undefined,
+      : data.expectedSalaryMaxPaise,
   };
 
   const profile = await apiFetch<CandidateProfile>("/candidates/me/profile", {
-    method: "PUT",
+    method: "PATCH",
     body: JSON.stringify(body),
   });
 
@@ -234,6 +301,14 @@ export async function updateCandidateProfile(data: Partial<CandidateOnboardingPa
     expectedSalaryMinRupees: paiseToRupees(profile.expectedSalaryMinPaise),
     expectedSalaryMaxRupees: paiseToRupees(profile.expectedSalaryMaxPaise),
   };
+}
+
+export async function updateCandidateEducation(qualification: string, collegeName?: string): Promise<CandidateProfile> {
+  const profile = await apiFetch<CandidateProfile>("/candidates/me/education", {
+    method: "PATCH",
+    body: JSON.stringify({ qualification, collegeName }),
+  });
+  return normalizeCandidateProfile(profile);
 }
 
 /**

@@ -286,6 +286,8 @@ export function MultiSelectField({
   options,
   value = "",
   onChange,
+  itemLabel = "city",
+  allowCustom = false,
   required,
   optional,
   placeholder = "Select options",
@@ -296,6 +298,8 @@ export function MultiSelectField({
   options: string[];
   value?: string | string[];
   onChange: (v: string) => void;
+  itemLabel?: string;
+  allowCustom?: boolean;
   required?: boolean | undefined;
   optional?: boolean | undefined;
   placeholder?: string;
@@ -355,6 +359,18 @@ export function MultiSelectField({
       ? selected.filter((x) => x !== opt)
       : [...selected, opt];
     onChange(next.join(", "));
+  };
+
+  const addCustomOption = () => {
+    const customValue = query.trim();
+    if (!customValue) return;
+    const existing = selected.find((item) => item.toLowerCase() === customValue.toLowerCase());
+    if (existing) {
+      setQuery("");
+      return;
+    }
+    onChange([...selected, customValue].join(", "));
+    setQuery("");
   };
 
   const removeOption = (e: React.MouseEvent, opt: string) => {
@@ -470,19 +486,25 @@ export function MultiSelectField({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search cities..."
+              onKeyDown={(e) => {
+                if (allowCustom && e.key === "Enter" && query.trim()) {
+                  e.preventDefault();
+                  addCustomOption();
+                }
+              }}
+              placeholder={`Search ${itemLabel}s...`}
               className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:bg-white focus:outline-none dark:border-border dark:bg-muted/50"
             />
           </div>
 
           {/* Options List */}
           <div className="max-h-60 overflow-y-auto space-y-0.5 overscroll-contain pr-1">
-            {filtered.length === 0 ? (
+            {filtered.length === 0 && !allowCustom ? (
               <div className="py-5 text-center text-xs text-muted-foreground">
-                No matching cities found
+                No matching {itemLabel}s found
               </div>
             ) : (
-              filtered.map((opt) => {
+              <>{filtered.map((opt) => {
                 const isSelected = selected.includes(opt);
                 return (
                   <button
@@ -511,14 +533,21 @@ export function MultiSelectField({
                     </div>
                   </button>
                 );
-              })
+              })}
+              {allowCustom && query.trim() && !selected.some((item) => item.toLowerCase() === query.trim().toLowerCase()) && (
+                <button type="button" onClick={addCustomOption} className="flex w-full items-center rounded-xl px-3 py-2 text-left text-sm font-semibold text-primary hover:bg-primary-soft">
+                  Add “{query.trim()}”
+                </button>
+              )}</>
             )}
           </div>
 
           {/* Footer */}
           <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2 px-1 dark:border-border">
             <span className="text-xs font-medium text-slate-500">
-              {selected.length === 0 ? "No city selected" : `${selected.length} city selected`}
+              {selected.length === 0
+                ? `No ${itemLabel} selected`
+                : `${selected.length} ${itemLabel}${selected.length === 1 ? "" : "s"} selected`}
             </span>
             <Button
               type="button"

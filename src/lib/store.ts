@@ -19,6 +19,9 @@ export interface CandidateKYCDocument {
   fileSizeBytes?: number;
   mimeType?: string;
   verified?: boolean;
+  reviewStatus?: "PENDING" | "VERIFIED" | "REJECTED" | "NOT_REQUIRED";
+  reviewNotes?: string;
+  reviewedAt?: string;
   createdAt?: string;
 }
 
@@ -33,7 +36,7 @@ export interface CandidateKYCItem {
   regNumber: string;
   state: string;
   docName: string;
-  status: "pending" | "verified" | "rejected";
+  status: "documents_required" | "pending" | "verified" | "rejected";
   submittedDate: string;
   notes?: string;
   experience: string;
@@ -49,6 +52,7 @@ export interface CandidateKYCItem {
   studyYear?: string;
   universityRegNo?: string;
   expectedGraduationYear?: number;
+  expectedGraduationMonth?: string;
   specialty?: string;
   subSpecialties?: string[];
   councilState?: string;

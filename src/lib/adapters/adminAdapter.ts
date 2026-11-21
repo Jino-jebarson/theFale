@@ -148,6 +148,18 @@ export async function reviewCandidateKyc(
   });
 }
 
+export async function reviewCandidateDocument(
+  candidateId: string,
+  documentId: string,
+  action: "APPROVE" | "REJECT",
+  notes?: string
+): Promise<void> {
+  await apiFetch(`/admin/kyc/candidates/${candidateId}/documents/${documentId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ action, notes }),
+  });
+}
+
 export async function getPendingStudentUpgrades(): Promise<StudentUpgradeRequestDto[]> {
   return apiFetch<StudentUpgradeRequestDto[]>("/admin/candidates/upgrade-requests", { validate: Array.isArray });
 }

@@ -30,6 +30,7 @@ export interface JobApplicationDto {
   status: string;
   matchScore?: number;
   appliedAt?: string;
+  updatedAt?: string;
   interviewScheduledAt?: string;
   interviewLocationOrLink?: string;
   withdrawalReason?: string;
@@ -54,6 +55,10 @@ export interface UiApplicationItem {
   dept: string;
   status: string;
   date: string;
+  appliedAt?: string;
+  updatedAt?: string;
+  interviewScheduledAt?: string;
+  interviewLocationOrLink?: string;
 }
 
 export function mapApplicationStatus(status: string): string {
@@ -120,6 +125,10 @@ export async function getMyApplications(): Promise<UiApplicationItem[]> {
       dept: dto.department || "Clinical",
       status: mapApplicationStatus(dto.status),
       date: dateFormatted,
+      appliedAt: dto.appliedAt,
+      updatedAt: dto.updatedAt,
+      interviewScheduledAt: dto.interviewScheduledAt,
+      interviewLocationOrLink: dto.interviewLocationOrLink,
     };
   });
 }

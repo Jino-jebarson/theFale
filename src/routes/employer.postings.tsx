@@ -44,6 +44,7 @@ import {
   attachFocusAndPollRefresh,
   getFacilityJobs,
   getFacilityApplicants,
+  getFacilityProfile,
   type JobPostingDto,
 } from "@/lib/adapters/facilityAdapter";
 import { getFacilityShifts, cancelShift, type UiShiftItem } from "@/lib/adapters/shiftAdapter";
@@ -86,11 +87,11 @@ function EmployerPostings() {
 
   const fetchPostings = (silent = false) => {
     if (!silent) setLoading(true);
-    Promise.all([
+    getFacilityProfile().then((profile) => Promise.all([
       getFacilityJobs(),
       getFacilityShifts(),
-      getFacilityApplicants(),
-    ])
+      profile.kycStatus === "VERIFIED" ? getFacilityApplicants() : Promise.resolve([]),
+    ]))
       .then(([fJobs, fShifts, fApps]) => {
         if (fJobs) setApiJobs(fJobs);
         if (fShifts) setApiShifts(fShifts);

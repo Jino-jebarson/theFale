@@ -614,6 +614,8 @@ function FacilityKYCAdmin() {
         mimeType: d.mimeType || (d.fileUrl?.startsWith("data:image/") || d.originalFileName?.match(/\.(jpg|jpeg|png|webp)$/i) ? "image/png" : "application/pdf"),
         fileUrl: d.fileUrl,
         verified: d.verified ?? (fac.status === "verified"),
+        reviewStatus: d.reviewStatus || (d.verified ? "VERIFIED" : "PENDING"),
+        reviewNotes: d.reviewNotes,
       }));
     }
 
@@ -623,6 +625,10 @@ function FacilityKYCAdmin() {
   const pendingCount = facilities.filter((f) => f.status === "pending").length;
   const verifiedCount = facilities.filter((f) => f.status === "verified").length;
   const rejectedCount = facilities.filter((f) => f.status === "rejected").length;
+  const hasRegistrationDocument = Boolean(selectedFacility?.documents?.some((doc: any) =>
+    String(doc.documentType || "").toUpperCase() === "FACILITY_REGISTRATION" &&
+    String(doc.reviewStatus || "PENDING").toUpperCase() !== "REJECTED"
+  ));
 
   return (
     <AdminLayout
@@ -1641,31 +1647,16 @@ function FacilityKYCAdmin() {
                     </div>
                   )}
 
-                  {/* Statutory Audit Checklist */}
-                  <div className="space-y-2 pt-2 border-t border-border/60 text-xs">
-                    <div className="flex items-start gap-2.5">
-                      <div className="grid h-4 w-4 place-items-center rounded-full bg-emerald-500/10 text-emerald-600 shrink-0 mt-0.5">
-                        <HiCheck className="h-3 w-3 stroke-[3]" />
-                      </div>
-                      <span className="text-foreground/90 font-medium">NABH Portal Accreditation active & validity confirmed</span>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <div className="grid h-4 w-4 place-items-center rounded-full bg-emerald-500/10 text-emerald-600 shrink-0 mt-0.5">
-                        <HiCheck className="h-3 w-3 stroke-[3]" />
-                      </div>
-                      <span className="text-foreground/90 font-medium">Clinical Establishment Act license verified with State DHS</span>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <div className="grid h-4 w-4 place-items-center rounded-full bg-emerald-500/10 text-emerald-600 shrink-0 mt-0.5">
-                        <HiCheck className="h-3 w-3 stroke-[3]" />
-                      </div>
-                      <span className="text-foreground/90 font-medium">Hospital Superintendent / Authorized HR credential checked</span>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <div className="grid h-4 w-4 place-items-center rounded-full bg-emerald-500/10 text-emerald-600 shrink-0 mt-0.5">
-                        <HiCheck className="h-3 w-3 stroke-[3]" />
-                      </div>
-                      <span className="text-foreground/90 font-medium">Bio-medical waste disposal and fire safety statutory certifications on record</span>
+                  <div className="space-y-2 pt-3 border-t border-border/60 text-xs">
+                    <div className={cn(
+                      "rounded-xl border p-3 font-semibold",
+                      hasRegistrationDocument
+                        ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
+                        : "border-amber-500/25 bg-amber-500/5 text-amber-800 dark:text-amber-200"
+                    )}>
+                      {hasRegistrationDocument
+                        ? "Facility registration / licence document is available for review."
+                        : "A facility registration / licence document is required before approval. Other accreditation documents are reviewed when applicable."}
                     </div>
                   </div>
                 </div>
@@ -1692,7 +1683,7 @@ function FacilityKYCAdmin() {
                   </Button>
                   <Button
                     size="sm"
-                    disabled={pageAction.isPending} onClick={() => handleVerify(selectedFacility.id, selectedFacility.name)}
+                    disabled={pageAction.isPending || !hasRegistrationDocument} onClick={() => handleVerify(selectedFacility.id, selectedFacility.name)}
                     className="flex-1 sm:flex-initial bg-primary hover:bg-primary-hover text-white text-xs font-bold gap-1 rounded-xl shadow-none whitespace-nowrap"
                   >
                     <HiCheck className="h-3.5 w-3.5 shrink-0" /> Approve & Issue Verified Badge

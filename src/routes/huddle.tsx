@@ -1397,7 +1397,7 @@ function HuddlePage() {
                       </div>
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-sm text-foreground">Posting Locked · Verification Required</span>
+                          <span className="font-bold text-sm text-foreground">Posting is available after verification</span>
                           <span className="rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">
                             Read-Only Access
                           </span>
@@ -1428,7 +1428,7 @@ function HuddlePage() {
                           Why is posting locked?
                         </p>
                         <p className="text-muted-foreground leading-relaxed">
-                          FALE Huddle is an exclusive, safe clinical knowledge network for verified doctors, nurses, allied health clinicians, and accredited healthcare students. Anyone can read and learn freely, but posting is unlocked only after The FALE team checks your credentials ({userLevel === "student" ? "College ID" : isHospital ? "KPME License" : "Council Registration"}) to prevent spam and protect patient privacy.
+                          You can read Huddle now. To post, first submit your {userLevel === "student" ? "college ID or bonafide certificate" : isHospital ? "facility registration or licence certificate" : "government photo ID, council registration certificate, and degree or provisional certificate"} for review. Posting unlocks after the FALE team approves your verification.
                         </p>
                       </div>
                     </div>
@@ -1438,7 +1438,7 @@ function HuddlePage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <Link to="/profile">
                         <Button className="h-9 px-4 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs shadow-xs cursor-pointer">
-                          Check KYC &amp; Verification Status
+                          Complete profile &amp; check verification
                         </Button>
                       </Link>
 

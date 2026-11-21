@@ -144,6 +144,7 @@ function Applicants() {
   const pageLoad = usePageLoad();
   const pageAction = useConfirmedAction();
   const s = useApp();
+  const isFacilityVerified = !isApiEnabled || String(s.profile["kycStatus"] || "").toUpperCase() === "VERIFIED";
   const scope = Route.useSearch();
   const navigate = useNavigate();
   const [roleTypeTab, setRoleTypeTab] = useState<"all" | "jobs" | "shifts">(scope.type || "all");
@@ -293,7 +294,7 @@ function Applicants() {
           noticePeriod: a.candidateNoticePeriod || "Immediate / 15 Days",
           expectedSalary: a.expectedSalary || "Standard Escrow Scale",
           phone: a.candidatePhone || a.phone || "+91 ***** *****",
-          email: a.candidateEmail || a.email || "*****@fale.care",
+          email: a.candidateEmail || a.email || "",
           bio: dynamicBio,
           education: `${candidateQual} | ${councilName}`,
           certifications: Array.isArray(a.certifications) ? a.certifications : [],
@@ -795,6 +796,12 @@ function Applicants() {
       {loading && <p role="status" className="flex items-center gap-2 p-4 text-sm"><ButtonSpinner />Loading applications...</p>}
       <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="w-full min-w-0 space-y-6">
+        {!isFacilityVerified && (
+          <div role="status" className="flex flex-col gap-3 rounded-2xl border border-amber-300/70 bg-amber-50/70 p-4 text-sm dark:border-amber-700/50 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
+            <div><p className="font-bold text-foreground">Candidate applications are locked until hospital verification</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Complete hospital verification to review candidate profiles and applications.</p></div>
+            <Button asChild variant="outline" size="sm" className="shrink-0 rounded-xl"><Link to="/employer/profile">Complete verification</Link></Button>
+          </div>
+        )}
         {/* Clean Executive Header */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>

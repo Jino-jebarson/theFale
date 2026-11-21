@@ -50,9 +50,9 @@ import {
 } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useApp, setState, CandidateKYCItem, CandidateKYCDocument } from "@/lib/store";
-import { cn } from "@/lib/utils";
+import { cleanCandidateEmail, cn } from "@/lib/utils";
 import { isApiEnabled } from "@/lib/api";
-import { getPendingCandidateKyc, reviewCandidateKyc } from "@/lib/adapters/adminAdapter";
+import { getPendingCandidateKyc, reviewCandidateDocument, reviewCandidateKyc } from "@/lib/adapters/adminAdapter";
 import { generateClinicalDocumentBlob } from "@/lib/clinicalDocumentPdf";
 import { precheckKycQueueWithAi } from "@/lib/adapters/aiAdapter";
 import {
@@ -79,7 +79,7 @@ function formatDocType(type?: string) {
     case "REGISTRATION_CERTIFICATE":
       return "State Council Registration Certificate";
     case "DEGREE_CERTIFICATE":
-      return "Medical / Nursing Degree Certificate";
+      return "Degree / Provisional Certificate";
     case "RESUME":
       return "Clinical Curriculum Vitae (CV)";
     case "ID_PROOF":
@@ -96,7 +96,7 @@ function formatDocType(type?: string) {
 }
 
 function formatBytes(bytes?: number) {
-  if (!bytes) return "Standard Document";
+  if (!bytes) return "Size unavailable";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -122,19 +122,64 @@ function getExpectedSalaryText(minPaise?: any, maxPaise?: any) {
   if (max) {
     return `Up to ${formatSalary(max)} / mo`;
   }
-  return "₹45,000 – ₹75,000 / mo";
+  return "Not provided";
+}
+
+function displayOrMissing(value?: string | number | null) {
+  if (value === null || value === undefined || String(value).trim() === "") return "Not provided";
+  return String(value);
+}
+
+function extractIndianPincode(address?: string | null) {
+  return address?.match(/(?:^|\D)([1-9]\d{5})(?=\D|$)/)?.[1] || "";
+}
+
+function formatCandidateRegisteredAddress(candidate: CandidateKYCItem) {
+  const address = candidate.addressLine?.trim() || "";
+  const addressLower = address.toLowerCase();
+  const details = [candidate.city, candidate.state, candidate.pincode]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .filter((value) => !addressLower.includes(value.toLowerCase()));
+  return [address, ...details].filter(Boolean).join(", ");
+}
+
+const STUDENT_PROOF_TYPES = ["STUDENT_ID", "BONAFIDE"];
+const REQUIRED_GRADUATE_DOCUMENTS = [
+  { type: "ID_PROOF", label: "Government photo ID" },
+  { type: "REGISTRATION_CERTIFICATE", label: "Council registration certificate" },
+  { type: "DEGREE_CERTIFICATE", label: "Degree or provisional certificate" },
+];
+
+function latestDocumentOfType(documents: CandidateKYCDocument[], type: string) {
+  const matching = documents.filter((doc) => doc.documentType?.trim().toUpperCase() === type);
+  return matching.reduce<CandidateKYCDocument | undefined>((latest, doc) => {
+    if (!latest) return doc;
+    const latestTime = latest.createdAt ? new Date(latest.createdAt).getTime() : -Infinity;
+    const documentTime = doc.createdAt ? new Date(doc.createdAt).getTime() : -Infinity;
+    return documentTime >= latestTime ? doc : latest;
+  }, undefined) || matching[matching.length - 1];
+}
+
+function documentReviewLabel(doc?: CandidateKYCDocument) {
+  if (!doc) return "Not submitted";
+  const status = (doc.reviewStatus || (doc.verified ? "VERIFIED" : "PENDING")).toUpperCase();
+  if (status === "VERIFIED") return "Verified";
+  if (status === "REJECTED") return "Replacement required";
+  if (status === "NOT_REQUIRED") return "Not required";
+  return "Submitted · awaiting review";
 }
 
 function CandidateKYCAdmin() {
   const pageLoad = usePageLoad();
   const pageAction = useConfirmedAction();
   const s = useApp();
-  const [filter, setFilter] = useState<"all" | "pending" | "verified" | "rejected">("pending");
+  const [filter, setFilter] = useState<"all" | "documents_required" | "pending" | "verified" | "rejected">("pending");
   const [search, setSearch] = useState("");
   const [selectedCandidate, setSelectedCandidate] = useState<CandidateKYCItem | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [rejectingDocument, setRejectingDocument] = useState<CandidateKYCDocument | null>(null);
 
   // Ally Statutory Credential Pre-Check State (#16)
   type AllyPreCheckResult = {
@@ -168,12 +213,25 @@ function CandidateKYCAdmin() {
       if (cached && cached.cacheKey === key) {
         return cached;
       }
+      if (c.isStudent || !c.regNumber?.trim() || !c.council?.trim()) {
+        return {
+          status: "PENDING",
+          confidence: null,
+          formatValid: false,
+          nameAligned: false,
+          assessment: c.isStudent
+            ? "Council registration pre-check does not apply to student profiles. Review the submitted proof of study instead."
+            : "Council pre-check is unavailable until the candidate provides a registration number and council.",
+          recommendation: "Review the required documents and profile details submitted by the candidate.",
+          cacheKey: key,
+        };
+      }
       return {
         status: "PENDING",
         confidence: null,
         formatValid: false,
         nameAligned: false,
-        assessment: `Queued for live Ally audit of registration #${c.regNumber || "UNSPECIFIED"} under ${c.council}.`,
+        assessment: `Queued for live Ally review of registration #${c.regNumber} under ${c.council}.`,
         recommendation: "Ally reviews supplied details only. A human must check the council record.",
         cacheKey: key,
       };
@@ -183,6 +241,7 @@ function CandidateKYCAdmin() {
 
   const handleRunAiPreCheck = useCallback(
     async (c: CandidateKYCItem, options?: { silent?: boolean; force?: boolean }) => {
+      if (c.isStudent || !c.regNumber?.trim() || !c.council?.trim()) return;
       const key = getAuditCacheKey(c);
       if (inFlightKeysRef.current.has(key)) return;
       inFlightKeysRef.current.add(key);
@@ -269,7 +328,7 @@ function CandidateKYCAdmin() {
             confidence: null,
             formatValid: false,
             nameAligned: false,
-            assessment: `Unable to complete live Ally verification for registration #${c.regNumber || "UNSPECIFIED"}.`,
+            assessment: `Unable to complete live Ally verification for registration #${c.regNumber}.`,
             recommendation: "Click Re-audit with Ally to retry verification.",
             cacheKey: key,
           },
@@ -457,24 +516,26 @@ function CandidateKYCAdmin() {
       setLoading(true);
       const res = await getPendingCandidateKyc();
       const mapped: CandidateKYCItem[] = res.map((dto: any) => {
-        let status: "pending" | "verified" | "rejected" = "pending";
+        let status: "documents_required" | "pending" | "verified" | "rejected" = "documents_required";
         if (dto.kycStatus === "VERIFIED") status = "verified";
         else if (dto.kycStatus === "REJECTED") status = "rejected";
+        else if (dto.kycStatus === "PENDING") status = "pending";
 
         const photoDoc = dto.documents?.find((d: any) => d.documentType === "PHOTO");
-        const regDoc = dto.documents?.find((d: any) => d.documentType === "REGISTRATION_CERTIFICATE");
-        const primaryDoc = regDoc || dto.documents?.[0];
+        const kycDocumentTypes = dto.isStudent ? STUDENT_PROOF_TYPES : REQUIRED_GRADUATE_DOCUMENTS.map((doc) => doc.type);
+        const primaryDoc = dto.documents?.find((doc: any) => kycDocumentTypes.includes(String(doc.documentType).toUpperCase()));
+        const hasStudentRegistrationProof = Boolean(dto.isStudent && String(dto.universityRegNo || "").trim().length >= 5);
 
         return {
           id: dto.id,
-          name: dto.name || "Candidate",
-          email: dto.email || "candidate@fale.in",
-          phone: dto.phone || "+91 ••••• •••••",
+          name: dto.name || "Name not provided",
+          email: cleanCandidateEmail(dto.email),
+          phone: dto.phone || "",
           gender: dto.gender,
           dob: dto.dob,
           city: dto.city,
-          state: dto.state || dto.city || "State",
-          pincode: dto.pincode,
+          state: dto.state || "",
+          pincode: dto.pincode || extractIndianPincode(dto.addressLine),
           addressLine: dto.addressLine,
           candidateLevel: dto.candidateLevel,
           isStudent: dto.isStudent,
@@ -483,15 +544,15 @@ function CandidateKYCAdmin() {
           studyYear: dto.studyYear,
           universityRegNo: dto.universityRegNo,
           expectedGraduationYear: dto.expectedGraduationYear,
-          profession: dto.profession || dto.specialty || "Clinical Practitioner",
+          profession: dto.profession || dto.specialty || "",
           specialty: dto.specialty,
           subSpecialties: dto.subSpecialties,
-          qualification: dto.qualification || "MBBS / B.Sc Nursing",
-          council: dto.council || "State Medical / Nursing Council",
+          qualification: dto.qualification || "",
+          council: dto.council || "",
           councilState: dto.councilState,
-          regNumber: dto.regNumber || "REG-VERIFICATION-PENDING",
+          regNumber: dto.regNumber || "",
           regYear: dto.regYear,
-          experience: dto.experienceYears ? `${dto.experienceYears}` : "Fresher / Resident",
+          experience: dto.experienceYears ? `${dto.experienceYears}` : "",
           bio: dto.bio,
           skills: dto.skills,
           languages: dto.languages,
@@ -501,10 +562,10 @@ function CandidateKYCAdmin() {
           noticePeriod: dto.noticePeriod,
           employmentType: dto.employmentType,
           availability: dto.availability,
-          docName: primaryDoc?.originalFileName || "Council_Registration_Certificate.pdf",
+          docName: primaryDoc?.originalFileName || (hasStudentRegistrationProof ? "University registration number submitted" : "No KYC documents uploaded"),
           documents: dto.documents || [],
           status,
-          submittedDate: dto.createdAt ? new Date(dto.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Recent",
+          submittedDate: dto.createdAt ? new Date(dto.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Date unavailable",
           notes: dto.kycNotes,
           userId: dto.userId,
           currentSalary: dto.currentSalary,
@@ -543,7 +604,7 @@ function CandidateKYCAdmin() {
   // Automatically verify pending KYC candidates in background with max 2 concurrent Ally requests
   useEffect(() => {
     const queue = candidates.filter((c) => {
-      if (c.status !== "pending") return false;
+      if (c.status !== "pending" || c.isStudent || !c.regNumber?.trim() || !c.council?.trim()) return false;
       const key = getAuditCacheKey(c);
       if (autoAuditedKeysRef.current.has(key)) return false;
       const cached = aiPreCheckResults[c.id];
@@ -576,7 +637,7 @@ function CandidateKYCAdmin() {
 
   // Trigger live Ally audit immediately when opening Inspect Dossier if not cached yet
   useEffect(() => {
-    if (!sheetOpen || !selectedCandidate) return;
+    if (!sheetOpen || !selectedCandidate || selectedCandidate.isStudent || !selectedCandidate.regNumber?.trim() || !selectedCandidate.council?.trim()) return;
     const key = getAuditCacheKey(selectedCandidate);
     const cached = aiPreCheckResults[selectedCandidate.id];
     if (!cached || cached.cacheKey !== key) {
@@ -612,15 +673,44 @@ function CandidateKYCAdmin() {
 
   }); };
 
+  const handleApproveDocument = async (doc: CandidateKYCDocument) => { await pageAction.run(async () => {
+    if (!selectedCandidate || !doc.id) return;
+    try {
+      await reviewCandidateDocument(selectedCandidate.id, doc.id, "APPROVE");
+      toast.success("Document approved", { description: `${doc.originalFileName} is now marked verified.` });
+      await fetchCandidates();
+    } catch (err: any) {
+      pageLoad.fail(err);
+      toast.error("Document approval failed", { description: err?.message });
+    }
+  }); };
+
+  const handleRejectDocument = (doc: CandidateKYCDocument) => {
+    setRejectingDocument(doc);
+    setRejectReason("");
+    setRejectModalOpen(true);
+  };
+
   const handleRejectConfirm = async () => { await pageAction.run(async () => {
     if (!selectedCandidate) return;
     {
       try {
+        if (rejectingDocument) {
+          if (!rejectingDocument.id) throw new Error("This document cannot be reviewed because its record ID is missing.");
+          await reviewCandidateDocument(selectedCandidate.id, rejectingDocument.id, "REJECT", rejectReason);
+          toast.success("Document rejected", { description: `The candidate was asked to upload a replacement for ${rejectingDocument.originalFileName}.` });
+          setRejectModalOpen(false);
+          setRejectingDocument(null);
+          setRejectReason("");
+          await fetchCandidates();
+          return;
+        }
         await reviewCandidateKyc(selectedCandidate.id, "REJECT", rejectReason || "Document verification rejected by admin.");
         toast.error("Candidate Document Rejected", {
           description: `Notification sent to ${selectedCandidate.name} to upload valid council certificate.`,
         });
         setRejectModalOpen(false);
+        setRejectingDocument(null);
         setSheetOpen(false);
         setRejectReason("");
         fetchCandidates();
@@ -634,6 +724,7 @@ function CandidateKYCAdmin() {
   }); };
 
   const pendingCount = candidates.filter((c) => c.status === "pending").length;
+  const documentsRequiredCount = candidates.filter((c) => c.status === "documents_required").length;
   const verifiedCount = candidates.filter((c) => c.status === "verified").length;
   const rejectedCount = candidates.filter((c) => c.status === "rejected").length;
 
@@ -707,6 +798,7 @@ function CandidateKYCAdmin() {
           {/* Segmented Filter Pills */}
           <div className="flex items-center gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 w-full md:w-fit overflow-x-auto no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {[
+              { id: "documents_required" as const, label: "Documents Required", count: documentsRequiredCount },
               { id: "pending" as const, label: "Pending Review", count: pendingCount },
               { id: "verified" as const, label: "Verified", count: verifiedCount },
               { id: "rejected" as const, label: "Rejected", count: rejectedCount },
@@ -775,7 +867,7 @@ function CandidateKYCAdmin() {
             <TableBody>
               {filtered.map((item) => {
                 const initials = item.name.split(" ").map((n) => n[0]).slice(0, 2).join("");
-                const docCount = item.documents?.length || 1;
+                const docCount = item.documents?.length || 0;
 
                 return (
                   <TableRow key={item.id} className="hover:bg-muted/30 transition-colors border-b border-border/70">
@@ -811,14 +903,14 @@ function CandidateKYCAdmin() {
 
                     {/* Profession & Qualification */}
                     <TableCell className="py-3.5 align-middle">
-                      <div className="font-bold text-foreground text-xs">{item.profession}</div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">{item.qualification}</div>
+                      <div className="font-bold text-foreground text-xs">{displayOrMissing(item.profession)}</div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">{displayOrMissing(item.qualification)}</div>
                     </TableCell>
 
                     {/* Council & Reg Number */}
                     <TableCell className="py-3.5 align-middle">
-                      <div className="font-semibold text-foreground text-xs">{item.council}</div>
-                      <div className="font-mono text-primary font-bold text-[11px] mt-0.5">{item.regNumber}</div>
+                      <div className="font-semibold text-foreground text-xs">{item.isStudent ? "Student profile" : displayOrMissing(item.council)}</div>
+                      <div className="font-mono text-primary font-bold text-[11px] mt-0.5">{displayOrMissing(item.isStudent ? item.universityRegNo : item.regNumber)}</div>
                     </TableCell>
 
                     {/* Document */}
@@ -835,7 +927,7 @@ function CandidateKYCAdmin() {
                           </span>
                         )}
                       </button>
-                      <div className="text-[10px] text-muted-foreground mt-0.5 pl-5.5">{item.submittedDate}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5 pl-5.5">{docCount ? item.submittedDate : "Waiting for required uploads"}</div>
                     </TableCell>
 
                     {/* Status Badge & AI Pre-Check (#16) */}
@@ -848,6 +940,10 @@ function CandidateKYCAdmin() {
                         ) : item.status === "rejected" ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2.5 py-1 text-[11px] font-bold text-rose-700 dark:text-rose-400 border border-rose-500/20">
                             <HiOutlineXMark className="h-3.5 w-3.5" /> Rejected
+                          </span>
+                        ) : item.status === "documents_required" ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                            <HiOutlineDocumentText className="h-3.5 w-3.5" /> Documents required
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary border border-primary/20">
@@ -874,7 +970,11 @@ function CandidateKYCAdmin() {
                                     : "text-muted-foreground"
                                 )}
                               >
-                                {isAnalyzing ? (
+                                {item.isStudent ? (
+                                  <span>Council pre-check not applicable</span>
+                                ) : !item.regNumber?.trim() || !item.council?.trim() ? (
+                                  <span>Registration details not provided</span>
+                                ) : isAnalyzing ? (
                                   <ButtonSpinner className="h-3 w-3 animate-spin text-primary shrink-0" />
                                 ) : (
                                   <BotMessageSquare
@@ -891,7 +991,11 @@ function CandidateKYCAdmin() {
                                   />
                                 )}
                                 <span>
-                                  {isAnalyzing
+                                  {item.isStudent
+                                    ? ""
+                                    : !item.regNumber?.trim() || !item.council?.trim()
+                                    ? ""
+                                    : isAnalyzing
                                     ? "Ally Auditing..."
                                     : isClear
                                     ? "Ally Review Ready"
@@ -968,7 +1072,7 @@ function CandidateKYCAdmin() {
         <div className="lg:hidden divide-y divide-border pb-16 sm:pb-0">
           {filtered.map((item) => {
             const initials = item.name.split(" ").map((n) => n[0]).slice(0, 2).join("");
-            const docCount = item.documents?.length || 1;
+            const docCount = item.documents?.length || 0;
             const preCheck = getCandidatePreCheckStatus(item);
             const isPreCheckAnalyzing = Boolean(runningPreCheckIds[item.id]);
             const isPreCheckClear = preCheck.status === "REVIEW";
@@ -994,7 +1098,7 @@ function CandidateKYCAdmin() {
                         {item.name}
                       </div>
                       <div className="text-[11px] text-muted-foreground truncate">
-                        {item.profession} • {item.qualification}
+                        {displayOrMissing(item.profession)} • {displayOrMissing(item.qualification)}
                       </div>
                     </div>
                   </div>
@@ -1007,6 +1111,10 @@ function CandidateKYCAdmin() {
                     ) : item.status === "rejected" ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 text-[10px] font-bold px-2.5 py-0.5 whitespace-nowrap">
                         <HiOutlineXMark className="h-3 w-3 shrink-0" /> Rejected
+                      </span>
+                    ) : item.status === "documents_required" ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/20 text-[10px] font-bold px-2.5 py-0.5 whitespace-nowrap">
+                        <HiOutlineDocumentText className="h-3 w-3 shrink-0" /> Documents required
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-bold px-2.5 py-0.5 whitespace-nowrap">
@@ -1042,7 +1150,11 @@ function CandidateKYCAdmin() {
                         />
                       )}
                       <span>
-                        {isPreCheckAnalyzing
+                        {item.isStudent
+                          ? "Council pre-check not applicable"
+                          : !item.regNumber?.trim() || !item.council?.trim()
+                          ? "Registration details not provided"
+                          : isPreCheckAnalyzing
                           ? "Ally Auditing..."
                           : isPreCheckClear
                           ? "Ally Review Ready"
@@ -1059,11 +1171,11 @@ function CandidateKYCAdmin() {
                 <div className="rounded-xl bg-muted/40 border border-border/50 p-3 text-xs space-y-1.5">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground shrink-0">Council:</span>
-                    <span className="font-semibold text-foreground truncate min-w-0 text-right">{item.council}</span>
+                    <span className="font-semibold text-foreground truncate min-w-0 text-right">{item.isStudent ? "Not applicable" : displayOrMissing(item.council)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground shrink-0">Reg Number:</span>
-                    <span className="font-mono font-bold text-primary truncate min-w-0 text-right">{item.regNumber}</span>
+                    <span className="font-mono font-bold text-primary truncate min-w-0 text-right">{displayOrMissing(item.isStudent ? item.universityRegNo : item.regNumber)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground shrink-0">Documents:</span>
@@ -1149,7 +1261,7 @@ function CandidateKYCAdmin() {
                     Candidate Clinical Dossier
                   </SheetTitle>
                   <SheetDescription className="text-[11px] sm:text-xs text-muted-foreground mt-0.5 leading-snug">
-                    Comprehensive council audit, medical degrees, and uploaded documents
+                    Candidate-submitted profile details, required verification evidence, and review status
                   </SheetDescription>
                 </div>
               </div>
@@ -1160,10 +1272,12 @@ function CandidateKYCAdmin() {
                     ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                     : selectedCandidate.status === "rejected"
                     ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                    : selectedCandidate.status === "documents_required"
+                    ? "bg-amber-500/10 text-amber-700 border-amber-500/20"
                     : "bg-primary/10 text-primary border-primary/20"
                 )}>
                   {selectedCandidate.status === "pending" && <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />}
-                  {selectedCandidate.status === "verified" ? "Verified Seal Active" : selectedCandidate.status === "rejected" ? "Verification Rejected" : "Pending Verification"}
+                  {selectedCandidate.status === "verified" ? "Verified Seal Active" : selectedCandidate.status === "rejected" ? "Verification Rejected" : selectedCandidate.status === "documents_required" ? "Documents Required" : "Pending Verification"}
                 </span>
               )}
             </div>
@@ -1191,7 +1305,7 @@ function CandidateKYCAdmin() {
                     <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                       <h3 className="font-black text-foreground text-base sm:text-lg leading-tight break-words">{selectedCandidate.name}</h3>
                       <span className="rounded-md bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide border border-primary/20 shrink-0">
-                        {selectedCandidate.profession}
+                        {displayOrMissing(selectedCandidate.profession)}
                       </span>
                       {selectedCandidate.candidateLevel && (
                         <span className="rounded-md bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border border-border shrink-0">
@@ -1200,22 +1314,22 @@ function CandidateKYCAdmin() {
                       )}
                     </div>
                     <p className="text-xs font-semibold text-muted-foreground mt-1 break-words">
-                      {selectedCandidate.qualification} {selectedCandidate.specialty ? `• ${selectedCandidate.specialty}` : ""} {selectedCandidate.experience ? `• ${selectedCandidate.experience}` : ""}
+                      {displayOrMissing(selectedCandidate.qualification)} {selectedCandidate.specialty ? `• ${selectedCandidate.specialty}` : ""} {selectedCandidate.experience ? `• ${selectedCandidate.experience}` : ""}
                     </p>
 
                     {/* Contact Strip */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-3 mt-3 border-t border-border/60 text-xs">
                       <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
                         <HiOutlinePhone className="h-3.5 w-3.5 text-primary shrink-0" />
-                        <a href={`tel:${selectedCandidate.phone}`} className="font-medium text-foreground truncate hover:text-primary transition-colors">
-                          {selectedCandidate.phone}
-                        </a>
+                        {selectedCandidate.phone ? (
+                          <a href={`tel:${selectedCandidate.phone}`} className="font-medium text-foreground truncate hover:text-primary transition-colors">{selectedCandidate.phone}</a>
+                        ) : <span className="font-medium text-muted-foreground">Not provided</span>}
                       </div>
                       <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
                         <HiOutlineEnvelope className="h-3.5 w-3.5 text-primary shrink-0" />
-                        <a href={`mailto:${selectedCandidate.email}`} className="font-medium text-foreground truncate hover:text-primary transition-colors">
-                          {selectedCandidate.email}
-                        </a>
+                        {selectedCandidate.email ? (
+                          <a href={`mailto:${selectedCandidate.email}`} className="font-medium text-foreground truncate hover:text-primary transition-colors">{selectedCandidate.email}</a>
+                        ) : <span className="font-medium text-muted-foreground">Not provided</span>}
                       </div>
                     </div>
                   </div>
@@ -1225,19 +1339,19 @@ function CandidateKYCAdmin() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-2 border-t border-border/60 text-xs">
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Gender</span>
-                    <strong className="text-foreground text-xs font-bold capitalize">{selectedCandidate.gender || "Not Specified"}</strong>
+                    <strong className="text-foreground text-xs font-bold capitalize">{displayOrMissing(selectedCandidate.gender)}</strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Date of Birth</span>
-                    <strong className="text-foreground text-xs font-bold">{selectedCandidate.dob || "On Record"}</strong>
+                    <strong className="text-foreground text-xs font-bold">{displayOrMissing(selectedCandidate.dob)}</strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">City & State</span>
-                    <strong className="text-foreground text-xs font-bold truncate block">{selectedCandidate.city || ""}, {selectedCandidate.state || ""}</strong>
+                    <strong className="text-foreground text-xs font-bold truncate block">{[selectedCandidate.city, selectedCandidate.state].filter(Boolean).join(", ") || "Not provided"}</strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Pincode</span>
-                    <strong className="text-foreground text-xs font-bold">{selectedCandidate.pincode || "600003"}</strong>
+                    <strong className="text-foreground text-xs font-bold">{displayOrMissing(selectedCandidate.pincode)}</strong>
                   </div>
                 </div>
 
@@ -1247,7 +1361,7 @@ function CandidateKYCAdmin() {
                     <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                     <div>
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">Registered Address</span>
-                      <p className="text-foreground font-medium">{selectedCandidate.addressLine}, {selectedCandidate.city}, {selectedCandidate.state} - {selectedCandidate.pincode}</p>
+                      <p className="text-foreground font-medium">{formatCandidateRegisteredAddress(selectedCandidate)}</p>
                     </div>
                   </div>
                 )}
@@ -1262,7 +1376,7 @@ function CandidateKYCAdmin() {
               </div>
 
               {/* Ally Credential Verification Pre-Check Card (#16) */}
-              {(() => {
+              {!selectedCandidate.isStudent && selectedCandidate.regNumber?.trim() && selectedCandidate.council?.trim() && (() => {
                 const preCheck = getCandidatePreCheckStatus(selectedCandidate);
                 const isClear = preCheck.status === "REVIEW";
                 const isFlagged = preCheck.status === "FLAGGED";
@@ -1360,36 +1474,33 @@ function CandidateKYCAdmin() {
                 );
               })()}
 
-              {/* 2. Council & Statutory Registration Card */}
-              <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3.5 shadow-xs">
+              {/* 2. Professional Registration Details (graduates only) */}
+              {!selectedCandidate.isStudent && <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3.5 shadow-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
                       <HiOutlineShieldCheck className="h-4 w-4" />
                     </span>
                     <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      State Council Registration
+                      Professional Registration Details
                     </span>
                   </div>
-                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full whitespace-nowrap">
-                    Active Regulatory Board
-                  </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="p-3.5 rounded-xl bg-muted/30 border border-border/60 flex flex-col justify-between min-h-[82px] space-y-1">
                     <span className="text-[10px] font-bold uppercase text-muted-foreground block">Council Name</span>
-                    <strong className="text-foreground text-sm font-bold block break-words">{selectedCandidate.council}</strong>
+                    <strong className="text-foreground text-sm font-bold block break-words">{displayOrMissing(selectedCandidate.council)}</strong>
                     <span className="text-[11px] text-muted-foreground block">
-                      Jurisdiction: {selectedCandidate.councilState || "National / State Council"}
+                      Jurisdiction: {displayOrMissing(selectedCandidate.councilState)}
                     </span>
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-primary/5 border border-primary/20 flex flex-col justify-between min-h-[82px] space-y-1">
                     <span className="text-[10px] font-bold uppercase text-primary block">Council Registration Number</span>
                     <div className="flex items-center justify-between gap-2">
-                      <strong className="text-primary font-mono text-sm sm:text-base font-extrabold tracking-wide break-all min-w-0">{selectedCandidate.regNumber}</strong>
-                      <Button
+                      <strong className="text-primary font-mono text-sm sm:text-base font-extrabold tracking-wide break-all min-w-0">{displayOrMissing(selectedCandidate.regNumber)}</strong>
+                      {selectedCandidate.regNumber && <Button
                         size="sm"
                         variant="ghost"
                         onClick={async () => {
@@ -1400,10 +1511,10 @@ function CandidateKYCAdmin() {
                       >
                         <HiOutlineClipboardDocument className="h-3 w-3" />
                         <span>Copy</span>
-                      </Button>
+                      </Button>}
                     </div>
                     <span className="text-[11px] text-muted-foreground block">
-                      Registration Year: {selectedCandidate.regYear || "Verified on Record"}
+                      Registration Year: {displayOrMissing(selectedCandidate.regYear)}
                     </span>
                   </div>
                 </div>
@@ -1414,7 +1525,7 @@ function CandidateKYCAdmin() {
                     <p className="text-foreground mt-0.5">{selectedCandidate.notes}</p>
                   </div>
                 )}
-              </div>
+              </div>}
 
               {/* 3. Academic & Educational Credentials */}
               <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3.5 shadow-xs">
@@ -1423,22 +1534,21 @@ function CandidateKYCAdmin() {
                     <HiOutlineAcademicCap className="h-4 w-4" />
                   </span>
                   <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Academic & Education Record
+                    {selectedCandidate.isStudent ? "Student Enrollment Details" : "Education & Qualification Details"}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="p-3.5 rounded-xl bg-muted/30 border border-border/60 flex flex-col justify-between min-h-[82px] space-y-1">
-                    <span className="text-[10px] font-bold uppercase text-muted-foreground block">Medical College / University</span>
-                    <strong className="text-foreground text-xs font-bold block">{selectedCandidate.college || "Medical Institution on Record"}</strong>
-                    <span className="text-[10px] text-muted-foreground block">Accredited Medical College</span>
+                    <span className="text-[10px] font-bold uppercase text-muted-foreground block">College / Institution</span>
+                    <strong className="text-foreground text-xs font-bold block">{displayOrMissing(selectedCandidate.college)}</strong>
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-muted/30 border border-border/60 flex flex-col justify-between min-h-[82px] space-y-1">
                     <span className="text-[10px] font-bold uppercase text-muted-foreground block">Degree / Course</span>
-                    <strong className="text-foreground text-xs font-bold block">{selectedCandidate.course || selectedCandidate.qualification}</strong>
+                    <strong className="text-foreground text-xs font-bold block">{displayOrMissing(selectedCandidate.course || selectedCandidate.qualification)}</strong>
                     <span className="text-[10px] text-muted-foreground block">
-                      Graduation: {selectedCandidate.expectedGraduationYear || "Degree Completed"}
+                      Expected graduation: {displayOrMissing(selectedCandidate.expectedGraduationYear)}
                     </span>
                   </div>
                 </div>
@@ -1446,16 +1556,16 @@ function CandidateKYCAdmin() {
                 {/* Additional Student / University Registry Fields */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Student Status</span>
-                    <strong className="text-foreground font-bold">{selectedCandidate.isStudent ? "Enrolled Student" : "Graduated Clinician"}</strong>
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Profile Type</span>
+                    <strong className="text-foreground font-bold">{selectedCandidate.isStudent ? "Student" : displayOrMissing(selectedCandidate.candidateLevel || "Professional")}</strong>
                   </div>
-                  {selectedCandidate.studyYear && (
+                  {selectedCandidate.isStudent && selectedCandidate.studyYear && (
                     <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">Year of Study</span>
                       <strong className="text-foreground font-bold">{selectedCandidate.studyYear}</strong>
                     </div>
                   )}
-                  {selectedCandidate.universityRegNo && (
+                  {selectedCandidate.isStudent && selectedCandidate.universityRegNo && (
                     <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">University Reg No</span>
                       <strong className="text-foreground font-mono font-bold">{selectedCandidate.universityRegNo}</strong>
@@ -1478,11 +1588,11 @@ function CandidateKYCAdmin() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="p-3 rounded-xl bg-muted/30 border border-border/50 space-y-1">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Primary Specialty</span>
-                    <strong className="text-foreground font-bold">{selectedCandidate.specialty || selectedCandidate.profession}</strong>
+                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.specialty || selectedCandidate.profession)}</strong>
                   </div>
                   <div className="p-3 rounded-xl bg-muted/30 border border-border/50 space-y-1">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Clinical Experience</span>
-                    <strong className="text-foreground font-bold">{selectedCandidate.experience || "Clinical Residency"}</strong>
+                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.experience)}</strong>
                   </div>
                 </div>
 
@@ -1549,29 +1659,29 @@ function CandidateKYCAdmin() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Availability</span>
-                    <strong className="text-foreground font-bold">{selectedCandidate.availability || "Immediate"}</strong>
+                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.availability)}</strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Notice Period</span>
-                    <strong className="text-foreground font-bold">{selectedCandidate.noticePeriod || "Immediate"}</strong>
+                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.noticePeriod)}</strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Employment Type</span>
-                    <strong className="text-foreground font-bold">{selectedCandidate.employmentType || "Locum / Full-time"}</strong>
+                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.employmentType)}</strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Open to Work</span>
                     <strong className={selectedCandidate.openToWork ? "text-emerald-600 font-bold" : "text-muted-foreground font-bold"}>
-                      {selectedCandidate.openToWork ? "Yes - Actively Seeking" : "Not Seeking"}
+                      {selectedCandidate.openToWork === undefined || selectedCandidate.openToWork === null ? "Not provided" : selectedCandidate.openToWork ? "Yes" : "No"}
                     </strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Willing to Relocate</span>
-                    <strong className="text-foreground font-bold">{selectedCandidate.relocate ? "Yes" : "Preferred Local Only"}</strong>
+                    <strong className="text-foreground font-bold">{selectedCandidate.relocate ? "Yes" : "Not specified"}</strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                     <span className="text-[10px] uppercase font-bold text-muted-foreground block">Current Compensation</span>
-                    <strong className="text-foreground font-bold">{selectedCandidate.currentSalary || "Market Standard"}</strong>
+                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.currentSalary)}</strong>
                   </div>
                   <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 col-span-1 sm:col-span-2">
                     <span className="text-[10px] uppercase font-bold text-primary block">Expected Salary</span>
@@ -1623,20 +1733,56 @@ function CandidateKYCAdmin() {
                 </div>
               </div>
 
-              {/* 7. UPLOADED VERIFICATION DOCUMENTS (Dossier) */}
+              {/* 7. Required KYC evidence and uploaded files */}
               <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-4 shadow-xs">
+                <div className="space-y-2.5">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">Required verification evidence</h3>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      {selectedCandidate.isStudent
+                        ? "Submit proof of current study or a university registration number."
+                        : "These documents are required before credential review can be completed."}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {selectedCandidate.isStudent ? (() => {
+                      const registrationNumber = selectedCandidate.universityRegNo?.trim();
+                      const studentProof = STUDENT_PROOF_TYPES
+                        .map((type) => latestDocumentOfType(selectedCandidate.documents || [], type))
+                        .find(Boolean);
+                      return (
+                        <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+                          <span className="text-xs font-semibold text-foreground">Proof of study</span>
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            {registrationNumber && registrationNumber.length >= 5
+                              ? `University registration number submitted (${registrationNumber}); manual review required.`
+                              : studentProof
+                              ? `${formatDocType(studentProof.documentType)} · ${documentReviewLabel(studentProof)}`
+                              : "Not submitted"}
+                          </p>
+                        </div>
+                      );
+                    })() : REQUIRED_GRADUATE_DOCUMENTS.map((required) => {
+                      const document = latestDocumentOfType(selectedCandidate.documents || [], required.type);
+                      return (
+                        <div key={required.type} className="rounded-xl border border-border/70 bg-muted/20 p-3">
+                          <span className="text-xs font-semibold text-foreground">{required.label}</span>
+                          <p className="text-[11px] text-muted-foreground mt-1">{documentReviewLabel(document)}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary shrink-0">
                       <HiOutlineDocumentCheck className="h-4 w-4" />
                     </span>
                     <span className="text-xs font-bold uppercase tracking-wider text-foreground leading-snug">
-                      Uploaded Verification Documents ({selectedCandidate.documents?.length || 0})
+                      Uploaded Files ({selectedCandidate.documents?.length || 0})
                     </span>
                   </div>
-                  <span className="text-[11px] text-muted-foreground font-semibold whitespace-nowrap">
-                    Cryptographically Secured
-                  </span>
                 </div>
 
                 {/* List of uploaded documents */}
@@ -1644,6 +1790,8 @@ function CandidateKYCAdmin() {
                   {(selectedCandidate.documents && selectedCandidate.documents.length > 0) ? (
                     selectedCandidate.documents.map((doc, idx) => {
                       const isImage = doc.mimeType?.startsWith("image/") || doc.originalFileName.match(/\.(jpg|jpeg|png|webp)$/i);
+                      const reviewStatus = (doc.reviewStatus || (doc.verified ? "VERIFIED" : "PENDING")).toUpperCase();
+                      const isCredentialDocument = REQUIRED_GRADUATE_DOCUMENTS.some((required) => required.type === doc.documentType.toUpperCase()) || STUDENT_PROOF_TYPES.includes(doc.documentType.toUpperCase()) || doc.documentType.toUpperCase() === "DEGREE_CERTIFICATE";
                       return (
                         <div
                           key={doc.id || idx}
@@ -1662,10 +1810,21 @@ function CandidateKYCAdmin() {
                                 <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 truncate max-w-full">
                                   {formatDocType(doc.documentType)}
                                 </span>
-                                {doc.verified && (
+                                {reviewStatus === "VERIFIED" && (
                                   <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.2 rounded shrink-0">
                                     Verified
                                   </span>
+                                )}
+                                {!isCredentialDocument && (
+                                  <span className="text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
+                                    Supporting file · not KYC evidence
+                                  </span>
+                                )}
+                                {isCredentialDocument && reviewStatus === "PENDING" && (
+                                  <span className="text-[10px] font-bold text-amber-700 bg-amber-500/10 px-1.5 py-0.2 rounded shrink-0">Pending review</span>
+                                )}
+                                {isCredentialDocument && reviewStatus === "REJECTED" && (
+                                  <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-1.5 py-0.2 rounded shrink-0">Rejected</span>
                                 )}
                               </div>
                               <p className="font-bold text-foreground text-xs truncate mt-1 group-hover:text-primary transition-colors">
@@ -1678,7 +1837,7 @@ function CandidateKYCAdmin() {
                           </div>
 
                           {/* Strictly Aligned Button Group */}
-                          <div className="flex items-center gap-1.5 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-border/50 shrink-0">
+                          <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-border/50 shrink-0">
                             <Button
                               size="sm"
                               onClick={() => setPreviewDoc(doc)}
@@ -1701,6 +1860,17 @@ function CandidateKYCAdmin() {
                               <span>Open</span>
                             </Button>
 
+                            {isCredentialDocument && reviewStatus === "PENDING" && (
+                              <>
+                                <Button type="button" size="sm" variant="outline" disabled={pageAction.isPending} onClick={() => handleRejectDocument(doc)} className="h-8 px-2 text-xs font-bold text-destructive border-destructive/25">
+                                  Reject
+                                </Button>
+                                <Button type="button" size="sm" disabled={pageAction.isPending} onClick={() => handleApproveDocument(doc)} className="h-8 px-2 text-xs font-bold">
+                                  Approve
+                                </Button>
+                              </>
+                            )}
+
                             <Button
                               size="sm"
                               variant="outline"
@@ -1722,13 +1892,17 @@ function CandidateKYCAdmin() {
                           <HiOutlineDocumentText className="h-5 w-5" />
                         </span>
                         <div className="min-w-0">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                            Council Registration Certificate
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/20">
+                            Documents required
                           </span>
                           <p className="font-bold text-foreground text-xs truncate mt-1">
-                            {selectedCandidate.docName}
+                            {selectedCandidate.isStudent ? "College ID, bonafide certificate, or university registration number" : "Government ID, council registration, and degree certificate"}
                           </p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">PDF Document • Attached for verification</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {selectedCandidate.isStudent && selectedCandidate.universityRegNo?.trim().length >= 5
+                              ? "A university registration number was submitted above. Review it before approving; no files have been uploaded."
+                              : "No files have been uploaded yet."}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -1905,12 +2079,17 @@ function CandidateKYCAdmin() {
       </Dialog>
 
       {/* Reject Modal */}
-      <Dialog open={rejectModalOpen} onOpenChange={setRejectModalOpen}>
+      <Dialog open={rejectModalOpen} onOpenChange={(open) => {
+        setRejectModalOpen(open);
+        if (!open) setRejectingDocument(null);
+      }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Reject Candidate Document</DialogTitle>
+            <DialogTitle>{rejectingDocument ? `Reject ${formatDocType(rejectingDocument.documentType)}` : "Reject Candidate KYC"}</DialogTitle>
             <DialogDescription>
-              State the reason for rejection. The candidate will receive an immediate notification to re-upload.
+              {rejectingDocument
+                ? `State why ${rejectingDocument.originalFileName} was rejected. The candidate will receive this reason and can upload a replacement.`
+                : "State the reason for rejection. The candidate will receive an immediate notification to update their verification."}
             </DialogDescription>
           </DialogHeader>
 
@@ -1929,7 +2108,7 @@ function CandidateKYCAdmin() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejectModalOpen(false)}>Cancel</Button>
-            <Button variant="destructive" disabled={pageAction.isPending} onClick={handleRejectConfirm} className="font-bold text-xs">
+            <Button variant="destructive" disabled={pageAction.isPending || (Boolean(rejectingDocument) && !rejectReason.trim())} onClick={handleRejectConfirm} className="font-bold text-xs">
               Confirm Rejection
             </Button>
           </DialogFooter>

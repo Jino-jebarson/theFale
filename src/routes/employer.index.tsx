@@ -30,6 +30,7 @@ import {
   HiOutlineChartPie,
   HiOutlineShieldCheck,
   HiOutlineQuestionMarkCircle,
+  HiOutlineClock,
   HiOutlineArrowPath,
   HiChevronRight,
 } from "react-icons/hi2";
@@ -133,19 +134,22 @@ function EmployerDashboard() {
   const [apiWallet, setApiWallet] = useState<FacilityWalletDto | null>(null);
   const [apiProfile, setApiProfile] = useState<FacilityProfileDto | null>(null);
   const [loading, setLoading] = useState(isApiEnabled);
+  const facilityKycStatus = String(apiProfile?.kycStatus || s.profile["kycStatus"] || "PENDING").toUpperCase();
+  const isFacilityVerified = facilityKycStatus === "VERIFIED";
+  const isFacilityRejected = facilityKycStatus === "REJECTED";
 
   useEffect(() => {
     let isMounted = true;
 
     const fetchDashboard = (silent = false) => {
       if (!silent) setLoading(true);
-      Promise.all([
+      getFacilityProfile().then((profile) => Promise.all([
         getFacilityJobs(),
         getFacilityShifts(),
-        getFacilityApplicants(),
+        profile.kycStatus === "VERIFIED" ? getFacilityApplicants() : Promise.resolve([]),
         getFacilityWallet(),
-        getFacilityProfile(),
-      ])
+        Promise.resolve(profile),
+      ]))
         .then(([fJobs, fShifts, fApps, fWallet, fProfile]) => {
           if (!isMounted) return;
           if (fJobs) setApiJobs(fJobs);
@@ -562,10 +566,13 @@ function EmployerDashboard() {
                   />
                 )}
                 <span
-                  title="Verified Institutional Partner"
-                  className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-emerald-600 text-white ring-2 ring-card shadow-xs"
+                  title={isFacilityVerified ? "Verified Institution" : isFacilityRejected ? "Verification needs attention" : "Verification pending"}
+                  className={cn(
+                    "absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full text-white ring-2 ring-card shadow-xs",
+                    isFacilityVerified ? "bg-emerald-600" : isFacilityRejected ? "bg-destructive" : "bg-amber-500",
+                  )}
                 >
-                  <RiVerifiedBadgeFill className="h-3.5 w-3.5" />
+                  {isFacilityVerified ? <RiVerifiedBadgeFill className="h-3.5 w-3.5" /> : <HiOutlineClock className="h-3.5 w-3.5" />}
                 </span>
               </button>
 
@@ -646,6 +653,31 @@ function EmployerDashboard() {
             </Link>
           </div>
         </section>
+
+        {!isFacilityVerified && !loading && (
+          <section
+            role="status"
+            className={cn(
+              "flex items-start gap-3 rounded-2xl border p-4 sm:p-5",
+              isFacilityRejected ? "border-destructive/25 bg-destructive/5" : "border-amber-500/25 bg-amber-500/5",
+            )}
+          >
+            <span className={cn("mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl", isFacilityRejected ? "bg-destructive/10 text-destructive" : "bg-amber-500/10 text-amber-700 dark:text-amber-400")}>
+              {isFacilityRejected ? <HiOutlineShieldCheck className="h-5 w-5" /> : <HiOutlineClock className="h-5 w-5" />}
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold text-foreground">
+                {isFacilityRejected ? "Action needed: facility verification" : "Complete your facility profile and request verification"}
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {isFacilityRejected
+                  ? apiProfile?.kycNotes || "Review the note below, update the requested facility details or document, and submit it again for review."
+                  : "Add your state clinical registration number and upload the matching registration or licence certificate. GST is optional. The FALE team will review your submission and update the status here."}
+              </p>
+              <Link to="/employer/profile" className="mt-2 inline-flex text-xs font-bold text-primary hover:underline">{isFacilityRejected ? "Review requested updates" : "Complete facility profile and upload documents"}</Link>
+            </div>
+          </section>
+        )}
 
         {/* Campus Overview Modal Dialog */}
         <Dialog open={isCampusModalOpen} onOpenChange={setIsCampusModalOpen}>

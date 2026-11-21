@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/table";
 import { useApp, setState, approveHuddlePost, rejectHuddlePost, AdminJobApproval, CandidateKYCItem, FacilityKYCItem, AdminApplication, HuddlePost } from "@/lib/store";
 import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
-import { cn } from "@/lib/utils";
+import { cleanCandidateEmail, cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees } from "@/lib/api";
 import { getDailyMorningBriefWithAi, getDemandForecastWithAi } from "@/lib/adapters/aiAdapter";
 import {
@@ -197,7 +197,7 @@ function AdminDashboard() {
         return {
           id: c.id,
           name: c.name || "Candidate",
-          email: c.email || "candidate@fale.in",
+          email: cleanCandidateEmail(c.email),
           phone: c.phone || "+91 6380102651",
           profession: c.profession || c.specialty || "Clinical Practitioner",
           qualification: c.qualification || "MBBS / B.Sc Nursing",
@@ -235,7 +235,7 @@ function AdminDashboard() {
           appliedDate: a.appliedAt ? new Date(a.appliedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "Recent",
           summary: "Screened through FALE clinical qualification pipeline.",
           phone: a.candidatePhone || a.phone || "+91 6380102651",
-          email: a.candidateEmail || a.email || "candidate@fale.in",
+          email: cleanCandidateEmail(a.candidateEmail || a.email),
         };
       });
 
@@ -265,7 +265,7 @@ function AdminDashboard() {
           appliedDate: sc.claimedAt ? new Date(sc.claimedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "Recent",
           summary: `Locum shift duty claim. Net escrow guarantee: ₹${netRupees.toLocaleString("en-IN")}.`,
           phone: "+91 6380102651",
-          email: "candidate@fale.in",
+          email: "",
           isShiftClaim: true,
         };
       });

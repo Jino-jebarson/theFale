@@ -176,6 +176,7 @@ function Applications() {
     (s.profile["cadreLevel"] as any) ||
     (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
   const isStudent = candidateLevel === "student";
+  const isCandidateVerified = !isApiEnabled || String(s.profile["kycStatus"] || "").toUpperCase() === "VERIFIED";
 
   const allJobs = useMemo(() => {
     if (apiJobs.length > 0) {
@@ -259,13 +260,16 @@ function Applications() {
     });
   };
 
-  const handleReapply = async (jobId: string, _title: string, _org: string) => jobAction.run(async () => {
+  const handleReapply = async (jobId: string, _title: string, _org: string) => {
+    if (!isCandidateVerified) { toast.info("Verify your profile before applying for jobs."); return; }
+    await jobAction.run(async () => {
     await applyForJob(jobId);
     const date = new Date().toLocaleDateString("en-IN");
     setApiApps((previous) => previous ? previous.map((item) => item.jobId === jobId ? { ...item, status: "Applied", date } : item) : previous);
     setState((previous) => ({ applied: [{ jobId, status: "Applied", date }, ...previous.applied.filter((item) => item.jobId !== jobId)] }));
     toast.success("Application submitted");
-  });
+    });
+  };
 
   return (
     <AppShell>
@@ -610,7 +614,7 @@ function Applications() {
                     <span>{details.summary}</span>
                   </div>
 
-                  {isWithdrawn && (
+                  {isWithdrawn && (isCandidateVerified ? (
                     <Button
                       size="sm"
                       onClick={() => handleReapply(a.jobId, j.title, j.org)}
@@ -619,7 +623,9 @@ function Applications() {
                       <HiOutlineArrowPath className="h-3.5 w-3.5" />
                       Re-apply
                     </Button>
-                  )}
+                  ) : (
+                    <Button asChild size="sm" variant="outline" className="rounded-xl font-bold h-8 text-xs"><Link to="/profile">Verify to re-apply</Link></Button>
+                  ))}
                 </div>
               )}
             </div>

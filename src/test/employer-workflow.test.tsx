@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseApplicationScope, matchesApplicationStage, formatDutySchedule, shiftInHistory } from "@/lib/employerWorkflow";
-const qa = vi.hoisted(() => ({ scope: {} as Record<string, string>, applicants: [] as any[], jobs: [] as any[], shifts: [] as any[], navigate: vi.fn() }));
+const qa = vi.hoisted(() => ({ scope: {} as Record<string, string>, applicants: [] as any[], jobs: [] as any[], shifts: [] as any[], kyc: "VERIFIED", navigate: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: any) => ({ options, useSearch: () => qa.scope }),
@@ -16,6 +16,7 @@ vi.mock("@/components/fale/EmptyEarningsGraphic", () => ({ EmptyEarningsGraphic:
 vi.mock("@/lib/adapters/facilityAdapter", async original => ({
   ...await original<typeof import("@/lib/adapters/facilityAdapter")>(),
   getFacilityApplicants: async () => qa.applicants, getFacilityJobs: async () => qa.jobs,
+  getFacilityProfile: async () => ({ id: "facility", kycStatus: qa.kyc }),
   attachFocusAndPollRefresh: () => () => {}, updateApplicantStatus: vi.fn(),
 }));
 vi.mock("@/lib/adapters/shiftAdapter", async original => ({ ...await original<typeof import("@/lib/adapters/shiftAdapter")>(), getFacilityShifts: async () => qa.shifts }));
@@ -24,7 +25,7 @@ import { Route as PostingsRoute } from "@/routes/employer.postings";
 const Applications = ApplicationsRoute.options.component as any;
 const Postings = PostingsRoute.options.component as any;
 beforeEach(() => {
-  vi.clearAllMocks(); qa.scope = {}; localStorage.clear();
+  vi.clearAllMocks(); qa.scope = {}; qa.kyc = "VERIFIED"; localStorage.clear();
   qa.applicants = [
     { id: "new-a", jobId: "shift-a", shiftId: "shift-a", jobTitle: "ICU Night", candidateName: "New Nurse", candidateRole: "Nurse", candidateExperience: "3 years", status: "CLAIMED", councilVerified: true, matchScore: 80, shiftStartAt: "2026-12-01T14:00:00Z", shiftEndAt: "2026-12-02T02:00:00Z" },
     { id: "confirmed-a", jobId: "shift-a", shiftId: "shift-a", jobTitle: "ICU Night", candidateName: "Upcoming Nurse", candidateRole: "Nurse", status: "CONFIRMED", checkInPin: "123456", councilVerified: true, matchScore: 80 },
@@ -40,6 +41,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("employer workflow", () => {
+  it("keeps postings accessible while facility verification is pending", async () => {
+    qa.kyc = "PENDING";
+    render(<Postings />);
+    await screen.findByText("Permanent Nurse");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
   it("defaults to actionable applications, groups by opening and collapses candidate insights", async () => {
     render(<Applications />);
     await screen.findByText("New Nurse");

@@ -54,7 +54,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useApp, setState, AdminApplication } from "@/lib/store";
-import { cn } from "@/lib/utils";
+import { cleanCandidateEmail, cn } from "@/lib/utils";
 import { isApiEnabled, paiseToRupees } from "@/lib/api";
 import { calculateClinicalMatch } from "@/lib/clinicalMatchingEngine";
 import { jobs, type Job } from "@/lib/data";
@@ -382,7 +382,7 @@ function ApplicationsAdmin() {
         }
 
         const cleanPhone = dto.candidatePhone || dto.phone || "+91 6380102651";
-        const cleanEmail = dto.candidateEmail || dto.email || "candidate@fale.in";
+        const cleanEmail = cleanCandidateEmail(dto.candidateEmail || dto.email);
 
         const roleCandidate = dto.candidateRole || dto.department || "Doctor";
         const specCandidate =
@@ -1429,12 +1429,16 @@ function ApplicationsAdmin() {
                     <HiOutlineEnvelope className="h-4 w-4 text-primary shrink-0" />
                     <div className="min-w-0 flex-1">
                       <div className="text-[10px] uppercase font-bold text-muted-foreground">Email Address</div>
-                      <a
-                        href={`mailto:${selectedApp.email}`}
-                        className="font-bold text-foreground font-mono text-xs hover:text-primary transition-colors truncate block"
-                      >
-                        {selectedApp.email}
-                      </a>
+                      {selectedApp.email ? (
+                        <a
+                          href={`mailto:${selectedApp.email}`}
+                          className="font-bold text-foreground font-mono text-xs hover:text-primary transition-colors truncate block"
+                        >
+                          {selectedApp.email}
+                        </a>
+                      ) : (
+                        <span className="font-medium text-muted-foreground text-xs">Not provided</span>
+                      )}
                     </div>
                   </div>
 

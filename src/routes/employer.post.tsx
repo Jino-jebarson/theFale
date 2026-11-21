@@ -164,6 +164,7 @@ function Post() {
   const posting = useConfirmedAction();
   const store = useApp();
   const navigate = useNavigate();
+  const isFacilityVerified = !isApiEnabled || String(store.profile["kycStatus"] || "").toUpperCase() === "VERIFIED";
   const hospitalName = String(store.profile["org"] || ((store.profile["hospitalName"] || "Healthcare Facility")));
   const hospitalCity = String(store.profile["city"] || "");
   const draftKey = `fale-job-draft:${store.contact || hospitalName}`;
@@ -207,6 +208,10 @@ function Post() {
         sessionStorage.setItem(draftKey, JSON.stringify(draft));
         toast.success("Local draft saved", { description: "Saved in this browser tab only. It has not been submitted." });
       } catch { toast.error("Cannot save a draft in this browser. Keep this page open to retain your input."); }
+      return;
+    }
+    if (!isFacilityVerified) {
+      toast.info("Hospital verification is required before publishing jobs.");
       return;
     }
     const city = workLocation || hospitalCity;
@@ -261,6 +266,13 @@ function Post() {
             </Link>
           </div>
         </div>
+
+        {!isFacilityVerified && (
+          <div role="status" className="flex flex-col gap-3 rounded-2xl border border-amber-300/70 bg-amber-50/70 p-4 text-sm dark:border-amber-700/50 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
+            <div><p className="font-bold text-foreground">Job publishing is locked until hospital verification</p><p className="mt-1 text-xs leading-5 text-muted-foreground">You can save a local draft and finish your hospital verification while this is reviewed.</p></div>
+            <Button asChild variant="outline" size="sm" className="shrink-0 rounded-xl"><Link to="/employer/profile">Complete verification</Link></Button>
+          </div>
+        )}
 
         {/* 2-Column Grid: Form (Left) + Candidate Preview (Right) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -618,6 +630,7 @@ function Post() {
               <Button
                 type="submit"
                 size="lg"
+                disabled={!isFacilityVerified}
                 className="rounded-xl h-10 px-6 text-xs font-bold cursor-pointer"
               >
                 Publish job
@@ -703,6 +716,7 @@ function Post() {
               <Button
                 type="submit"
                 size="lg"
+                disabled={!isFacilityVerified}
                 className="w-full rounded-xl h-11 text-sm font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer"
               >
                 Publish job
