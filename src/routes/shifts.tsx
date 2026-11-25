@@ -161,34 +161,44 @@ function Shifts() {
 
   useEffect(() => {
     let mounted = true;
-    const fetchShiftPortal = (silent = false) => {
+    const fetchShiftPortal = async (silent = false) => {
+      if (isStudent) {
+        setApiShifts([]);
+        setMyClaims([]);
+        setLoading(false);
+        return;
+      }
       if (!silent) setLoading(true);
-      Promise.all([
-        getOpenShifts(),
-        getMyClaims(),
-        getCandidateProfile(),
-      ])
-        .then(([fetchedShifts, fetchedClaims, profile]) => {
-          if (!mounted) return;
-          setApiShifts(fetchedShifts);
-          setMyClaims(fetchedClaims);
-          if (profile) {
-            setState((prev) => ({
-              candidateLevel: profile.isStudent ? "student" : (profile.candidateLevel?.toLowerCase() as any),
-              profile: {
-                ...prev.profile,
-                name: profile.name || prev.profile["name"],
-                role: profile.profession || prev.profile["role"],
-                specialty: profile.specialty || prev.profile["specialty"],
-                city: profile.city || prev.profile["city"],
-                kycStatus: profile.kycStatus || prev.profile["kycStatus"],
-              },
-            }));
+      try {
+        const profile = await getCandidateProfile();
+        if (!mounted) return;
+        if (profile) {
+          setState((prev) => ({
+            candidateLevel: profile.isStudent ? "student" : (profile.candidateLevel?.toLowerCase() as any),
+            profile: {
+              ...prev.profile,
+              name: profile.name || prev.profile["name"],
+              role: profile.profession || prev.profile["role"],
+              specialty: profile.specialty || prev.profile["specialty"],
+              city: profile.city || prev.profile["city"],
+              kycStatus: profile.kycStatus || prev.profile["kycStatus"],
+            },
+          }));
+          if (profile.isStudent) {
+            setApiShifts([]);
+            setMyClaims([]);
+            return;
           }
-        }).catch(pageLoad.fail)
-        .finally(() => {
-          if (mounted && !silent) setLoading(false);
-        });
+        }
+        const [fetchedShifts, fetchedClaims] = await Promise.all([getOpenShifts(), getMyClaims()]);
+        if (!mounted) return;
+        setApiShifts(fetchedShifts);
+        setMyClaims(fetchedClaims);
+      } catch (error) {
+        if (mounted) pageLoad.fail(error);
+      } finally {
+        if (mounted && !silent) setLoading(false);
+      }
     };
 
     fetchShiftPortal(false);
@@ -197,7 +207,7 @@ function Shifts() {
       mounted = false;
       detachRefresh();
     };
-  }, [pageLoad.retryKey]);
+  }, [pageLoad.retryKey, isStudent]);
 
   const allShifts = useMemo(() => {
     {
@@ -426,6 +436,12 @@ function Shifts() {
   }, [isApiEnabled, myClaims, appliedShiftObjects]);
 
   const handleApply = async (id: string, title: string, org: string) => {
+    if (isStudent) {
+      toast.info("Clinical shifts unlock after graduation", {
+        description: "You can apply for internships while studying. Shifts open after graduation and professional verification.",
+      });
+      return;
+    }
     if (!isCandidateVerified) {
       toast.info("Verify your profile before claiming shifts.");
       return;
@@ -634,6 +650,63 @@ function Shifts() {
       toast.error("Completion failed", { description: err?.message });
     }
   }); };
+
+  if (isStudent) {
+    return (
+      <AppShell>
+        <div className="w-full space-y-5 pb-16">
+          <PageHead
+            title="Clinical shifts"
+            sub="Student accounts can explore internships now. Clinical shift access opens after graduation, council registration, and profile verification."
+          />
+
+          <section className="mx-auto w-full max-w-4xl rounded-3xl border border-primary/20 bg-gradient-to-br from-card via-card to-primary-soft/20 p-6 shadow-xs sm:p-9">
+            <div className="mx-auto flex max-w-2xl flex-col items-center text-center">
+              <span className="mb-4 grid h-14 w-14 place-items-center rounded-2xl border border-primary/20 bg-primary-soft text-primary">
+                <HiOutlineLockClosed className="h-7 w-7" />
+              </span>
+              <span className="mb-3 rounded-full border border-primary/20 bg-primary-soft px-3 py-1 text-xs font-semibold text-primary">
+                Shift access unlocks after graduation
+              </span>
+              <h2 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+                Keep building experience while you study
+              </h2>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                Clinical shifts are available to graduates with professional registration and completed FALE verification. Until then, find course-relevant internships and track your applications from the student dashboard.
+              </p>
+
+              <div className="mt-6 grid w-full gap-3 text-left sm:grid-cols-2">
+                <div className="rounded-2xl border border-border bg-card p-4">
+                  <p className="text-sm font-semibold text-foreground">Available now: internships</p>
+                  <p className="mt-1 text-sm leading-5 text-muted-foreground">Explore placements that match your course and follow applications from your student dashboard.</p>
+                </div>
+                <div className="rounded-2xl border border-border bg-card p-4">
+                  <p className="text-sm font-semibold text-foreground">To unlock shifts</p>
+                  <p className="mt-1 text-sm leading-5 text-muted-foreground">Graduate, add your professional council registration, and complete FALE profile verification.</p>
+                </div>
+              </div>
+
+              <div className="mt-6 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
+                <Button asChild className="h-10 rounded-xl px-5 font-semibold">
+                  <Link to="/jobs" search={{ q: undefined }}>
+                    <HiOutlineSparkles className="mr-2 h-4 w-4" />
+                    Browse internships
+                    <HiArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button asChild variant="outline" className="h-10 rounded-xl px-5 font-semibold">
+                  <Link to="/home">
+                    <HiOutlineAcademicCap className="mr-2 h-4 w-4 text-primary" />
+                    Go to student dashboard
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>

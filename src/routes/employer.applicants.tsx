@@ -283,6 +283,7 @@ function Applicants() {
           city: candidateCity,
           for: a.jobTitle || "Clinical Role",
           status: uiStatus,
+          firstHireFeeWaived: Boolean(a.firstHireFeeWaived),
           verified: a.councilVerified === true,
           match: derivedMatch,
           appliedDate: formatAppliedTimestamp(a.appliedAt),
@@ -316,6 +317,8 @@ function Applicants() {
           candidateRatingCount: a.candidateRatingCount ?? undefined,
           completedShiftsCount: a.completedShiftsCount ?? undefined,
           shiftClaimStatus: a.status || undefined,
+          interviewScheduledAt: a.interviewScheduledAt || undefined,
+          interviewLocationOrLink: a.interviewLocationOrLink || undefined,
           candidateDocuments: a.candidateDocuments || [],
         };
       });
@@ -621,6 +624,9 @@ function Applicants() {
 
   // AI Interview Questions Generator State (#12)
   const [interviewQuestionsModalApp, setInterviewQuestionsModalApp] = useState<Applicant | null>(null);
+  const [interviewScheduleApp, setInterviewScheduleApp] = useState<Applicant | null>(null);
+  const [interviewDateTime, setInterviewDateTime] = useState("");
+  const [interviewLocation, setInterviewLocation] = useState("");
   const [candidateQuestions, setCandidateQuestions] = useState<string[]>([]);
   const [generatingQuestions, setGeneratingQuestions] = useState(false);
 
@@ -702,20 +708,43 @@ function Applicants() {
     }
   };
 
-  const handleInvite = async (app: Applicant) => { await pageAction.run(async () => {
-    {
-      try {
-        await updateApplicantStatus(app.id, "INTERVIEW");
-      } catch (e: any) {
-        toast.error(e?.message || "Status update failed");
-        return;
-      }
+  const handleInvite = (app: Applicant) => {
+    setInterviewDateTime("");
+    setInterviewLocation("");
+    setInterviewScheduleApp(app);
+  };
+
+  const handleScheduleInterview = async () => {
+    if (!interviewScheduleApp || !interviewDateTime) {
+      toast.error("Choose an interview date and time.");
+      return;
     }
-    setStatus((prev) => ({ ...prev, [app.id]: "Interview" }));
-    toast.success(`Application moved to Interview for ${app.name}`, {
-      description: "Interview status saved.",
+    const scheduledAt = new Date(interviewDateTime);
+    if (Number.isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) {
+      toast.error("Choose a future date and time for the interview.");
+      return;
+    }
+
+    await pageAction.run(async () => {
+      try {
+        await updateApplicantStatus(
+          interviewScheduleApp.id,
+          "INTERVIEW",
+          interviewLocation.trim() || undefined,
+          scheduledAt.toISOString(),
+        );
+        setStatus((prev) => ({ ...prev, [interviewScheduleApp.id]: "Interview" }));
+        window.dispatchEvent(new CustomEvent("fale:applications-updated"));
+        toast.success(`Interview scheduled with ${interviewScheduleApp.name}`, {
+          description: scheduledAt.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }),
+        });
+        setInterviewScheduleApp(null);
+        fetchApplicants(true);
+      } catch (e: any) {
+        toast.error(e?.message || "Could not schedule the interview.");
+      }
     });
-  }); };
+  };
 
   const handleMakeOffer = async (app: Applicant) => { await pageAction.run(async () => {
     {
@@ -735,16 +764,20 @@ function Applicants() {
   const handleHire = async (app: Applicant) => { await pageAction.run(async () => {
     {
       try {
-        await updateApplicantStatus(app.id, "HIRED");
+        const updated = await updateApplicantStatus(app.id, "HIRED");
+        app.firstHireFeeWaived = Boolean(updated?.firstHireFeeWaived);
+        setStatus((prev) => ({ ...prev, [app.id]: "Hired" }));
+        toast.success(`${app.name} confirmed & hired!`, {
+          description: updated?.firstHireFeeWaived
+            ? "Your first placement fee is waived for this hire. Candidate compensation and applicable shift costs still apply."
+            : "Hire recorded. Any applicable placement fee follows your facility agreement.",
+        });
+        fetchApplicants(true);
       } catch (e: any) {
         toast.error(e?.message || "Status update failed");
         return;
       }
     }
-    setStatus((prev) => ({ ...prev, [app.id]: "Hired" }));
-    toast.success(`${app.name} confirmed & hired!`, {
-      description: "Candidate onboarding and escrow milestone initiated.",
-    });
   }); };
 
   const openRejectModal = (app: Applicant) => {
@@ -1037,6 +1070,11 @@ function Applicants() {
                         {isActionNeeded && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-bold text-primary">
                             Action Needed
+                          </span>
+                        )}
+                        {a.firstHireFeeWaived && (
+                          <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary-soft px-2 py-0.5 text-[10px] font-bold text-primary">
+                            First placement fee waived
                           </span>
                         )}
                       </div>
@@ -2224,6 +2262,51 @@ function Applicants() {
               >
                 <Star className="h-3.5 w-3.5 fill-white" />
                 {submittingRating ? "Submitting..." : `Submit ${ratingScore}★ Rating`}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {interviewScheduleApp && (
+        <Dialog open onOpenChange={(open) => !open && setInterviewScheduleApp(null)}>
+          <DialogContent className="max-w-md rounded-3xl p-5 sm:p-6">
+            <DialogHeader>
+              <DialogTitle>Schedule an interview</DialogTitle>
+              <DialogDescription>
+                Choose a date, time, and meeting details for {interviewScheduleApp.name}.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <label className="block space-y-1.5 text-sm font-medium">
+                <span>Interview date and time <span className="text-destructive">*</span></span>
+                <Input
+                  type="datetime-local"
+                  value={interviewDateTime}
+                  min={new Date(Date.now() + 60_000 - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16)}
+                  onChange={(event) => setInterviewDateTime(event.target.value)}
+                  className="h-11 rounded-xl"
+                  required
+                />
+              </label>
+              <label className="block space-y-1.5 text-sm font-medium">
+                <span>Meeting details <span className="font-normal text-muted-foreground">(optional)</span></span>
+                <Input
+                  value={interviewLocation}
+                  onChange={(event) => setInterviewLocation(event.target.value)}
+                  placeholder="Hospital address, video link, or phone interview"
+                  maxLength={255}
+                  className="h-11 rounded-xl"
+                />
+              </label>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                The interview will be added to the candidate’s application and shown in your upcoming interviews.
+              </p>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setInterviewScheduleApp(null)} className="rounded-xl">Cancel</Button>
+              <Button disabled={pageAction.isPending || !interviewDateTime} onClick={() => void handleScheduleInterview()} className="rounded-xl">
+                {pageAction.isPending ? "Scheduling…" : "Schedule interview"}
               </Button>
             </DialogFooter>
           </DialogContent>

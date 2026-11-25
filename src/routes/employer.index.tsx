@@ -23,7 +23,6 @@ import {
   HiOutlineDocumentCheck,
   HiOutlineCheckBadge,
   HiArrowRight,
-  HiOutlinePhone,
   HiOutlineMagnifyingGlass,
   HiOutlineBanknotes,
   HiOutlineArrowTrendingUp,
@@ -31,6 +30,8 @@ import {
   HiOutlineShieldCheck,
   HiOutlineQuestionMarkCircle,
   HiOutlineClock,
+  HiOutlineUsers,
+  HiOutlineCalendarDays,
   HiOutlineArrowPath,
   HiChevronRight,
 } from "react-icons/hi2";
@@ -39,10 +40,10 @@ import { RiVerifiedBadgeFill, RiShieldCheckFill } from "react-icons/ri";
 import { toast } from "sonner";
 import { BotMessageSquare } from "lucide-react";
 import { AppShell, StatusBadge, initials } from "@/components/fale/AppShell";
+import { FacilityImage } from "@/components/fale/FacilityImage";
 import { OrgMark } from "@/components/fale/JobCard";
 import { EmptyEarningsGraphic } from "@/components/fale/EmptyEarningsGraphic";
 import { Button, ButtonSpinner } from "@/components/ui/button";
-import { applicants, shifts, jobs } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import facilityMultispecialtyImg from "@/assets/facilities/facility-multispecialty.jpg";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -58,7 +59,7 @@ import {
   type FacilityProfileDto,
   type FacilityWalletDto,
 } from "@/lib/adapters/facilityAdapter";
-import { getFacilityShifts, type UiShiftItem } from "@/lib/adapters/shiftAdapter";
+import { getFacilityShifts, getFacilityShiftPolicy, type FacilityShiftPolicyDto, type UiShiftItem } from "@/lib/adapters/shiftAdapter";
 import { type JobPostingDto } from "@/lib/adapters/jobAdapter";
 
 export const Route = createFileRoute("/employer/")({
@@ -87,42 +88,15 @@ export const Route = createFileRoute("/employer/")({
 const BRAND_COLORS = {
   saffron: "#FF5A1F",
   charcoal: "#1A1A1A",
-  green: "#1A8633",
-  amber: "#F59E0B",
+  green: "#FF7E45",
   slate: "#8A8A8A",
 };
-
-// Analytics Data: Locum Shifts
-const shiftFulfillmentData7d = [
-  { period: "Mon", broadcast: 14, filled: 13, hours: 156 },
-  { period: "Tue", broadcast: 18, filled: 18, hours: 216 },
-  { period: "Wed", broadcast: 22, filled: 21, hours: 252 },
-  { period: "Thu", broadcast: 16, filled: 15, hours: 180 },
-  { period: "Fri", broadcast: 25, filled: 24, hours: 288 },
-  { period: "Sat", broadcast: 30, filled: 29, hours: 348 },
-  { period: "Sun", broadcast: 28, filled: 27, hours: 324 },
-];
-
-const shiftFulfillmentData30d = [
-  { period: "W1", broadcast: 110, filled: 106, hours: 1272 },
-  { period: "W2", broadcast: 135, filled: 131, hours: 1572 },
-  { period: "W3", broadcast: 148, filled: 144, hours: 1728 },
-  { period: "W4", broadcast: 162, filled: 157, hours: 1884 },
-];
-
-// Candidate Pipeline Stages (FALE Recruitment Funnel)
-const candidatePipelineData = [
-  { name: "Shortlisted", value: 40, count: "12 Candidates", color: "#FF5A1F" },
-  { name: "Interview Scheduled", value: 30, count: "9 Candidates", color: "#E04812" },
-  { name: "Offers Extended", value: 18, count: "5 Candidates", color: "#FF7E45" },
-  { name: "Under Screening", value: 12, count: "4 Candidates", color: "#FFA47A" },
-];
 
 function EmployerDashboard() {
   const pageLoad = usePageLoad();
   const s = useApp();
   const [analyticsTimeframe, setAnalyticsTimeframe] = useState<"7d" | "30d">("7d");
-  const [activeTab, setActiveTab] = useState<"postings" | "shifts" | "applicants">("postings");
+  const [activeTab, setActiveTab] = useState<"postings" | "shifts">("postings");
   const [searchQuery, setSearchQuery] = useState("");
   const [activePieIndex, setActivePieIndex] = useState<number | null>(null);
   const [isCampusModalOpen, setIsCampusModalOpen] = useState(false);
@@ -133,41 +107,89 @@ function EmployerDashboard() {
   const [apiApplicants, setApiApplicants] = useState<any[]>([]);
   const [apiWallet, setApiWallet] = useState<FacilityWalletDto | null>(null);
   const [apiProfile, setApiProfile] = useState<FacilityProfileDto | null>(null);
+  const [shiftPolicy, setShiftPolicy] = useState<FacilityShiftPolicyDto | null>(null);
+  const [resourceErrors, setResourceErrors] = useState<Record<string, string | null>>({});
   const [loading, setLoading] = useState(isApiEnabled);
-  const facilityKycStatus = String(apiProfile?.kycStatus || s.profile["kycStatus"] || "PENDING").toUpperCase();
+  const rawFacilityKycStatus = apiProfile?.kycStatus || s.profile["kycStatus"];
+  const facilityKycStatus = rawFacilityKycStatus
+    ? String(rawFacilityKycStatus).toUpperCase()
+    : loading ? "LOADING" : resourceErrors.profile ? "UNAVAILABLE" : "PENDING";
   const isFacilityVerified = facilityKycStatus === "VERIFIED";
   const isFacilityRejected = facilityKycStatus === "REJECTED";
 
   useEffect(() => {
     let isMounted = true;
+    let requestInFlight = false;
 
-    const fetchDashboard = (silent = false) => {
+    const fetchDashboard = async (silent = false) => {
+      if (requestInFlight) return;
+      requestInFlight = true;
       if (!silent) setLoading(true);
-      getFacilityProfile().then((profile) => Promise.all([
-        getFacilityJobs(),
-        getFacilityShifts(),
-        profile.kycStatus === "VERIFIED" ? getFacilityApplicants() : Promise.resolve([]),
-        getFacilityWallet(),
-        Promise.resolve(profile),
-      ]))
-        .then(([fJobs, fShifts, fApps, fWallet, fProfile]) => {
-          if (!isMounted) return;
-          if (fJobs) setApiJobs(fJobs);
-          if (fShifts) setApiShifts(fShifts);
-          if (fApps) setApiApplicants(fApps);
-          if (fWallet) setApiWallet(fWallet);
-          if (fProfile) setApiProfile(fProfile);
-        }).catch(pageLoad.fail)
-        .finally(() => {
-          if (isMounted && !silent) setLoading(false);
-        });
+      let settled: PromiseSettledResult<any>[];
+      try {
+        settled = await Promise.allSettled([
+          getFacilityProfile(),
+          getFacilityJobs(),
+          getFacilityShifts(),
+          getFacilityWallet(),
+          getFacilityShiftPolicy(),
+        ]);
+      } catch (error) {
+        if (isMounted) {
+          pageLoad.fail(error);
+          setLoading(false);
+        }
+        requestInFlight = false;
+        return;
+      }
+      if (!isMounted) {
+        requestInFlight = false;
+        return;
+      }
+
+      const [profileResult, jobsResult, shiftsResult, walletResult, shiftPolicyResult] = settled;
+      const errorText = (error: unknown) => error instanceof Error ? error.message : "Could not load this section.";
+      const nextErrors: Record<string, string | null> = {
+        profile: profileResult.status === "rejected" ? errorText(profileResult.reason) : null,
+        jobs: jobsResult.status === "rejected" ? errorText(jobsResult.reason) : null,
+        shifts: shiftsResult.status === "rejected" ? errorText(shiftsResult.reason) : null,
+        wallet: walletResult.status === "rejected" ? errorText(walletResult.reason) : null,
+        shiftPolicy: shiftPolicyResult.status === "rejected" ? errorText(shiftPolicyResult.reason) : null,
+        applicants: null,
+      };
+
+      if (profileResult.status === "fulfilled") {
+        setApiProfile(profileResult.value);
+        if (String(profileResult.value.kycStatus || "").toUpperCase() === "VERIFIED") {
+          try {
+            const applicants = await getFacilityApplicants();
+            if (!isMounted) return;
+            setApiApplicants(applicants);
+          } catch (error) {
+            nextErrors.applicants = errorText(error);
+          }
+        } else {
+          setApiApplicants([]);
+        }
+      } else {
+        pageLoad.fail(profileResult.reason);
+        setApiApplicants([]);
+      }
+
+      if (jobsResult.status === "fulfilled") setApiJobs(jobsResult.value);
+      if (shiftsResult.status === "fulfilled") setApiShifts(shiftsResult.value);
+      if (walletResult.status === "fulfilled") setApiWallet(walletResult.value);
+      if (shiftPolicyResult.status === "fulfilled") setShiftPolicy(shiftPolicyResult.value);
+      setResourceErrors(nextErrors);
+      if (isMounted && !silent) setLoading(false);
+      requestInFlight = false;
     };
 
     fetchDashboard(false);
 
     const handleAppsUpdated = () => fetchDashboard(true);
     window.addEventListener("fale:applications-updated", handleAppsUpdated);
-    const detachAutoRefresh = attachFocusAndPollRefresh(() => fetchDashboard(true), 15000);
+    const detachAutoRefresh = attachFocusAndPollRefresh(() => fetchDashboard(true), 60000);
 
     return () => {
       isMounted = false;
@@ -177,20 +199,12 @@ function EmployerDashboard() {
   }, [pageLoad.retryKey]);
 
   const orgName = apiProfile?.hospitalName || "Healthcare Facility";
-  const rawCity = apiProfile?.city || "";
-  const city = /[\u0900-\u0D7F]/.test(rawCity) ? "Chennai" : rawCity;
+  const city = apiProfile?.city || String(s.profile["city"] || "");
 
   const stateName = apiProfile?.state || String(s.profile["state"] || "");
-  const displayCity = useMemo(() => {
-    const c = apiProfile?.city || city;
-    if (c && !/[\u0900-\u0D7F]/.test(c) && c !== "Healthcare Facility") {
-      const statePart = stateName && !c.toLowerCase().includes(stateName.toLowerCase())
-        ? `, ${stateName}`
-        : "";
-      return `${c}${statePart}`;
-    }
-    return "Chennai, Tamil Nadu";
-  }, [apiProfile?.city, city, stateName]);
+  const displayCity = useMemo(() =>
+    [apiProfile?.area, city, stateName].filter(Boolean).join(", ") || "Location not added",
+  [apiProfile?.area, city, stateName]);
 
   const campusLocation = useMemo(() => {
     if (apiProfile?.addressLine) {
@@ -202,7 +216,7 @@ function EmployerDashboard() {
     if (apiProfile?.state) {
       return `${city}, ${apiProfile.state}`;
     }
-    return city;
+    return city || "Address not added";
   }, [apiProfile, city]);
 
   const bedCount = apiProfile?.beds || apiProfile?.bedCount;
@@ -215,15 +229,14 @@ function EmployerDashboard() {
 
   const accreditationText = useMemo(() => {
     const level = apiProfile?.accreditationLevel;
-    if (!level) return "NABH Accredited";
-    return level.toUpperCase().includes("NABH") ? level : `NABH ${level}`;
+    return level || "Accreditation not added";
   }, [apiProfile?.accreditationLevel]);
 
   const facilityTypeText = useMemo(() => {
     if (apiProfile?.facilityType) return apiProfile.facilityType;
     if (s.profile["facilityType"]) return String(s.profile["facilityType"]);
     if (apiProfile?.size) return `${apiProfile.size} Center`;
-    return "Multispecialty Hospital";
+    return "Facility type not added";
   }, [apiProfile?.facilityType, apiProfile?.size, s.profile]);
 
   const campusPhotoUrl = useMemo(() => {
@@ -265,18 +278,19 @@ function EmployerDashboard() {
 
   // Effective applicants list
   const effectiveApplicants = useMemo(() => {
-    return apiApplicants;
+    return isApiEnabled ? apiApplicants : s.adminApplications;
 
   }, [isApiEnabled, apiApplicants, s.adminApplications]);
 
   // Filtered jobs
   const allJobs = useMemo(() => {
+    if (!isApiEnabled) return s.postedJobs;
     return apiJobs.map((j) => ({
           id: j.id,
           title: j.title,
           dept: j.department || "General Medicine",
           city: j.city || "",
-          status: j.status || "OPEN",
+          status: j.status || "UNKNOWN",
           exp: j.experienceRequired || "1-3 Years",
           type: j.isInternship ? "Internship" : "Full-time",
           openings: j.openings || 1,
@@ -297,7 +311,12 @@ function EmployerDashboard() {
     });
   }, [allJobs, searchQuery, city]);
 
-  const activeShifts = apiShifts;
+  const activeShifts = isApiEnabled ? apiShifts : (s.postedShifts || []).map((shift) => ({
+    ...shift,
+    startAt: shift.startAt || shift.date,
+    slots: shift.openings || 1,
+    slotsClaimed: 0,
+  } as unknown as UiShiftItem));
 
   // Dynamic Telemetry Metrics
   const activeJobsCount = useMemo(() => {
@@ -314,11 +333,11 @@ function EmployerDashboard() {
     }).length;
   }, [allJobs]);
 
-  // Filter out rejected and cancelled shifts for active operational metrics
+  // Only count shifts that were actually published or filled in operational metrics.
   const validShifts = useMemo(() => {
     return activeShifts.filter((sh) => {
       const st = (sh.status || "").toUpperCase();
-      return st !== "CANCELLED" && st !== "REJECTED";
+      return ["OPEN", "BROADCASTED", "FILLED", "COMPLETED", "CLOSED"].includes(st);
     });
   }, [activeShifts]);
 
@@ -327,7 +346,7 @@ function EmployerDashboard() {
   }, [validShifts]);
 
   const claimedShiftSlots = useMemo(() => {
-    return validShifts.reduce((acc, sh) => acc + (sh.slotsClaimed || 0), 0);
+    return validShifts.reduce((acc, sh) => acc + Math.min(Math.max(0, sh.slots || 0), Math.max(0, sh.slotsClaimed || 0)), 0);
   }, [validShifts]);
 
   const liveBroadcastsCount = useMemo(() => {
@@ -345,31 +364,53 @@ function EmployerDashboard() {
   const shortlistedApplicants = useMemo(() => {
     return effectiveApplicants.filter((a: any) => {
       const st = (a.status || "").toUpperCase();
-      return (
-        st === "SHORTLISTED" ||
-        st === "INTERVIEW_SCHEDULED" ||
-        st === "CLAIMED" ||
-        st === "CLAIM_PENDING_ADMIN" ||
-        st === "CONFIRMED" ||
-        st === "CHECKED_IN" ||
-        st === "TIMESHEET_SUBMITTED"
-      );
+      return st === "SHORTLISTED" && !a.isShiftClaim && !a.shiftId;
     });
   }, [effectiveApplicants]);
 
+  const pipelineApplicants = useMemo(() => effectiveApplicants.filter((a: any) => {
+    const status = String(a.status || "").toUpperCase();
+    const isShift = Boolean(a.isShiftClaim || a.shiftId || String(a.jobTitle || "").toLowerCase().includes("locum shift"));
+    return !isShift && !["REJECTED", "WITHDRAWN", "POSITION_FILLED", "CANCELLED"].includes(status);
+  }), [effectiveApplicants]);
+
+  const interviewApplicants = useMemo(() => pipelineApplicants.filter((a: any) => {
+    const status = String(a.status || "").toUpperCase();
+    return status === "INTERVIEW" || status === "INTERVIEW_SCHEDULED";
+  }), [pipelineApplicants]);
+
+  const upcomingInterviews = useMemo(() => interviewApplicants
+    .filter((a: any) => a.interviewScheduledAt && new Date(a.interviewScheduledAt).getTime() >= Date.now())
+    .sort((a: any, b: any) => new Date(a.interviewScheduledAt).getTime() - new Date(b.interviewScheduledAt).getTime())
+  , [interviewApplicants]);
+
+  const offerApplicants = useMemo(() => pipelineApplicants.filter((a: any) => {
+    const status = String(a.status || "").toUpperCase();
+    return ["OFFER", "OFFERED", "ACCEPTED", "HIRED"].includes(status);
+  }), [pipelineApplicants]);
+
   const councilVerifiedCount = useMemo(() => {
-    return effectiveApplicants.filter((a: any) => a.councilVerified !== false).length;
+    return effectiveApplicants.filter((a: any) => a.councilVerified === true && !a.isShiftClaim && !a.shiftId).length;
   }, [effectiveApplicants]);
+
+  const jobsUnavailable = loading || Boolean(resourceErrors.jobs);
+  const shiftsUnavailable = loading || Boolean(resourceErrors.shifts);
+  const applicantsUnavailable = loading || Boolean(resourceErrors.applicants);
+  const walletUnavailable = loading || Boolean(resourceErrors.wallet);
+  const partialErrorLabels = Object.entries(resourceErrors)
+    .filter(([name, message]) => name !== "profile" && Boolean(message))
+    .map(([name]) => ({ jobs: "job postings", shifts: "shift data", applicants: "applicant data", wallet: "wallet data" }[name] || name));
 
   // Dynamic Candidate Pipeline Funnel Data
   const dynamicCandidatePipelineData = useMemo(() => {
-    const total = effectiveApplicants.length;
+    const total = pipelineApplicants.length;
     if (total === 0) {
       return [
-        { name: "Shortlisted", value: 0, count: "0 Candidates", color: "#FF5A1F" },
-        { name: "Interview Scheduled", value: 0, count: "0 Candidates", color: "#E04812" },
-        { name: "Offers Extended", value: 0, count: "0 Candidates", color: "#FF7E45" },
-        { name: "Under Screening", value: 0, count: "0 Candidates", color: "#FFA47A" },
+        { name: "Under screening", value: 0, count: "0 candidates", color: "#FF5A1F" },
+        { name: "Shortlisted", value: 0, count: "0 candidates", color: "#E04812" },
+        { name: "Interview scheduled", value: 0, count: "0 candidates", color: "#FF7E45" },
+        { name: "Offers & hires", value: 0, count: "0 candidates", color: "#FFA47A" },
+        { name: "Needs review", value: 0, count: "0 candidates", color: "#FFD3C2" },
       ];
     }
 
@@ -377,113 +418,101 @@ function EmployerDashboard() {
     let interview = 0;
     let offers = 0;
     let screening = 0;
+    let needsReview = 0;
 
-    effectiveApplicants.forEach((a: any) => {
+    pipelineApplicants.forEach((a: any) => {
       const st = (a.status || "").toUpperCase();
-      if (st === "SHORTLISTED" || st === "CONFIRMED") shortlisted++;
+      if (st === "SHORTLISTED") shortlisted++;
       else if (st === "INTERVIEW_SCHEDULED" || st === "INTERVIEW") interview++;
-      else if (st === "OFFERED" || st === "OFFER" || st === "ACCEPTED" || st === "HIRED" || st === "COMPLETED") offers++;
-      else if (st === "NEW" || st === "APPLIED" || st === "PENDING" || st === "UNDER_REVIEW" || st === "UNDER_SCREENING") screening++;
-      else shortlisted++;
+      else if (["OFFERED", "OFFER", "ACCEPTED", "HIRED"].includes(st)) offers++;
+      else if (["NEW", "APPLIED", "PENDING", "PENDING_SCREENING", "UNDER_ADMIN_SCREENING", "UNDER_REVIEW", "UNDER_SCREENING"].includes(st)) screening++;
+      else needsReview++;
     });
 
     return [
       {
-        name: "Shortlisted",
-        value: Math.round((shortlisted / total) * 100),
-        count: `${shortlisted} Candidate${shortlisted !== 1 ? "s" : ""}`,
+        name: "Under screening",
+        value: Math.round((screening / total) * 100),
+        count: `${screening} candidate${screening !== 1 ? "s" : ""}`,
         color: "#FF5A1F",
       },
       {
-        name: "Interview Scheduled",
-        value: Math.round((interview / total) * 100),
-        count: `${interview} Candidate${interview !== 1 ? "s" : ""}`,
+        name: "Shortlisted",
+        value: Math.round((shortlisted / total) * 100),
+        count: `${shortlisted} Candidate${shortlisted !== 1 ? "s" : ""}`,
         color: "#E04812",
       },
       {
-        name: "Offers Extended",
-        value: Math.round((offers / total) * 100),
-        count: `${offers} Candidate${offers !== 1 ? "s" : ""}`,
+        name: "Interview scheduled",
+        value: Math.round((interview / total) * 100),
+        count: `${interview} Candidate${interview !== 1 ? "s" : ""}`,
         color: "#FF7E45",
       },
       {
-        name: "Under Screening",
-        value: Math.round((screening / total) * 100),
-        count: `${screening} Candidate${screening !== 1 ? "s" : ""}`,
+        name: "Offers & hires",
+        value: Math.round((offers / total) * 100),
+        count: `${offers} Candidate${offers !== 1 ? "s" : ""}`,
         color: "#FFA47A",
       },
+      {
+        name: "Needs review",
+        value: Math.round((needsReview / total) * 100),
+        count: `${needsReview} candidate${needsReview !== 1 ? "s" : ""}`,
+        color: "#FFD3C2",
+      },
     ];
-  }, [effectiveApplicants]);
+  }, [pipelineApplicants]);
 
   const pieRenderData = useMemo(() => {
     const hasData = dynamicCandidatePipelineData.some((d) => d.value > 0);
     if (!hasData) {
-      return [{ name: "No Candidates", value: 1, color: "hsl(var(--muted) / 0.5)" }];
+      return [{ name: "No Candidates", value: 1, color: "#FFE5DC" }];
     }
     return dynamicCandidatePipelineData.filter((d) => d.value > 0);
   }, [dynamicCandidatePipelineData]);
 
-  // Active trend data (100% dynamic from real shift dates & statuses)
+  // Analytics use actual shift start dates within the selected rolling window.
   const trendData = useMemo(() => {
-    if (analyticsTimeframe === "7d") {
-      const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-      const dayBuckets: Record<string, { broadcast: number; filled: number; hours: number }> = {
-        Mon: { broadcast: 0, filled: 0, hours: 0 },
-        Tue: { broadcast: 0, filled: 0, hours: 0 },
-        Wed: { broadcast: 0, filled: 0, hours: 0 },
-        Thu: { broadcast: 0, filled: 0, hours: 0 },
-        Fri: { broadcast: 0, filled: 0, hours: 0 },
-        Sat: { broadcast: 0, filled: 0, hours: 0 },
-        Sun: { broadcast: 0, filled: 0, hours: 0 },
-      };
+    const rangeDays = analyticsTimeframe === "7d" ? 7 : 30;
+    const today = new Date();
+    const end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+    const start = new Date(today);
+    start.setDate(start.getDate() - rangeDays + 1);
+    start.setHours(0, 0, 0, 0);
+    const dayMs = 24 * 60 * 60 * 1000;
+    const buckets = Array.from({ length: analyticsTimeframe === "7d" ? 7 : 5 }, (_, index) => ({
+      period: analyticsTimeframe === "7d"
+        ? new Date(start.getTime() + index * dayMs).toLocaleDateString("en-IN", { weekday: "short", day: "numeric" })
+        : (() => {
+            const bucketStart = new Date(start.getTime() + index * 7 * dayMs);
+            const bucketEnd = new Date(Math.min(end.getTime(), bucketStart.getTime() + 6 * dayMs));
+            const formatDay = (date: Date) => date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+            return `${formatDay(bucketStart)}–${formatDay(bucketEnd)}`;
+          })(),
+      broadcast: 0,
+      filled: 0,
+      hours: 0,
+    }));
 
-      validShifts.forEach((sh) => {
-        const d = sh.startAt ? new Date(sh.startAt) : new Date(sh.date);
-        const dayIdx = isNaN(d.getTime()) ? 2 : d.getDay();
-        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        const dayKey = dayNames[dayIdx];
+    validShifts.forEach((shift) => {
+      if (!shift.startAt) return;
+      const scheduledAt = new Date(shift.startAt);
+      if (Number.isNaN(scheduledAt.getTime()) || scheduledAt < start || scheduledAt > end) return;
+      const scheduledDay = new Date(scheduledAt);
+      scheduledDay.setHours(0, 0, 0, 0);
+      const daysFromStart = Math.floor((scheduledDay.getTime() - start.getTime()) / dayMs);
+      const bucketIndex = analyticsTimeframe === "7d" ? daysFromStart : Math.min(4, Math.floor(daysFromStart / 7));
+      const bucket = buckets[bucketIndex];
+      if (!bucket) return;
+      const slots = Math.max(0, Number(shift.slots) || 1);
+      const claimed = Math.min(slots, Math.max(0, Number(shift.slotsClaimed) || 0));
+      bucket.broadcast += slots;
+      bucket.filled += claimed;
+      bucket.hours += (Number(shift.hours) || 0) * claimed;
+    });
 
-        if (dayBuckets[dayKey]) {
-          dayBuckets[dayKey].broadcast += sh.slots || 1;
-          dayBuckets[dayKey].filled += sh.slotsClaimed || 0;
-          dayBuckets[dayKey].hours += (sh.hours || 8) * (sh.slotsClaimed || 0);
-        }
-      });
-
-      return days.map((day) => ({
-        period: day,
-        broadcast: dayBuckets[day].broadcast,
-        filled: dayBuckets[day].filled,
-        hours: dayBuckets[day].hours,
-      }));
-    } else {
-      const weekBuckets: Record<string, { broadcast: number; filled: number; hours: number }> = {
-        W1: { broadcast: 0, filled: 0, hours: 0 },
-        W2: { broadcast: 0, filled: 0, hours: 0 },
-        W3: { broadcast: 0, filled: 0, hours: 0 },
-        W4: { broadcast: 0, filled: 0, hours: 0 },
-      };
-
-      validShifts.forEach((sh) => {
-        const d = sh.startAt ? new Date(sh.startAt) : new Date(sh.date);
-        const dayOfMonth = isNaN(d.getTime()) ? 4 : d.getDate();
-        const weekIndex = Math.min(3, Math.floor((dayOfMonth - 1) / 7));
-        const weekKey = ["W1", "W2", "W3", "W4"][weekIndex];
-
-        if (weekBuckets[weekKey]) {
-          weekBuckets[weekKey].broadcast += sh.slots || 1;
-          weekBuckets[weekKey].filled += sh.slotsClaimed || 0;
-          weekBuckets[weekKey].hours += (sh.hours || 8) * (sh.slotsClaimed || 0);
-        }
-      });
-
-      return ["W1", "W2", "W3", "W4"].map((w) => ({
-        period: w,
-        broadcast: weekBuckets[w].broadcast,
-        filled: weekBuckets[w].filled,
-        hours: weekBuckets[w].hours,
-      }));
-    }
+    return buckets;
   }, [validShifts, analyticsTimeframe]);
 
   const totalBroadcastCount = useMemo(() => {
@@ -513,10 +542,10 @@ function EmployerDashboard() {
       const summaryMetrics = {
         organization: orgName,
         city,
-        totalBroadcastShifts: totalBroadcastCount || validShifts.length,
+        totalScheduledSlots: totalBroadcastCount,
         claimedShiftSlots,
         totalShiftSlots,
-        fillRate: `${locumFillRate}%`,
+        claimedSlotRate: `${locumFillRate}%`,
         activePostingsCount: activeJobsCount,
         escrowBalanceINR: paiseToRupees(apiWallet?.availableBalancePaise || 0),
       };
@@ -535,10 +564,44 @@ function EmployerDashboard() {
     }
   };
 
+  const addInterviewToCalendar = (app: any) => {
+    const start = new Date(app.interviewScheduledAt);
+    if (Number.isNaN(start.getTime())) return;
+    const durationMinutes = Number(app.interviewDurationMinutes) > 0 ? Number(app.interviewDurationMinutes) : 30;
+    const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+    const toIcsDate = (date: Date) => date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const escapeIcs = (value: string) => value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+    const title = `Interview: ${app.jobTitle || app.role || "Healthcare role"}`;
+    const lines = [
+      "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//The Fale//Hospital Interview//EN", "BEGIN:VEVENT",
+      `UID:${app.id}@thefale.care`, `DTSTAMP:${toIcsDate(new Date())}`, `DTSTART:${toIcsDate(start)}`, `DTEND:${toIcsDate(end)}`,
+      `SUMMARY:${escapeIcs(title)}`,
+      `DESCRIPTION:${escapeIcs(`Candidate: ${app.candidateName || app.name || "Candidate"}\nFacility: ${orgName}`)}`,
+      ...(app.interviewLocationOrLink ? [`LOCATION:${escapeIcs(app.interviewLocationOrLink)}`] : []),
+      "END:VEVENT", "END:VCALENDAR",
+    ];
+    const file = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `fale-interview-${String(app.candidateName || "candidate").trim().replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.ics`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success("Calendar invite downloaded");
+  };
+
   return (
     <AppShell>
       <RequestError message={pageLoad.error} onRetry={pageLoad.retry} />
       <div className="space-y-6 w-full min-w-0 max-w-full pb-16">
+        {partialErrorLabels.length > 0 && (
+          <section role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+            <p className="text-xs text-foreground">
+              Some dashboard data is unavailable: {partialErrorLabels.join(", ")}. Other sections are still shown with the latest available data.
+            </p>
+            <Button variant="outline" size="sm" onClick={pageLoad.retry} className="h-8 rounded-lg text-xs">Retry</Button>
+          </section>
+        )}
         {/* ========================================================================= */}
         {/* 1. EXECUTIVE HOSPITAL COMMAND COCKPIT HEADER                                */}
         {/* ========================================================================= */}
@@ -554,7 +617,7 @@ function EmployerDashboard() {
                 className="relative shrink-0 cursor-pointer group/avatar"
               >
                 {apiProfile?.logoUrl ? (
-                  <img
+                  <FacilityImage
                     src={apiProfile.logoUrl}
                     alt={orgName}
                     className="h-13 w-13 sm:h-14 sm:w-14 rounded-2xl object-cover shadow-sm border border-border/60 bg-muted/40 transition-transform group-hover/avatar:scale-105"
@@ -566,10 +629,10 @@ function EmployerDashboard() {
                   />
                 )}
                 <span
-                  title={isFacilityVerified ? "Verified Institution" : isFacilityRejected ? "Verification needs attention" : "Verification pending"}
+                  title={isFacilityVerified ? "Verified institution" : isFacilityRejected ? "Verification needs attention" : facilityKycStatus === "LOADING" ? "Loading verification status" : facilityKycStatus === "UNAVAILABLE" ? "Verification status unavailable" : "Verification pending"}
                   className={cn(
                     "absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full text-white ring-2 ring-card shadow-xs",
-                    isFacilityVerified ? "bg-emerald-600" : isFacilityRejected ? "bg-destructive" : "bg-amber-500",
+                    isFacilityVerified ? "bg-primary" : isFacilityRejected ? "bg-destructive" : "bg-muted-foreground",
                   )}
                 >
                   {isFacilityVerified ? <RiVerifiedBadgeFill className="h-3.5 w-3.5" /> : <HiOutlineClock className="h-3.5 w-3.5" />}
@@ -635,7 +698,7 @@ function EmployerDashboard() {
                 <>
                   <span className="hidden sm:inline text-muted-foreground/40">•</span>
                   <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                     <span>
                       <strong className="font-bold font-mono text-foreground">₹{lockedEscrowRupees.toLocaleString("en-IN")}</strong> locked in active shifts
                     </span>
@@ -654,15 +717,15 @@ function EmployerDashboard() {
           </div>
         </section>
 
-        {!isFacilityVerified && !loading && (
+        {!isFacilityVerified && !loading && !resourceErrors.profile && (
           <section
             role="status"
             className={cn(
               "flex items-start gap-3 rounded-2xl border p-4 sm:p-5",
-              isFacilityRejected ? "border-destructive/25 bg-destructive/5" : "border-amber-500/25 bg-amber-500/5",
+              isFacilityRejected ? "border-destructive/25 bg-destructive/5" : "border-primary/20 bg-primary/5",
             )}
           >
-            <span className={cn("mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl", isFacilityRejected ? "bg-destructive/10 text-destructive" : "bg-amber-500/10 text-amber-700 dark:text-amber-400")}>
+            <span className={cn("mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl", isFacilityRejected ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary")}>
               {isFacilityRejected ? <HiOutlineShieldCheck className="h-5 w-5" /> : <HiOutlineClock className="h-5 w-5" />}
             </span>
             <div className="min-w-0">
@@ -686,15 +749,15 @@ function EmployerDashboard() {
               <DialogTitle>{orgName} Campus Overview</DialogTitle>
             </DialogHeader>
             <div className="relative aspect-video w-full overflow-hidden bg-slate-950">
-              <img
+              <FacilityImage
                 src={campusPhotoUrl}
                 alt={orgName}
                 className="h-full w-full object-cover"
               />
               <div className="absolute top-3.5 right-3.5">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-black/70 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white border border-white/20">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>{apiProfile?.kycStatus === "VERIFIED" ? "Verified Institution" : "Clinical Partner"}</span>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-black/70 backdrop-blur-md px-3 py-1 text-xs font-semibold text-white border border-white/20">
+                  <span className="h-2 w-2 rounded-full bg-primary" />
+                  <span>{isFacilityVerified ? "Verified institution" : isFacilityRejected ? "Verification needs attention" : facilityKycStatus === "UNAVAILABLE" ? "Status unavailable" : "Verification pending"}</span>
                 </span>
               </div>
             </div>
@@ -749,20 +812,20 @@ function EmployerDashboard() {
                     <HiOutlineBriefcase className="h-4 w-4" />
                   </span>
                   <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
-                    Active Roles
+                    Job postings
                   </span>
                 </div>
                 <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
-                  {activeJobsCount > 0 ? `+${activeJobsCount} Live` : `${allJobs.length} Live`}
+                  {jobsUnavailable ? "Updating" : `${activeJobsCount} active`}
                 </span>
               </div>
 
               <div className="mt-2.5">
                 <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground leading-none">
-                  {allJobs.length}
+                  {jobsUnavailable ? "—" : allJobs.length}
                 </div>
                 <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-                  clinical requisitions
+                  {jobsUnavailable ? "Postings unavailable" : `${allJobs.length} total requisitions`}
                 </p>
               </div>
             </div>
@@ -770,7 +833,7 @@ function EmployerDashboard() {
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
               <span className="text-primary font-semibold flex items-center gap-1">
                 <HiOutlineArrowTrendingUp className="h-3.5 w-3.5" />
-                {activeJobsCount > 0 ? `${activeJobsCount} Active Postings` : "94% Fill Velocity"}
+                {jobsUnavailable ? "Retry to refresh postings" : `${inVerificationJobsCount} awaiting review`}
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
@@ -788,20 +851,23 @@ function EmployerDashboard() {
                     <HiOutlineBolt className="h-4 w-4" />
                   </span>
                   <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
-                    Locum Fill Rate
+                    All-time slot fill rate
                   </span>
                 </div>
-                <span className="shrink-0 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 text-[10px] font-extrabold px-2 py-0.5">
-                  {liveBroadcastsCount > 0 ? `${liveBroadcastsCount} Live` : "0 Active"}
+                <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
+                  {shiftsUnavailable ? "Updating" : `${liveBroadcastsCount} open`}
                 </span>
               </div>
 
               <div className="mt-2.5">
-                <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground leading-none">
-                  {locumFillRate}%
+                <div className={cn(
+                  "font-black tracking-tight text-foreground leading-none",
+                  shiftsUnavailable || totalShiftSlots === 0 ? "text-sm sm:text-base" : "text-2xl sm:text-3xl font-mono",
+                )}>
+                  {shiftsUnavailable ? "Unavailable" : totalShiftSlots === 0 ? "No shifts posted yet" : `${locumFillRate}%`}
                 </div>
                 <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-                  {totalShiftSlots > 0 ? `${claimedShiftSlots} of ${totalShiftSlots} claimed` : "0 shifts broadcasted"}
+                  {shiftsUnavailable ? "Retry to refresh shift activity" : totalShiftSlots > 0 ? `${claimedShiftSlots} of ${totalShiftSlots} slots claimed` : "Post a shift to track bookings"}
                 </p>
               </div>
             </div>
@@ -812,7 +878,7 @@ function EmployerDashboard() {
                   "h-1.5 w-1.5 rounded-full shrink-0",
                   liveBroadcastsCount > 0 ? "bg-primary animate-pulse" : "bg-muted-foreground/50"
                 )} />
-                <span>{`${activeShifts.length} Live Broadcasts`}</span>
+                <span>{shiftsUnavailable ? "Retry to refresh shifts" : `${liveBroadcastsCount} open broadcasts`}</span>
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
@@ -833,17 +899,20 @@ function EmployerDashboard() {
                     Pipeline
                   </span>
                 </div>
-                <span className="shrink-0 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20 text-[10px] font-extrabold px-2 py-0.5">
-                  {shortlistedApplicants.length > 0 ? `${shortlistedApplicants.length} Shortlisted` : `${effectiveApplicants.length} In Review`}
+                <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
+                  {!isFacilityVerified ? "Verification required" : applicantsUnavailable ? "Updating" : `${shortlistedApplicants.length} shortlisted`}
                 </span>
               </div>
 
               <div className="mt-2.5">
-                <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground leading-none">
-                  {effectiveApplicants.length}
+                <div className={cn(
+                  "font-black tracking-tight text-foreground leading-none",
+                  !isFacilityVerified || applicantsUnavailable ? "text-sm sm:text-base" : "text-2xl sm:text-3xl font-mono",
+                )}>
+                  {!isFacilityVerified ? "Verify your facility" : applicantsUnavailable ? "Unavailable" : pipelineApplicants.length}
                 </div>
                 <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-                  verified clinicians
+                  {!isFacilityVerified ? "Candidate profiles unlock after approval" : applicantsUnavailable ? "Applicant data unavailable" : "active job applicants"}
                 </p>
               </div>
             </div>
@@ -851,7 +920,7 @@ function EmployerDashboard() {
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
               <span className="text-primary font-semibold truncate flex items-center gap-1">
                 <HiOutlineCheckBadge className="h-3.5 w-3.5" />
-                {councilVerifiedCount > 0 ? `${councilVerifiedCount} Council Verified` : "0 Council Verified"}
+                {!isFacilityVerified || applicantsUnavailable ? "Applicant verification unavailable" : `${councilVerifiedCount} council verified`}
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
@@ -872,19 +941,19 @@ function EmployerDashboard() {
                     Escrow Protection
                   </span>
                 </div>
-                <span className="shrink-0 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-extrabold px-2 py-0.5">
-                  {apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
+                <span className="shrink-0 rounded-full bg-primary/10 text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
+                  {walletUnavailable ? "Updating" : apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
                     ? "Escrow Locked"
-                    : "100% Nodal"}
+                    : "No active escrow"}
                 </span>
               </div>
 
               <div className="mt-2.5">
                 <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground leading-none">
-                  {formattedEscrow}
+                  {walletUnavailable ? "—" : formattedEscrow}
                 </div>
                 <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-                  {apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
+                  {walletUnavailable ? "Wallet data unavailable" : apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
                     ? "locked in shift escrow"
                     : "available wallet balance"}
                 </p>
@@ -893,9 +962,9 @@ function EmployerDashboard() {
 
             <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
               <span className="text-primary font-semibold truncate">
-                {apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
+                {walletUnavailable ? "Retry to refresh wallet" : apiWallet?.lockedEscrowBalancePaise && apiWallet.lockedEscrowBalancePaise > 0
                   ? `₹${paiseToRupees(apiWallet.availableBalancePaise).toLocaleString("en-IN")} Available`
-                  : "24h Nodal Protection"}
+                  : "View wallet activity"}
               </span>
               <HiArrowRight className="h-3 w-3 shrink-0 opacity-60 group-hover:translate-x-0.5 transition-transform" />
             </div>
@@ -920,14 +989,14 @@ function EmployerDashboard() {
                     Ally Director
                   </span>
                   {aiExecutiveBrief && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      Live Analysis
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                      Brief ready
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Real-time operational analysis of fill rates, critical department vacancies, and Escrow deployment.
+                  Review recent shift slot activity, recruitment progress, and wallet status.
                 </p>
               </div>
             </div>
@@ -1004,9 +1073,9 @@ function EmployerDashboard() {
                     <span className="h-2 w-2 rounded-full bg-primary shrink-0" />
                     <span>Broadcasted</span>
                   </span>
-                  <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400 text-[11px] sm:text-xs">
-                    <span className="h-2 w-2 rounded-full bg-emerald-600 shrink-0" />
-                    <span>Fulfilled</span>
+                  <span className="inline-flex items-center gap-1 font-semibold text-primary text-[11px] sm:text-xs">
+                    <span className="h-2 w-2 rounded-full bg-primary/70 shrink-0" />
+                    <span>Claimed</span>
                   </span>
                 </div>
 
@@ -1041,6 +1110,11 @@ function EmployerDashboard() {
 
             {/* Recharts Area Chart */}
             <div className="h-56 sm:h-64 w-full pt-1 sm:pt-2">
+              {shiftsUnavailable ? (
+                <div className="grid h-full place-items-center rounded-2xl bg-muted/20 px-5 text-center text-sm text-muted-foreground">Shift analytics are unavailable right now. Retry to load the latest data.</div>
+              ) : totalBroadcastCount === 0 ? (
+                <div className="grid h-full place-items-center rounded-2xl bg-muted/20 px-5 text-center text-sm text-muted-foreground">No scheduled shift slots in this date range.</div>
+              ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={trendData} margin={{ top: 8, right: 10, left: 4, bottom: 0 }}>
                   <defs>
@@ -1075,11 +1149,11 @@ function EmployerDashboard() {
                             </span>
                             <div className="flex items-center gap-2 text-primary font-semibold">
                               <span className="h-2 w-2 rounded-full bg-primary" />
-                              <span>Broadcasted: {payload[0]?.value} shifts</span>
+                              <span>Posted: {payload[0]?.value} slots</span>
                             </div>
-                            <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold">
-                              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                              <span>Fulfilled: {payload[1]?.value} shifts</span>
+                            <div className="flex items-center gap-2 text-primary/80 font-semibold">
+                              <span className="h-2 w-2 rounded-full bg-primary/70" />
+                              <span>Claimed: {payload[1]?.value} slots</span>
                             </div>
                           </div>
                         );
@@ -1105,6 +1179,7 @@ function EmployerDashboard() {
                   />
                 </AreaChart>
               </ResponsiveContainer>
+              )}
             </div>
 
             {/* Bottom Summary Bar (Identical height, zero truncation or overflow) */}
@@ -1116,21 +1191,21 @@ function EmployerDashboard() {
                 </span>
                 <div className="mt-1 flex items-baseline justify-center gap-1 font-mono leading-none">
                   <span className="text-sm sm:text-base font-black text-foreground">
-                    {trendData.reduce((acc, curr) => acc + curr.broadcast, 0)}
+                    {shiftsUnavailable ? "—" : totalBroadcastCount}
                   </span>
                   <span className="text-[10px] sm:text-xs font-sans font-medium text-muted-foreground">
-                    Shifts
+                    Slots
                   </span>
                 </div>
               </div>
 
-              <div className="py-2 px-1.5 sm:py-2.5 sm:px-3 rounded-xl sm:rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col justify-center items-center min-w-0 h-full shadow-2xs">
-                <span className="text-[9px] sm:text-[10px] uppercase font-bold text-emerald-800 dark:text-emerald-300 tracking-wider block truncate w-full">
-                  Fulfillment
+              <div className="py-2 px-1.5 sm:py-2.5 sm:px-3 rounded-xl sm:rounded-2xl bg-primary/5 border border-primary/15 flex flex-col justify-center items-center min-w-0 h-full shadow-2xs">
+                <span className="text-[9px] sm:text-[10px] uppercase font-bold text-primary tracking-wider block truncate w-full">
+                  Claimed rate
                 </span>
                 <div className="mt-1 flex items-baseline justify-center font-mono leading-none">
-                  <span className="text-sm sm:text-base font-black text-emerald-600 dark:text-emerald-400">
-                    {dynamicFulfillmentRate}
+                  <span className="text-sm sm:text-base font-black text-primary">
+                    {shiftsUnavailable ? "—" : totalBroadcastCount ? dynamicFulfillmentRate : "—"}
                   </span>
                 </div>
               </div>
@@ -1142,7 +1217,7 @@ function EmployerDashboard() {
                 </span>
                 <div className="mt-1 flex items-baseline justify-center gap-1 font-mono leading-none">
                   <span className="text-sm sm:text-base font-black text-foreground">
-                    {totalCoveredHours.toLocaleString()}
+                    {shiftsUnavailable ? "—" : totalCoveredHours.toLocaleString()}
                   </span>
                   <span className="text-[10px] sm:text-xs font-sans font-medium text-muted-foreground">
                     hrs
@@ -1161,16 +1236,24 @@ function EmployerDashboard() {
                   <span className="truncate">Candidate Pipeline</span>
                 </h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Shortlisted clinicians by recruitment stage
+                  Active job applications by recruitment stage
                 </p>
               </div>
               <span className="shrink-0 whitespace-nowrap text-[10.5px] sm:text-xs font-bold text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-full self-start sm:self-center">
-                {effectiveApplicants.length} Active
+                {!isFacilityVerified || applicantsUnavailable ? "Unavailable" : `${pipelineApplicants.length} active`}
               </span>
             </div>
 
             {/* Recharts Pie Chart / Donut */}
             <div className="relative h-56 w-full flex items-center justify-center my-auto py-1">
+              {!isFacilityVerified ? (
+                <p className="px-4 text-center text-sm text-muted-foreground">Candidate pipeline appears after facility verification.</p>
+              ) : applicantsUnavailable ? (
+                <p className="px-4 text-center text-sm text-muted-foreground">Applicant data is unavailable. Use Retry above to refresh.</p>
+              ) : pipelineApplicants.length === 0 ? (
+                <p className="px-4 text-center text-sm text-muted-foreground">No job applications yet. Applications will appear here when candidates apply.</p>
+              ) : (
+              <>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -1207,16 +1290,19 @@ function EmployerDashboard() {
                   Pipeline
                 </span>
                 <span className="text-xl sm:text-2xl font-black font-mono text-foreground tracking-tight my-1 leading-none">
-                  {effectiveApplicants.length}
+                  {pipelineApplicants.length}
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[9px] font-bold text-primary leading-none">
                   <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  Council Verified
+                  {councilVerifiedCount} council verified
                 </span>
               </div>
+              </>
+              )}
             </div>
 
-            {/* Legend Pills below Pie */}
+            {/* Pipeline legend only appears when there is data to break down. */}
+            {isFacilityVerified && !applicantsUnavailable && pipelineApplicants.length > 0 ? (
             <div className="space-y-1 pt-2 border-t border-border/50">
               {dynamicCandidatePipelineData.map((d, index) => (
                 <div
@@ -1256,15 +1342,20 @@ function EmployerDashboard() {
                 </div>
               ))}
             </div>
+            ) : (
+              <p className="border-t border-border/50 pt-3 text-center text-xs text-muted-foreground">
+                {isFacilityVerified ? applicantsUnavailable ? "Stage breakdown unavailable." : "Stage breakdown appears when applications arrive." : "Verify your facility to unlock applicant insights."}
+              </p>
+            )}
           </div>
         </section>
 
         {/* ========================================================================= */}
         {/* 4. MAIN OPERATIONAL REQUISITIONS & SHIFT BOARD (NECESSARY ONLY)          */}
         {/* ========================================================================= */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 items-start">
+        <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-12">
           {/* Main Feed Column (8 cols) */}
-          <div className="lg:col-span-8 space-y-4">
+          <div className="flex min-w-0 flex-col gap-4 lg:col-span-8">
             {/* Search and Tabs Bar */}
             <div className="space-y-3">
               <div className="relative w-full">
@@ -1307,42 +1398,33 @@ function EmployerDashboard() {
                   <span>Locum Board ({activeShifts.length})</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("applicants")}
-                  className={cn(
-                    "flex-1 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap",
-                    activeTab === "applicants"
-                      ? "bg-card text-foreground shadow-2xs font-bold"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <HiOutlineDocumentCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                  <span>Shortlisted ({effectiveApplicants.length})</span>
-                </button>
               </div>
             </div>
 
             {/* TAB 1: Clinical Postings */}
             {activeTab === "postings" && (
-              <div className="space-y-3.5">
+              <div className="flex flex-1 flex-col gap-3.5">
                 {filteredJobs.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-border/80 bg-card/80 backdrop-blur-xs p-6 sm:p-10 text-center animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden shadow-xs">
+                  <div className="relative flex min-h-[360px] flex-1 flex-col items-center justify-center overflow-hidden rounded-3xl border border-dashed border-border/80 bg-card/80 p-6 text-center shadow-xs backdrop-blur-xs animate-in fade-in zoom-in-95 duration-300 sm:p-10">
                     {/* Saffron ambient brand glow */}
                     <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#FF5A1F]/10 dark:bg-[#FF5A1F]/15 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute -bottom-16 right-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+                    <div className="absolute -bottom-16 right-10 w-48 h-48 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
 
                     <div className="relative z-10 max-w-lg mx-auto flex flex-col items-center">
                       <EmptyEarningsGraphic className="w-36 h-36 sm:w-44 sm:h-44 mb-3" />
 
                       <h3 className="text-lg sm:text-xl font-bold text-foreground tracking-tight">
-                        {searchQuery ? "No matching postings found" : "No clinical postings published yet"}
+                        {jobsUnavailable ? loading ? "Loading job postings" : "Job postings unavailable" : searchQuery ? "No matching postings found" : isFacilityVerified ? "No clinical postings published yet" : "Verify your facility to publish jobs"}
                       </h3>
 
                       <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-md mx-auto">
-                        {searchQuery
+                        {jobsUnavailable
+                          ? "We couldn't load your postings. Retry from the dashboard notice above."
+                          : searchQuery
                           ? `We couldn't find any openings matching "${searchQuery}". Try adjusting your keywords or clearing the search.`
-                          : "Create and publish permanent roles, clinical fellowships, or consultant vacancies to attract verified medical practitioners."}
+                          : isFacilityVerified
+                            ? "Create and publish permanent roles, clinical fellowships, or consultant vacancies to attract healthcare practitioners."
+                            : "Complete facility verification first. Once approved, you can publish roles and review applicants."}
                       </p>
 
                       <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3">
@@ -1357,7 +1439,11 @@ function EmployerDashboard() {
                             <span>Clear Search</span>
                           </Button>
                         ) : null}
-                        <Button
+                        {jobsUnavailable ? null : !isFacilityVerified ? (
+                          <Button size="sm" asChild className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary/90 text-white gap-2 shadow-none cursor-pointer">
+                            <Link to="/employer/profile">Complete verification</Link>
+                          </Button>
+                        ) : <Button
                           size="sm"
                           asChild
                           className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary/90 text-white gap-2 shadow-none cursor-pointer"
@@ -1366,7 +1452,7 @@ function EmployerDashboard() {
                             <HiPlus className="h-4 w-4" />
                             <span>Post Clinical Vacancy</span>
                           </Link>
-                        </Button>
+                        </Button>}
                       </div>
                     </div>
                   </div>
@@ -1395,9 +1481,14 @@ function EmployerDashboard() {
                           <span>•</span>
                           <span>{city}</span>
                         </div>
-                        <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs text-primary font-bold hover:bg-primary-soft">
-                          <Link to="/employer/applicants">View Shortlist →</Link>
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground font-semibold hover:bg-muted/60">
+                            <Link to="/employer/postings">Manage</Link>
+                          </Button>
+                          <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs text-primary font-bold hover:bg-primary-soft">
+                            <Link to="/employer/applicants">View candidates →</Link>
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))
@@ -1408,33 +1499,33 @@ function EmployerDashboard() {
             {/* TAB 2: Locum Shifts */}
             {activeTab === "shifts" && (
               <div className="space-y-3">
-                {activeShifts.length === 0 ? (
+                {shiftsUnavailable || activeShifts.length === 0 ? (
                   <div className="rounded-3xl border border-dashed border-border/80 bg-card/80 backdrop-blur-xs p-6 sm:p-10 text-center animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden shadow-xs">
                     <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#FF5A1F]/10 dark:bg-[#FF5A1F]/15 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute -bottom-16 right-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+                    <div className="absolute -bottom-16 right-10 w-48 h-48 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
 
                     <div className="relative z-10 max-w-lg mx-auto flex flex-col items-center">
                       <EmptyEarningsGraphic className="w-36 h-36 sm:w-44 sm:h-44 mb-3" />
 
                       <h3 className="text-lg sm:text-xl font-bold text-foreground tracking-tight">
-                        No active locum duty shifts
+                        {shiftsUnavailable ? loading ? "Loading shift activity" : "Shift data unavailable" : isFacilityVerified ? "No active locum duty shifts" : "Verify your facility to post shifts"}
                       </h3>
 
                       <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-md mx-auto">
-                        Broadcast urgent on-call doctor or nursing shifts with 24h escrow protection directly to registered clinicians.
+                        {shiftsUnavailable ? "Shift activity couldn't be loaded. Retry from the dashboard notice above." : isFacilityVerified ? "Post urgent coverage needs and manage clinician responses from this dashboard." : "Complete facility verification before posting shifts. Approved facilities can then reach eligible clinicians."}
                       </p>
 
                       <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3">
-                        <Button
+                        {!shiftsUnavailable && <Button
                           size="sm"
                           asChild
                           className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary/90 text-white gap-2 shadow-none cursor-pointer"
                         >
-                          <Link to="/employer/post-shift">
+                          <Link to={isFacilityVerified ? "/employer/post-shift" : "/employer/profile"}>
                             <HiOutlineBolt className="h-4 w-4" />
-                            <span>Broadcast Instant Shift</span>
+                            <span>{isFacilityVerified ? "Post a shift" : "Complete verification"}</span>
                           </Link>
-                        </Button>
+                        </Button>}
                       </div>
                     </div>
                   </div>
@@ -1449,16 +1540,16 @@ function EmployerDashboard() {
                           <span className={cn(
                             "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold",
                             sh.status === "PENDING_APPROVAL"
-                              ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
+                              ? "bg-primary/10 text-primary border border-primary/20"
                               : sh.status === "OPEN"
-                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20"
+                              ? "bg-primary/10 text-primary border border-primary/20"
                               : sh.status === "FILLED"
-                              ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
+                              ? "bg-primary/5 text-primary border border-primary/15"
                               : "bg-muted text-muted-foreground"
                           )}>
                             <span className={cn(
                               "h-1.5 w-1.5 rounded-full",
-                              sh.status === "PENDING_APPROVAL" ? "bg-amber-500" : "bg-emerald-500 animate-pulse"
+                              sh.status === "PENDING_APPROVAL" ? "bg-primary" : "bg-primary/70 animate-pulse"
                             )} />
                             {sh.status === "PENDING_APPROVAL"
                               ? "Awaiting Admin Verification"
@@ -1475,8 +1566,8 @@ function EmployerDashboard() {
                       </div>
 
                       <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs">
-                        <span className="text-emerald-600 font-medium text-[11px] flex items-center gap-1">
-                          <HiOutlineShieldCheck className="h-3.5 w-3.5" /> 24h Escrow Protected
+                        <span className="text-muted-foreground font-medium text-[11px] flex items-center gap-1">
+                          <HiOutlineShieldCheck className="h-3.5 w-3.5 text-primary" /> Escrow details in shift
                         </span>
                         <Button asChild variant="outline" size="sm" className="h-7 text-xs rounded-lg font-bold">
                           {Number((sh as any).slotsClaimed || 0) > 0 ? (
@@ -1492,71 +1583,33 @@ function EmployerDashboard() {
               </div>
             )}
 
-            {/* TAB 3: Shortlisted */}
-            {activeTab === "applicants" && (
-              <div className="space-y-3">
-                {effectiveApplicants.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-border/80 bg-card/80 backdrop-blur-xs p-6 sm:p-10 text-center animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden shadow-xs">
-                    <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#FF5A1F]/10 dark:bg-[#FF5A1F]/15 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute -bottom-16 right-10 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-
-                    <div className="relative z-10 max-w-lg mx-auto flex flex-col items-center">
-                      <EmptyEarningsGraphic className="w-36 h-36 sm:w-44 sm:h-44 mb-3" />
-
-                      <h3 className="text-lg sm:text-xl font-bold text-foreground tracking-tight">
-                        No shortlisted candidates yet
-                      </h3>
-
-                      <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-md mx-auto">
-                        When candidates apply to your postings or compliance admins assign shortlisted clinicians, they will appear here.
-                      </p>
-
-                      <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3">
-                        <Button
-                          size="sm"
-                          asChild
-                          className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary/90 text-white gap-2 shadow-none cursor-pointer"
-                        >
-                          <Link to="/employer/candidates">
-                            <span>Browse Verified Clinicians</span>
-                          </Link>
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  effectiveApplicants.map((a) => {
-                    const displayStatus = formatApplicationStatus(a.status);
-                    return (
-                      <div
-                        key={a.id}
-                        className="rounded-2xl border border-border/70 bg-card p-4 shadow-xs hover:border-primary/40 transition-all flex items-center justify-between gap-3"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-sm font-bold text-primary">
-                            {initials(a.candidateName || a.name || "Candidate")}
-                          </span>
-                          <div className="min-w-0">
-                            <h4 className="text-sm font-bold text-foreground truncate">{a.candidateName || a.name}</h4>
-                            <p className="text-xs text-muted-foreground truncate">{a.jobTitle || a.role || "Healthcare Clinician"} • {displayStatus}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <StatusBadge status={displayStatus} />
-                          <Button asChild size="sm" variant="outline" className="h-7 text-xs rounded-lg font-bold">
-                            <Link to="/employer/applicants">Review</Link>
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
           </div>
-
           {/* Right Rail: Hospital Readiness & Hotline (4 cols) */}
-          <div className="lg:col-span-4 space-y-4 lg:sticky lg:top-20">
+          <div className="lg:col-span-4 space-y-4 min-w-0">
+            <section className="rounded-3xl border border-primary/20 bg-primary/5 p-5 shadow-xs" aria-labelledby="facility-offers-title">
+              <div className="flex items-start gap-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><HiOutlineBolt className="h-4.5 w-4.5" /></span>
+                <div className="min-w-0">
+                  <h3 id="facility-offers-title" className="text-sm font-bold text-foreground">Your facility offers</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Keep track of the complimentary launch benefits available to your facility.</p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-3">
+                <div className="flex items-start justify-between gap-3 border-t border-primary/10 pt-3">
+                  <div><p className="text-xs font-semibold text-foreground">Candidate contact unlocks</p><p className="mt-0.5 text-[11px] text-muted-foreground">Complimentary welcome credits</p></div>
+                  <span className="shrink-0 text-right text-xs font-bold text-primary">{apiWallet?.welcomeCreditsGranted ? `${apiWallet.candidateCredits} remaining` : resourceErrors.wallet ? "Unavailable" : apiWallet ? "No welcome credits" : "Loading"}</span>
+                </div>
+                <div className="flex items-start justify-between gap-3 border-t border-primary/10 pt-3">
+                  <div><p className="text-xs font-semibold text-foreground">First qualifying hire</p><p className="mt-0.5 text-[11px] text-muted-foreground">Placement fee waiver</p></div>
+                  <span className="shrink-0 text-right text-xs font-bold text-primary">{apiProfile?.firstHireFreeAvailable ? "Available" : resourceErrors.profile ? "Unavailable" : apiProfile ? "Used" : "Loading"}</span>
+                </div>
+                <div className="flex items-start justify-between gap-3 border-t border-primary/10 pt-3">
+                  <div><p className="text-xs font-semibold text-foreground">First completed shift</p><p className="mt-0.5 text-[11px] text-muted-foreground">The Fale service fee waived</p></div>
+                  <span className="shrink-0 text-right text-xs font-bold text-primary">{shiftPolicy?.firstShiftFeeWaived ? "Available" : resourceErrors.shiftPolicy ? "Unavailable" : shiftPolicy ? "Used" : "Loading"}</span>
+                </div>
+              </div>
+              <p className="mt-4 border-t border-primary/10 pt-3 text-[11px] leading-relaxed text-muted-foreground">Candidate compensation, shift wages, applicable taxes, and any additional paid contact unlocks still apply.</p>
+            </section>
             {/* Verified Clinical Hiring Desk */}
             <div className="rounded-3xl border border-border/80 bg-card p-5 shadow-xs space-y-3">
               <div className="flex items-center justify-between">
@@ -1565,71 +1618,166 @@ function EmployerDashboard() {
                     <HiOutlineCheckBadge className="h-4.5 w-4.5" />
                   </span>
                   <div>
-                    <h4 className="text-xs font-bold text-foreground">Verified Clinical Hiring</h4>
-                    <p className="text-[10px] text-muted-foreground">Council-cleared professionals delivered to your desk</p>
+                    <h4 className="text-xs font-bold text-foreground">Candidate hiring access</h4>
+                    <p className="text-[10px] text-muted-foreground">{isFacilityVerified ? "Review applicant credentials and hiring progress." : "Candidate access opens after facility verification."}</p>
                   </div>
                 </div>
-                <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold px-2 py-0.5 flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Active
+                <span className="rounded-full bg-primary/10 border border-primary/20 text-primary text-[10px] font-extrabold px-2 py-0.5 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  {isFacilityVerified ? "Verified" : isFacilityRejected ? "Action needed" : "Locked"}
                 </span>
               </div>
 
               <div className="rounded-2xl bg-muted/40 p-3.5 space-y-2.5 border border-border/50 text-xs">
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-muted-foreground font-medium">Postings in Verification</span>
-                  <span className="font-bold font-mono text-amber-600 dark:text-amber-400">
-                    {inVerificationJobsCount > 0 ? `${inVerificationJobsCount} Under Review` : "0 Under Review"}
+                  <span className="font-bold font-mono text-primary">
+                    {jobsUnavailable ? "—" : `${inVerificationJobsCount} under review`}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-muted-foreground font-medium">Active Vacancies</span>
-                  <span className="font-bold font-mono text-emerald-600 dark:text-emerald-400">
-                    {activeJobsCount > 0 ? `${activeJobsCount} Published` : `${allJobs.length} Published`}
+                  <span className="font-bold font-mono text-primary">
+                    {jobsUnavailable ? "—" : `${activeJobsCount} published`}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-muted-foreground font-medium">Shortlisted Clinicians</span>
                   <span className="font-bold font-mono text-primary font-bold">
-                    {shortlistedApplicants.length > 0 ? `${shortlistedApplicants.length} Ready to Interview` : `${effectiveApplicants.length} In Review`}
+                    {!isFacilityVerified || applicantsUnavailable ? "—" : `${shortlistedApplicants.length} shortlisted`}
                   </span>
                 </div>
               </div>
 
               <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs">
                 <span className="text-muted-foreground text-[11px]">Qualified Candidates</span>
-                <Link to="/employer/applicants" className="font-bold text-primary hover:underline text-xs">
-                  View Shortlist &rarr;
+                <Link to={isFacilityVerified ? "/employer/applicants" : "/employer/profile"} className="font-bold text-primary hover:underline text-xs">
+                  {isFacilityVerified ? "View applicants" : "Complete verification"} &rarr;
                 </Link>
               </div>
             </div>
 
-            {/* 24/7 Clinical Concierge & Escrow Help */}
+            {/* Facility support */}
             <div className="rounded-3xl border border-primary/20 bg-primary/5 p-5 shadow-xs space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-primary flex items-center gap-1.5">
                   <HiOutlineQuestionMarkCircle className="h-4 w-4" />
-                  <span>Clinical Concierge</span>
+                  <span>Facility support</span>
                 </span>
-                <span className="rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold px-2 py-0.5">
-                  24/7 Live
+                <span className="rounded-full bg-primary/10 text-primary text-[10px] font-bold px-2 py-0.5">
+                  Support
                 </span>
               </div>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Need urgent shift cover or credential escrow resolution? Call your dedicated nodal coordinator.
+                Need help with verification, hiring, or payments? Contact the support team.
               </p>
-              <div className="pt-1 flex items-center justify-between text-xs font-mono font-bold">
-                <a href="tel:+917338367726" className="text-foreground hover:text-primary transition-colors flex items-center gap-1">
-                  <HiOutlinePhone className="h-3 w-3 text-primary" />
-                  <span>+91 73383 67726</span>
-                </a>
+              <div className="pt-1 flex items-center justify-end text-xs font-mono font-bold">
                 <Link to="/support" className="text-primary hover:underline text-[11px]">
                   Help Desk →
                 </Link>
               </div>
             </div>
+            <div className="rounded-3xl border border-border/70 bg-card p-5 shadow-xs">
+              <div className="flex items-start justify-between gap-3">
+                <div><h3 className="flex items-center gap-2 text-sm font-bold text-foreground"><HiOutlineBuildingOffice2 className="h-4 w-4 text-primary" /> Hospital profile</h3><p className="mt-1 text-xs text-muted-foreground">Facility details and verification readiness.</p></div>
+              <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">{facilityKycStatus === "VERIFIED" ? "Verified" : facilityKycStatus === "REJECTED" ? "Needs attention" : facilityKycStatus === "LOADING" ? "Loading" : facilityKycStatus === "UNAVAILABLE" ? "Unavailable" : "Pending"}</span>
+              </div>
+              <div className="mt-4 space-y-2 text-xs">
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">Facility type</span><span className="text-right font-semibold text-foreground">{resourceErrors.profile ? "Unavailable" : apiProfile?.facilityType || "Not added"}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">Location</span><span className="text-right font-semibold text-foreground">{resourceErrors.profile ? "Unavailable" : [apiProfile?.area, apiProfile?.city, apiProfile?.state].filter(Boolean).join(", ") || "Not added"}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">Capacity</span><span className="text-right font-semibold text-foreground">{bedCount ? `${bedCount} beds${icuCount ? ` · ${icuCount} ICU` : ""}` : "Not added"}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">Departments</span><span className="text-right font-semibold text-foreground">{resourceErrors.profile ? "Unavailable" : apiProfile?.departments?.length ? apiProfile.departments.length : "Not added"}</span></div>
+              </div>
+              <Link to="/employer/profile" className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">Review facility profile<HiArrowRight className="h-3.5 w-3.5" /></Link>
+            </div>
           </div>
         </div>
+        <section className="mt-6 grid grid-cols-1 items-stretch gap-4 xl:grid-cols-2">
+          <div className="flex h-full flex-col rounded-3xl border border-border/70 bg-card p-5 shadow-xs">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-bold text-foreground"><HiOutlineUsers className="h-4 w-4 text-primary" /> Candidate pipeline</h3>
+                <p className="mt-1 text-xs text-muted-foreground">Applicants and clinicians matched to your facility.</p>
+              </div>
+              <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-foreground">{!isFacilityVerified ? "Verify first" : applicantsUnavailable ? "Unavailable" : pipelineApplicants.length}</span>
+            </div>
+            {!isFacilityVerified ? (
+              <p className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed text-foreground">Candidate profiles are available after facility verification. <Link className="font-bold text-primary underline" to="/employer/profile">Complete verification</Link></p>
+            ) : applicantsUnavailable ? (
+              <p className="mt-4 rounded-xl bg-muted/30 p-3 text-xs text-muted-foreground">Applicant data could not be loaded. Retry to check for updates.</p>
+            ) : pipelineApplicants.length ? (
+              <div className="mt-4 space-y-2">
+                {pipelineApplicants.slice(0, 3).map((a: any) => (
+                  <div key={a.id} className="flex items-center justify-between gap-2 rounded-xl bg-muted/30 p-3">
+                    <div className="min-w-0"><p className="truncate text-sm font-semibold text-foreground">{a.candidateName || a.name || "Candidate"}</p><p className="truncate text-xs text-muted-foreground">{a.jobTitle || a.role || "Healthcare role"}</p></div>
+                    <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">{formatApplicationStatus(a.status)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="mt-4 rounded-xl bg-muted/30 p-3 text-xs text-muted-foreground">No job applicants yet. Candidates will appear here when they apply.</p>}
+            <Link to={isFacilityVerified ? "/employer/applicants" : "/employer/profile"} className="mt-auto inline-flex items-center gap-1 pt-4 text-xs font-bold text-primary hover:underline">{isFacilityVerified ? "Open candidate workbench" : "View verification steps"}<HiArrowRight className="h-3.5 w-3.5" /></Link>
+          </div>
+
+          <div className="flex h-full flex-col rounded-3xl border border-border/70 bg-card p-5 shadow-xs">
+            <div className="flex items-start justify-between gap-3">
+              <div><h3 className="flex items-center gap-2 text-sm font-bold text-foreground"><HiOutlineCalendarDays className="h-4 w-4 text-primary" /> Interviews & offers</h3><p className="mt-1 text-xs text-muted-foreground">Track candidates progressing through hiring.</p></div>
+              <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-bold text-foreground">{!isFacilityVerified ? "Verify first" : applicantsUnavailable ? "Unavailable" : interviewApplicants.length + offerApplicants.length}</span>
+            </div>
+            {!isFacilityVerified ? (
+              <p className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed text-foreground">Interview and offer actions unlock after facility verification.</p>
+            ) : applicantsUnavailable ? (
+              <p className="mt-4 rounded-xl bg-muted/30 p-3 text-xs text-muted-foreground">Hiring progress is unavailable. Retry to refresh applicants.</p>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {[{ title: "Interviews", items: interviewApplicants }, { title: "Offers and hires", items: offerApplicants }].map((group) => (
+                  <div key={group.title} className="rounded-xl bg-muted/30 p-3"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-foreground">{group.title}</span><span className="text-xs font-bold text-primary">{group.items.length}</span></div><p className="mt-1 text-[11px] text-muted-foreground">{group.items.slice(0, 2).map((a: any) => a.candidateName || a.name || "Candidate").join(", ") || `No ${group.title.toLowerCase()} yet`}</p></div>
+                ))}
+              </div>
+            )}
+            <Link to={isFacilityVerified ? "/employer/applicants" : "/employer/profile"} className="mt-auto inline-flex items-center gap-1 pt-4 text-xs font-bold text-primary hover:underline">{isFacilityVerified ? "Manage hiring pipeline" : "View verification steps"}<HiArrowRight className="h-3.5 w-3.5" /></Link>
+          </div>
+
+        </section>
+        <section className="mt-4 rounded-3xl border border-border/70 bg-card p-5 shadow-xs">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="flex items-center gap-2 text-sm font-bold text-foreground"><HiOutlineCalendarDays className="h-4 w-4 text-primary" /> Upcoming interviews</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Your interview schedule, candidate details, and calendar actions.</p>
+            </div>
+            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">{!isFacilityVerified || applicantsUnavailable ? "Unavailable" : `${upcomingInterviews.length} scheduled`}</span>
+          </div>
+          {!isFacilityVerified ? (
+            <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-foreground">
+              <p>Interview scheduling and candidate details will be available after facility verification.</p>
+              <Link to="/employer/profile" className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">Complete verification<HiArrowRight className="h-3.5 w-3.5" /></Link>
+            </div>
+          ) : applicantsUnavailable ? (
+            <div className="mt-4 rounded-2xl bg-muted/30 p-4 text-sm text-muted-foreground">Interview data is unavailable. Retry to load your latest schedule.</div>
+          ) : upcomingInterviews.length ? (
+            <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {upcomingInterviews.map((app: any) => (
+                <article key={app.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><HiOutlineCalendarDays className="h-5 w-5" /></div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-foreground">{app.candidateName || app.name || "Candidate"}</p>
+                      <p className="truncate text-xs text-muted-foreground">{app.jobTitle || app.role || "Healthcare role"}</p>
+                      <p className="mt-1 text-xs font-semibold text-primary">{new Date(app.interviewScheduledAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">Calendar invite duration: {Number(app.interviewDurationMinutes) > 0 ? Number(app.interviewDurationMinutes) : 30} minutes</p>
+                      {app.interviewLocationOrLink && <p className="mt-1 break-all text-[11px] text-muted-foreground">{app.interviewLocationOrLink}</p>}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" className="rounded-xl text-xs" onClick={() => addInterviewToCalendar(app)}>Download calendar invite</Button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 flex flex-col items-start justify-between gap-3 rounded-2xl bg-muted/30 p-4 sm:flex-row sm:items-center">
+              <div><p className="text-sm font-semibold text-foreground">No upcoming interviews scheduled</p><p className="mt-1 text-xs text-muted-foreground">Schedule an interview from the candidate workbench and it will appear here.</p></div>
+              <Button asChild size="sm" variant="outline" className="rounded-xl text-xs"><Link to="/employer/applicants">Open candidates</Link></Button>
+            </div>
+          )}
+        </section>
       </div>
     </AppShell>
   );

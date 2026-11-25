@@ -133,6 +133,7 @@ export interface Applicant {
   city: string;
   for: string;
   status: string;
+  firstHireFeeWaived?: boolean;
   verified: boolean;
   match: number;
   appliedDate: string;
@@ -162,6 +163,8 @@ export interface Applicant {
   candidateRatingCount?: number;
   completedShiftsCount?: number;
   shiftClaimStatus?: string;
+  interviewScheduledAt?: string;
+  interviewLocationOrLink?: string;
   experienceList: { hospital: string; role: string; duration: string; details: string }[];
   resumeUrl?: string;
   resumeFileName?: string;

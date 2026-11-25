@@ -543,6 +543,13 @@ function EmployerWalletPage() {
           </div>
         </div>
 
+        {apiWallet?.welcomeCreditsGranted && (
+          <div role="status" className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
+            <HiOutlineSparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <p><span className="font-semibold">Welcome offer applied:</span> this facility received 3 complimentary candidate contact unlocks. Your remaining credits are shown below; additional unlocks can be purchased when needed.</p>
+          </div>
+        )}
+
         {/* 4 Professional KPI Cards */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
           {/* Card 1: Available Escrow */}

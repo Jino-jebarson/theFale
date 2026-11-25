@@ -226,7 +226,9 @@ export function SelectField({
       {open && (
         <div
           role="listbox"
-          className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 rounded-2xl border border-slate-200/90 bg-white p-1.5 shadow-xl shadow-slate-900/10 backdrop-blur-sm animate-in fade-in-0 zoom-in-95 duration-150 dark:border-border dark:bg-card"
+          className={cn(
+            "absolute left-0 right-0 top-[calc(100%+6px)] z-50 rounded-2xl border border-slate-200/90 bg-white p-1.5 shadow-xl shadow-slate-900/10 backdrop-blur-sm animate-in fade-in-0 zoom-in-95 duration-150 dark:border-border dark:bg-card",
+          )}
         >
           {/* Search input for long lists */}
           {isSearchable && (
@@ -579,6 +581,7 @@ export function DateField({
   max,
   placeholder = "Select date",
   className,
+  monthOnly = false,
 }: {
   label: string;
   value?: string;
@@ -589,6 +592,7 @@ export function DateField({
   max?: string;
   placeholder?: string;
   className?: string;
+  monthOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -659,7 +663,7 @@ export function DateField({
   };
 
   const minYear = min ? parseInt(min.split("-")[0], 10) : 1940;
-  const maxYear = max ? parseInt(max.split("-")[0], 10) : new Date().getFullYear() + 10;
+  const maxYear = max ? parseInt(max.split("-")[0], 10) : new Date().getFullYear() + (monthOnly ? 30 : 10);
   const yearOptions: number[] = [];
   for (let y = maxYear; y >= minYear; y--) {
     yearOptions.push(y);
@@ -674,7 +678,9 @@ export function DateField({
   };
 
   const displayValue = parsedDate && !isNaN(parsedDate.getTime())
-    ? `${String(parsedDate.getDate()).padStart(2, "0")} ${months[parsedDate.getMonth()].slice(0, 3)} ${parsedDate.getFullYear()}`
+    ? monthOnly
+      ? `${months[parsedDate.getMonth()]} ${parsedDate.getFullYear()}`
+      : `${String(parsedDate.getDate()).padStart(2, "0")} ${months[parsedDate.getMonth()].slice(0, 3)} ${parsedDate.getFullYear()}`
     : "";
 
   return (
@@ -734,6 +740,30 @@ export function DateField({
           aria-label={label}
           className="absolute left-0 right-0 w-full top-[calc(100%+6px)] z-50 rounded-2xl border border-slate-200/90 bg-white p-3.5 shadow-2xl shadow-slate-900/10 backdrop-blur-sm animate-in fade-in-0 zoom-in-95 duration-150 dark:border-border dark:bg-card"
         >
+          {monthOnly ? (
+            <>
+              <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5 dark:border-border">
+                <button type="button" disabled={viewYear <= minYear} onClick={() => setViewYear((year) => Math.max(minYear, year - 1))} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-muted">
+                  <HiChevronLeft className="h-4 w-4" />
+                </button>
+                <select value={viewYear} onChange={(e) => setViewYear(parseInt(e.target.value, 10))} className="h-8 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-800 focus:border-primary focus:outline-none dark:border-border dark:bg-muted dark:text-foreground">
+                  {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+                <button type="button" disabled={viewYear >= maxYear} onClick={() => setViewYear((year) => Math.min(maxYear, year + 1))} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-muted">
+                  <HiChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {months.map((month, index) => {
+                  const monthValue = `${viewYear}-${String(index + 1).padStart(2, "0")}`;
+                  const isDisabled = (min && monthValue < min.slice(0, 7)) || (max && monthValue > max.slice(0, 7));
+                  const isSelected = value === monthValue;
+                  return <button key={month} type="button" disabled={isDisabled} onClick={() => { onChange(monthValue); setOpen(false); }} className={cn("rounded-lg px-2 py-2.5 text-xs font-semibold transition-colors cursor-pointer", isSelected ? "bg-primary text-white shadow-sm" : "text-foreground hover:bg-primary-soft hover:text-primary dark:hover:bg-accent", isDisabled && "cursor-not-allowed opacity-30 hover:bg-transparent hover:text-foreground")}>{month.slice(0, 3)}</button>;
+                })}
+              </div>
+            </>
+          ) : (
+          <>
           {/* Header with Month + Year Selectors */}
           <div className="mb-3 flex items-center justify-between gap-1 border-b border-slate-100 pb-2.5 dark:border-border">
             <button
@@ -815,6 +845,8 @@ export function DateField({
               );
             })}
           </div>
+          </>
+          )}
 
           {/* Quick Clear Action if not required */}
           {value && (

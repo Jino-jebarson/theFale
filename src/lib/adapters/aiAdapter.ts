@@ -572,7 +572,7 @@ export async function auditPostingComplianceWithAi(
   });
 }
 
-// Hospital Partner Statutory Accreditation & License Audit
+// Advisory facility-profile pre-check. This task has no document or registry access.
 export async function auditFacilityWithAi(
   name: string,
   licenseNumber: string,
@@ -580,7 +580,7 @@ export async function auditFacilityWithAi(
   gstin?: string,
   context?: { beds?: number; icuBeds?: number; city?: string; state?: string }
 ) {
-  const prompt = `Hospital: ${name}, License: ${licenseNumber}, Accreditation: ${accreditation}, GSTIN: ${gstin || "Pending"}, Beds: ${context?.beds ?? "Not provided"}, ICU Beds: ${context?.icuBeds ?? "Not provided"}, City: ${context?.city || "India"}, State: ${context?.state || "State"}. Audit Clinical Establishment Act statutory registry adherence, accreditation standing, and capacity balance. Output 3-sentence compliance verdict. Strictly zero emojis.`;
+  const prompt = `Review this hospital's submitted profile for missing information or internal inconsistencies only. Hospital: ${name}. Licence number: ${licenseNumber || "Not provided"}. Accreditation: ${accreditation || "Not provided"}. GSTIN: ${gstin || "Not provided"}. Inpatient beds: ${context?.beds ?? "Not provided"}. ICU beds: ${context?.icuBeds ?? "Not provided"}. City: ${context?.city || "Not provided"}. State: ${context?.state || "Not provided"}. You do not receive the uploaded certificate and cannot access official registries. Never say a licence, accreditation, hospital, or capacity is verified, valid, compliant, or active. Treat missing values as not provided, never as zero. Flag only specific inconsistencies in supplied values; missing optional profile information alone is not a discrepancy. Recommend that a human admin compare the uploaded registration certificate with the submitted facility details and check the issuing authority. Return a concise advisory assessment with no emojis.`;
   return executeAiTask({
     task: "facility_audit",
     prompt,

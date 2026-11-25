@@ -12,7 +12,8 @@ export interface FacilityProfileDto {
   size?: string;
   about?: string;
   website?: string;
-  city: string;
+  area?: string;
+  city?: string;
   state?: string;
   pincode?: string;
   addressLine?: string;
@@ -38,6 +39,30 @@ export interface FacilityProfileDto {
   documents?: FacilityDocumentDto[];
   kycStatus: string;
   verifiedAt?: string;
+  firstHireFreeAvailable?: boolean;
+}
+
+export interface FacilityTeamInviteDto {
+  id: string;
+  name: string;
+  phone: string;
+  status: string;
+  createdAt?: string;
+}
+
+export async function getFacilityTeam(): Promise<FacilityTeamInviteDto[]> {
+  return apiFetch<FacilityTeamInviteDto[]>("/facility/team", { validate: Array.isArray });
+}
+
+export async function inviteFacilityTeamMember(data: { name: string; phone: string }): Promise<FacilityTeamInviteDto> {
+  return apiFetch<FacilityTeamInviteDto>("/facility/team", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function removeFacilityTeamMember(id: string): Promise<void> {
+  return apiFetch<void>(`/facility/team/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export interface FacilityDocumentDto {
@@ -58,6 +83,7 @@ export interface FacilityWalletDto {
   lockedEscrowBalancePaise: number;
   totalDisbursedPaise: number;
   candidateCredits: number;
+  welcomeCreditsGranted?: boolean;
   updatedAt?: string;
 }
 
@@ -145,28 +171,30 @@ export interface PostJobPayload {
 
 export interface FacilityOnboardPayload {
   hospitalName: string;
-  facilityType: string;
+  facilityType?: string;
   size?: string;
   about?: string;
   website?: string;
-  city: string;
-  state: string;
+  area?: string;
+  city?: string;
+  state?: string;
   pincode?: string;
   addressLine?: string;
-  beds: number;
+  beds?: number;
   icuBeds?: number;
   licenseNumber?: string;
   groupName?: string;
   branchName?: string;
   agreementAccepted?: boolean;
   agreementOtp?: string;
+  password?: string;
   gst?: string;
   nabhNumber?: string;
   accreditationLevel?: string;
   contactPerson: string;
   designation?: string;
-  contactPhone: string;
-  contactEmail: string;
+  contactPhone?: string;
+  contactEmail?: string;
   departments?: string[];
   hiringNeeds?: string[];
   logoUrl?: string;

@@ -13,6 +13,8 @@ export interface UserSummary {
   onboarded: boolean;
   onboardingComplete?: boolean;
   active: boolean;
+  passwordConfigured?: boolean;
+  preferredLanguage?: string;
 }
 
 export interface AuthResponse {
@@ -68,11 +70,37 @@ export async function verifyOtp(phone: string, otp: string, role?: string): Prom
   return response;
 }
 
+/** Sign in to a facility account using its verified mobile number and optional password. */
+export async function facilityPasswordLogin(phone: string, password: string): Promise<AuthResponse> {
+  const cleanPhone = phone.startsWith("+") ? phone : `+91${phone.replace(/\D/g, "")}`;
+  const response = await apiFetch<AuthResponse>("/auth/facility/login", {
+    method: "POST",
+    skipAuth: true,
+    body: JSON.stringify({ phone: cleanPhone, password }),
+  });
+  acceptAuthResponse(response);
+  return response;
+}
+
 /**
  * Fetch authenticated user profile summary.
  */
 export async function getCurrentUser(): Promise<UserSummary> {
   return apiFetch<UserSummary>("/auth/me");
+}
+
+export async function updatePreferredLanguage(preferredLanguage: string): Promise<UserSummary> {
+  return apiFetch<UserSummary>("/auth/me/language", {
+    method: "PATCH",
+    body: JSON.stringify({ preferredLanguage }),
+  });
+}
+
+export async function updateFacilityPassword(data: { currentPassword?: string; newPassword: string }): Promise<void> {
+  await apiFetch<void>("/auth/facility/password", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }
 
 /**

@@ -210,10 +210,6 @@ function Post() {
       } catch { toast.error("Cannot save a draft in this browser. Keep this page open to retain your input."); }
       return;
     }
-    if (!isFacilityVerified) {
-      toast.info("Hospital verification is required before publishing jobs.");
-      return;
-    }
     const city = workLocation || hospitalCity;
     if (!city) { toast.error("Please select a work location"); return; }
     await posting.run(async () => {
@@ -269,8 +265,8 @@ function Post() {
 
         {!isFacilityVerified && (
           <div role="status" className="flex flex-col gap-3 rounded-2xl border border-amber-300/70 bg-amber-50/70 p-4 text-sm dark:border-amber-700/50 dark:bg-amber-950/20 sm:flex-row sm:items-center sm:justify-between">
-            <div><p className="font-bold text-foreground">Job publishing is locked until hospital verification</p><p className="mt-1 text-xs leading-5 text-muted-foreground">You can save a local draft and finish your hospital verification while this is reviewed.</p></div>
-            <Button asChild variant="outline" size="sm" className="shrink-0 rounded-xl"><Link to="/employer/profile">Complete verification</Link></Button>
+            <div><p className="font-bold text-foreground">Hospital verification is in progress</p><p className="mt-1 text-xs leading-5 text-muted-foreground">You can submit this job now. It will be reviewed before it goes live.</p></div>
+            <Button asChild variant="outline" size="sm" className="shrink-0 rounded-xl"><Link to="/employer/profile">View verification</Link></Button>
           </div>
         )}
 
@@ -630,7 +626,7 @@ function Post() {
               <Button
                 type="submit"
                 size="lg"
-                disabled={!isFacilityVerified}
+                disabled={posting.isPending}
                 className="rounded-xl h-10 px-6 text-xs font-bold cursor-pointer"
               >
                 Publish job
@@ -716,7 +712,7 @@ function Post() {
               <Button
                 type="submit"
                 size="lg"
-                disabled={!isFacilityVerified}
+                disabled={posting.isPending}
                 className="w-full rounded-xl h-11 text-sm font-bold bg-primary hover:bg-primary-hover text-primary-foreground shadow-xs cursor-pointer"
               >
                 Publish job

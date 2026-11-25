@@ -36,6 +36,8 @@ import {
   HiOutlinePhone,
   HiOutlineBuildingLibrary,
   HiOutlineLockClosed,
+  HiOutlineEye,
+  HiOutlineEyeSlash,
   HiOutlineArrowPath,
 } from "react-icons/hi2";
 import {
@@ -71,9 +73,11 @@ import {
   type AddressValue,
 } from "@/components/fale/fields";
 import { setState, useApp } from "@/lib/store";
+import { InterfaceLanguagePicker } from "@/lib/i18n";
 import { isApiEnabled } from "@/lib/api";
 import { onboardCandidate } from "@/lib/adapters/candidateAdapter";
 import { onboardFacility, uploadFacilityDocument } from "@/lib/adapters/facilityAdapter";
+import { FACILITY_AREAS } from "@/lib/facilityAreas";
 import { sendOtp } from "@/lib/adapters/authAdapter";
 import {
   councilByProfession,
@@ -150,17 +154,53 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const YEARS = Array.from({ length: 40 }, (_, i) => String(new Date().getFullYear() - i));
 
 const STUDENT_COURSES = [
-  { label: "BPT (Physiotherapy)", role: "physiotherapist" },
-  { label: "MPT (Physiotherapy)", role: "physiotherapist" },
-  { label: "B.Sc Nursing", role: "nurse" },
-  { label: "GNM Nursing", role: "nurse" },
-  { label: "BMLT (Lab technology)", role: "lab_technician" },
-  { label: "DMLT (Lab technology)", role: "lab_technician" },
-  { label: "B.Sc Radiology / MIT", role: "radiographer" },
-  { label: "B.Pharm / D.Pharm", role: "pharmacist" },
-  { label: "B.Sc OT technology", role: "ot_technician" },
-  { label: "B.Sc Dialysis technology", role: "dialysis_technician" },
-];
+  { label: "MBBS", profession: "Doctor" },
+  { label: "MD / MS", profession: "Doctor" },
+  { label: "DNB", profession: "Doctor" },
+  { label: "BDS", profession: "Dentist" },
+  { label: "MDS", profession: "Dentist" },
+  { label: "BAMS", profession: "Doctor" },
+  { label: "BHMS", profession: "Doctor" },
+  { label: "BUMS", profession: "Doctor" },
+  { label: "BSMS", profession: "Doctor" },
+  { label: "B.Sc Nursing", profession: "Nurse" },
+  { label: "GNM Nursing", profession: "Nurse" },
+  { label: "ANM", profession: "Nurse" },
+  { label: "Post Basic B.Sc Nursing", profession: "Nurse" },
+  { label: "M.Sc Nursing", profession: "Nurse" },
+  { label: "BPT (Physiotherapy)", profession: "Physiotherapist" },
+  { label: "MPT (Physiotherapy)", profession: "Physiotherapist" },
+  { label: "B.Pharm", profession: "Pharmacist" },
+  { label: "D.Pharm", profession: "Pharmacist" },
+  { label: "Pharm.D", profession: "Pharmacist" },
+  { label: "M.Pharm", profession: "Pharmacist" },
+  { label: "BMLT (Lab technology)", profession: "Lab Technician" },
+  { label: "B.Sc Medical Laboratory Technology", profession: "Lab Technician" },
+  { label: "DMLT (Lab technology)", profession: "Lab Technician" },
+  { label: "M.Sc Medical Laboratory Technology", profession: "Lab Technician" },
+  { label: "B.Sc Radiology / MIT", profession: "Radiographer" },
+  { label: "BMRIT (Medical Imaging Technology)", profession: "Radiographer" },
+  { label: "DMRT", profession: "Radiographer" },
+  { label: "B.Sc OT Technology", profession: "OT Technician" },
+  { label: "Diploma in OT Technology", profession: "OT Technician" },
+  { label: "B.Sc Anaesthesia Technology", profession: "Anaesthesia Technician" },
+  { label: "B.Sc Dialysis Technology", profession: "Dialysis Technician" },
+  { label: "Diploma in Dialysis Technology", profession: "Dialysis Technician" },
+  { label: "B.Sc Cardiac Care Technology", profession: "Cardiac Care Technician" },
+  { label: "B.Sc Perfusion Technology", profession: "Cardiac Care Technician" },
+  { label: "B.Sc Respiratory Therapy", profession: "Respiratory Therapist" },
+  { label: "B.Optom / Bachelor of Optometry", profession: "Optometrist" },
+  { label: "B.Sc Occupational Therapy", profession: "Occupational Therapist" },
+  { label: "BASLP (Audiology and Speech-Language Pathology)", profession: "Audiologist" },
+  { label: "B.Sc Emergency and Trauma Care", profession: "Paramedic" },
+  { label: "B.Sc Neurophysiology Technology", profession: "Technician" },
+  { label: "B.Sc Medical Records / Health Information Management", profession: "Medical Coder" },
+  { label: "B.Sc Nutrition and Dietetics", profession: "Dietitian" },
+  { label: "B.Sc Dental Technology / Dental Hygiene", profession: "Dental Hygienist" },
+  { label: "B.Sc Prosthetics and Orthotics", profession: "Technician" },
+  { label: "B.Sc Physician Assistant", profession: "Paramedic" },
+  { label: "Other healthcare course", profession: "Student" },
+] as const;
 
 const STUDENT_PROOFS = [
   { id: "college_id", label: "College ID card", desc: "Photo of the front, with your name and course" },
@@ -185,7 +225,7 @@ const STUDENT_AREAS = [
   "Basavanagudi",
 ];
 
-const STUDENT_YEARS = ["1st year", "2nd year", "3rd year", "4th year", "Internship year"];
+const STUDENT_YEARS = ["1st year", "2nd year", "3rd year", "4th year", "Internship / clinical training"];
 
 function mIdx(m: string | undefined, y: string | undefined) {
   if (m === "" || m == null || !y) return null;
@@ -412,7 +452,7 @@ function CandidatePathwayChooser({
 }
 
 function OnboardingSetupFrame({
-  title, steps, current, category, heading, description, children, error, onBack, onNext, nextLabel, pending, onResume,
+  title, steps, current, category, heading, description, children, error, onBack, onNext, nextLabel, pending, onResume, completionProgress,
 }: {
   title: string;
   steps: { t: string; d: string }[];
@@ -427,8 +467,9 @@ function OnboardingSetupFrame({
   nextLabel: string;
   pending?: boolean;
   onResume?: () => void;
+  completionProgress?: number;
 }) {
-  const progress = Math.round(((current + 1) / steps.length) * 100);
+  const progress = Math.max(0, Math.min(100, completionProgress ?? Math.round(((current + 1) / steps.length) * 100)));
   const sidebarTitle = title.includes("Student") ? "Student Profile" : title.includes("Facility") ? "Facility Setup" : "Your Profile";
   return (
     <div className="light min-h-screen bg-[#f8fafc] text-slate-900" data-theme="light">
@@ -439,6 +480,7 @@ function OnboardingSetupFrame({
             <span className="hidden text-xs font-semibold uppercase tracking-wider text-slate-500 sm:inline-block">{title}</span>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
+            <InterfaceLanguagePicker />
             {onResume && <Button type="button" variant="outline" size="sm" onClick={onResume} className="hidden items-center gap-1.5 rounded-full border-primary/30 text-xs font-bold text-primary hover:bg-primary-soft sm:inline-flex"><HiOutlineSparkles className="h-3.5 w-3.5" />Auto-fill from Resume</Button>}
             <button type="button" aria-label="Exit setup" title="Exit profile setup" onClick={() => window.location.assign("/")} className="rounded-xl p-2 text-primary transition-all hover:bg-primary-soft/70 hover:text-primary-hover"><LogOut className="h-5 w-5 stroke-[2.2]" /></button>
           </div>
@@ -468,20 +510,20 @@ function OnboardingSetupFrame({
     </div>
   );
 }
-const QUICK_STUDENT_COURSES = ["BPT (Physiotherapy)", "MPT (Physiotherapy)", "B.Sc Nursing", "GNM Nursing", "BMLT (Lab technology)", "DMLT (Lab technology)", "B.Sc Radiology / MIT", "B.Pharm / D.Pharm", "B.Sc OT technology", "B.Sc Dialysis technology"];
-const QUICK_COURSE_PROFESSION: Record<string, string> = { "BPT (Physiotherapy)": "Physiotherapist", "MPT (Physiotherapy)": "Physiotherapist", "B.Sc Nursing": "Nurse", "GNM Nursing": "Nurse", "BMLT (Lab technology)": "Lab Technician", "DMLT (Lab technology)": "Lab Technician", "B.Sc Radiology / MIT": "Radiographer", "B.Pharm / D.Pharm": "Pharmacist", "B.Sc OT technology": "OT Technician", "B.Sc Dialysis technology": "Dialysis Technician" };
-const QUICK_AREAS = ["Jayanagar", "Banashankari", "JP Nagar", "Koramangala", "HSR Layout", "Indiranagar", "Whitefield", "Hebbal", "Yelahanka", "Rajajinagar", "Malleshwaram", "Electronic City", "Marathahalli", "Basavanagudi"];
-
+const QUICK_STUDENT_COURSES = STUDENT_COURSES.map(({ label }) => label);
+const OTHER_STUDENT_COURSE = "Other healthcare course";
 export function QuickCandidateOnboarding() {
   const navigate = useNavigate();
   const [pathway, setPathway] = useState<"choose" | "student" | "graduate">("choose");
   const [step, setStep] = useState(0);
+  const [error, setError] = useState("");
   const [name, setName] = useState("");
   const [track, setTrack] = useState<"student" | "fresher" | "professional" | "">("");
   const [profession, setProfession] = useState("");
   const [specialty, setSpecialty] = useState("");
   const [customSpecialty, setCustomSpecialty] = useState("");
   const [course, setCourse] = useState("");
+  const [otherCourse, setOtherCourse] = useState("");
   const [city, setCity] = useState("");
   const [customCity, setCustomCity] = useState("");
   const [area, setArea] = useState("");
@@ -505,7 +547,6 @@ export function QuickCandidateOnboarding() {
   const [showPhotoModal, setShowPhotoModal] = useState(false);
   const [photoPreview, setPhotoPreview] = useState("");
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const adultCutoff = new Date();
   adultCutoff.setFullYear(adultCutoff.getFullYear() - 18);
@@ -594,7 +635,7 @@ export function QuickCandidateOnboarding() {
     const reportProfileIssue = (description: string) => toast.error("Please complete your profile", { description });
     if (name.trim().length < 3) { reportProfileIssue("Enter your full name as it appears on your certificates."); return; }
     if (!track) { reportProfileIssue("Choose whether you are a student, fresher, or working professional."); return; }
-    if (track === "student" ? !course : !profession) { reportProfileIssue(track === "student" ? "Select your course to continue." : "Select your profession to continue."); return; }
+    if (track === "student" ? (!course || (course === OTHER_STUDENT_COURSE && otherCourse.trim().length < 2)) : !profession) { reportProfileIssue(track === "student" ? "Select your course and enter its name if you chose Other healthcare course." : "Select your profession to continue."); return; }
     if (track !== "student" && (!specialty || (specialty === "Other" && customSpecialty.trim().length < 2))) { reportProfileIssue("Select a specialization, or enter one if you chose Other."); return; }
     if (!locationAddress.trim()) { reportProfileIssue("Enter your full address or use your current location."); return; }
     if (track === "professional" && (!years || !Number.isFinite(Number(years)) || Number(years) <= 0)) { reportProfileIssue("Enter a valid number of years of experience."); return; }
@@ -602,12 +643,14 @@ export function QuickCandidateOnboarding() {
     if (track === "student") {
       if (college.trim().length < 3 || !studyYear || !graduation) { reportProfileIssue("Add your college, year of study, and expected graduation month."); return; }
       if (proof === "univ_reg" ? universityRegNo.trim().length < 5 : !proofFile) { reportProfileIssue(proof === "univ_reg" ? "Enter your university registration number." : "Upload your proof of study."); return; }
-      if (!adultConfirmed) { reportProfileIssue("Confirm that you are at least 18 years old."); return; }
+      if (!adultConfirmed) { reportProfileIssue("Confirm that you are at least 18 and authorize verification of your student enrollment."); return; }
     }
     setPending(true);
     try {
       const isStudent = track === "student";
-      const resolvedProfession = isStudent ? QUICK_COURSE_PROFESSION[course] : profession;
+      const selectedCourse = STUDENT_COURSES.find((option) => option.label === course);
+      const resolvedProfession = isStudent ? selectedCourse?.profession || "Student" : profession;
+      const resolvedCourse = isStudent && course === OTHER_STUDENT_COURSE ? otherCourse.trim() : course;
       const resolvedSpecialty = specialty === "Other" ? customSpecialty.trim() : specialty;
       let resolvedCity = city === "Other" ? customCity.trim() : city;
       let resolvedArea = area.trim();
@@ -630,7 +673,7 @@ export function QuickCandidateOnboarding() {
         fullName: name.trim(), candidateLevel: isStudent ? "STUDENT" : track === "fresher" ? "FRESHER" : "PROFESSIONAL",
         city: resolvedCity, ...(resolvedArea ? { locality: resolvedArea } : {}), ...(resolvedState ? { state: resolvedState } : {}), addressLine: locationAddress.trim(), openToWork: !isStudent, ...(resolvedProfession ? { profession: resolvedProfession } : {}),
         ...(!isStudent && resolvedSpecialty ? { primarySpecialty: resolvedSpecialty } : {}),
-        ...(isStudent ? { course, collegeName: college.trim(), studyYear, expectedGraduationYear: graduationYear, expectedGraduationMonth: graduation, universityRegNo: proof === "univ_reg" ? universityRegNo.trim() : undefined,
+        ...(isStudent ? { course: resolvedCourse, collegeName: college.trim(), studyYear, expectedGraduationYear: graduationYear, expectedGraduationMonth: graduation, universityRegNo: proof === "univ_reg" ? universityRegNo.trim() : undefined,
           ...(proof === "college_id" && proofFile ? { studentIdCardUrl: proofFile.data, studentIdCardFileName: proofFile.name } : {}),
           ...(proof === "bonafide" && proofFile ? { bonafideCertificateUrl: proofFile.data, bonafideCertificateFileName: proofFile.name } : {}) } : {}),
         ...(dob ? { dob } : {}), ...(gender ? { gender } : {}), ...(track === "professional" && years ? { experienceYears: years } : {}),
@@ -638,10 +681,10 @@ export function QuickCandidateOnboarding() {
         ...(profilePhotoUrl ? { profilePhotoUrl, profilePhotoFileName: "ProfilePhoto.jpg" } : {}),
         ...(resume ? { resumeUrl: resume.data, resumeFileName: resume.name } : {}),
       });
-      setState({ onboarded: true, candidateLevel: track, portal: "candidate", profile: { name: name.trim(), level: track, cadreLevel: track, role: resolvedProfession || "", specialty: resolvedSpecialty, course, college, studyYear, expectedGraduationYear: graduationYear, expectedGraduationMonth: isStudent ? graduation : undefined, city: resolvedCity, area: resolvedArea, addressLine: locationAddress.trim(), state: resolvedState, dob, gender, openToWork: !isStudent, ...(profilePhotoUrl ? { avatar: profilePhotoUrl } : {}) } });
+      setState({ onboarded: true, candidateLevel: track, portal: "candidate", profile: { name: name.trim(), level: track, cadreLevel: track, role: resolvedProfession || "", specialty: resolvedSpecialty, course: resolvedCourse, college, studyYear, expectedGraduationYear: graduationYear, expectedGraduationMonth: isStudent ? graduation : undefined, city: resolvedCity, area: resolvedArea, addressLine: locationAddress.trim(), state: resolvedState, dob, gender, openToWork: !isStudent, ...(profilePhotoUrl ? { avatar: profilePhotoUrl } : {}) } });
       toast.success(isStudent ? "Student profile submitted for verification" : "Profile submitted for verification", { description: isStudent ? "Your proof of study is ready for review." : "You can complete any remaining verification when you apply." });
       setShowPhotoModal(false);
-      await navigate({ to: isStudent ? "/huddle" : "/home" });
+      await navigate({ to: "/home" });
     } catch (e) {
       toast.error("We couldn’t save your profile", { description: e instanceof Error ? e.message : "Please try again. If the issue continues, contact support." });
     }
@@ -657,11 +700,11 @@ export function QuickCandidateOnboarding() {
     }
     if (step === 1) { setStep(2); return; }
     if (track === "student") {
-      if (!course) { toast.error("Course required", { description: "Select your course before continuing." }); return; }
+      if (!course || (course === OTHER_STUDENT_COURSE && otherCourse.trim().length < 2)) { toast.error("Course required", { description: course === OTHER_STUDENT_COURSE ? "Enter the name of your healthcare course." : "Select your course before continuing." }); return; }
       if (!locationAddress.trim()) { toast.error("Address required", { description: "Enter your full address or use your current location." }); return; }
       if (college.trim().length < 3 || !studyYear || !graduation) { toast.error("Study details required", { description: "Add your college, year of study, and expected graduation month." }); return; }
       if (proof === "univ_reg" ? universityRegNo.trim().length < 5 : !proofFile) { toast.error("Proof of study required", { description: proof === "univ_reg" ? "Enter a valid university registration number." : "Upload your college ID or bonafide certificate." }); return; }
-      if (!adultConfirmed) { toast.error("Age confirmation required", { description: "Confirm that you are at least 18 years old to continue." }); return; }
+      if (!adultConfirmed) { toast.error("Student consent required", { description: "Confirm that you are at least 18 and authorize verification of your student enrollment." }); return; }
     } else {
       if (!profession) { toast.error("Profession required", { description: "Select your profession before continuing." }); return; }
       if (!specialty || (specialty === "Other" && customSpecialty.trim().length < 2)) { toast.error("Specialization required", { description: "Select a specialization for your profession, or enter one if you chose Other." }); return; }
@@ -695,13 +738,13 @@ export function QuickCandidateOnboarding() {
   >
     {step === 0 ? <FormSection icon={<HiOutlineUser className="h-4 w-4" />} title="Basic Information" subtitle="Official details as registered on your certificates and ID."><Field label="Full name" required value={name} onChange={(e) => setName(e.target.value)} placeholder="As on your certificates" /></FormSection> : step === 1 ? isStudent ? <div className="space-y-8">
       <FormSection icon={<HiOutlineAcademicCap className="h-4 w-4" />} title="Course & college" subtitle="Share the course and college where you are currently enrolled.">
-        <div className="grid gap-4 sm:grid-cols-2"><SelectField label="Course" required options={QUICK_STUDENT_COURSES} value={course} onChange={setCourse} placeholder="Select your course" /><Field label="College" required value={college} onChange={(e) => setCollege(e.target.value)} placeholder="Your college name" /><div className="sm:col-span-2"><label className="block"><Label required>Full address</Label><Textarea required rows={3} value={locationAddress} onChange={(e) => { setLocationAddress(e.target.value); setCity(""); setCustomCity(""); setArea(""); setLocationState(""); }} placeholder="Building, street, neighbourhood, city and state" className="min-h-24 resize-y rounded-xl bg-white text-sm focus-visible:ring-primary" /></label><div className="mt-2 flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Include your neighbourhood and city so we can match you with nearby opportunities.</p>{currentLocationAction}</div></div><SelectField label="Year of study" required options={["1st year", "2nd year", "3rd year", "4th year", "Internship year"]} value={studyYear} onChange={setStudyYear} /><Field label="Expected graduation month" required type="month" value={graduation} onChange={(e) => setGraduation(e.target.value)} /></div>
+        <div className="grid gap-4 sm:grid-cols-2"><SelectField label="Course" required options={QUICK_STUDENT_COURSES} value={course} onChange={setCourse} placeholder="Select your course" />{course === OTHER_STUDENT_COURSE && <Field label="Course name" required value={otherCourse} onChange={(e) => setOtherCourse(e.target.value)} placeholder="Enter your healthcare course" />}<Field label="College" required value={college} onChange={(e) => setCollege(e.target.value)} placeholder="Your college name" /><div className="sm:col-span-2"><label className="block"><Label required>Full address</Label><Textarea required rows={3} value={locationAddress} onChange={(e) => { setLocationAddress(e.target.value); setCity(""); setCustomCity(""); setArea(""); setLocationState(""); }} placeholder="Building, street, neighbourhood, city and state" className="min-h-24 resize-y rounded-xl bg-white text-sm focus-visible:ring-primary" /></label><div className="mt-2 flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Include your neighbourhood and city so we can match you with nearby opportunities.</p>{currentLocationAction}</div></div><SelectField label="Year of study / training stage" required options={STUDENT_YEARS} value={studyYear} onChange={setStudyYear} /><div><DateField label={studyYear === "Internship / clinical training" ? "Expected completion month" : "Expected graduation month"} required monthOnly value={graduation} onChange={setGraduation} placeholder="Select month and year" />{studyYear === "Internship / clinical training" && <p className="mt-1.5 text-xs text-muted-foreground">Choose this if you are currently doing your course’s internship or supervised clinical training.</p>}</div></div>
       </FormSection>
     </div> : <FormSection icon={<HiOutlineSparkles className="h-4 w-4" />} title="Set up your profile" subtitle="Upload your resume for Ally to read, or fill in the essentials yourself."><div className="grid gap-3 sm:grid-cols-2"><button type="button" onClick={() => setResumeModalOpen(true)} className="flex items-start gap-3 rounded-2xl border border-primary/25 bg-primary-soft/30 p-4 text-left transition-all hover:border-primary sm:p-5"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary text-white"><HiOutlineSparkles className="h-5 w-5" /></span><span><b className="block text-sm text-slate-900">Upload your resume</b><span className="mt-1 block text-xs leading-relaxed text-slate-500">Ally reads it. You check each detail before saving.</span></span></button><button type="button" onClick={() => setStep(2)} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left transition-all hover:border-primary sm:p-5"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-primary"><HiOutlinePencilSquare className="h-5 w-5" /></span><span><b className="block text-sm text-slate-900">Fill in myself</b><span className="mt-1 block text-xs leading-relaxed text-slate-500">Choose your profession and area.</span></span></button></div></FormSection> : isStudent ? <div className="space-y-8">
       <FormSection icon={<HiOutlineDocumentCheck className="h-4 w-4" />} title="Proof of study" subtitle="Choose one document or add your university registration number.">
         <SelectField label="Proof of study" required options={["College ID card", "Bonafide certificate", "University registration number"]} value={proof === "college_id" ? "College ID card" : proof === "bonafide" ? "Bonafide certificate" : "University registration number"} onChange={(value) => { setProof(value === "College ID card" ? "college_id" : value === "Bonafide certificate" ? "bonafide" : "univ_reg"); setProofFile(null); }} />
         {proof === "univ_reg" ? <><Field label="University registration number" required value={universityRegNo} onChange={(e) => setUniversityRegNo(e.target.value)} /><p className="text-xs text-slate-500">The FALE team reviews this number from your profile before approving your student verification.</p></> : <UploadBox label={proof === "bonafide" ? "Bonafide certificate" : "College ID card"} hint="Photo or PDF, up to 5 MB" file={proofFile?.name} onFile={(fileName, dataUrl) => setProofFile(fileName && dataUrl ? { name: fileName, data: dataUrl } : null)} />}
-        <label className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary-soft/30 p-3 text-sm text-slate-700"><input type="checkbox" checked={adultConfirmed} onChange={(e) => setAdultConfirmed(e.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" />I confirm that I am 18 or older.</label>
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-primary/20 bg-primary-soft/30 p-3 text-sm text-slate-700"><input type="checkbox" checked={adultConfirmed} onChange={(e) => setAdultConfirmed(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-primary" /><span>I confirm that I am at least 18 years old, currently enrolled in the course and college I provided, and that my details and documents are accurate. I authorize The Fale to review my documents and verify my enrollment with my college. See our <Link to="/privacy" target="_blank" onClick={(event) => event.stopPropagation()} className="font-semibold text-primary underline underline-offset-2">Privacy Policy</Link>.</span></label>
       </FormSection>
       <FormSection icon={<HiOutlineInformationCircle className="h-4 w-4" />} title="What happens next" subtitle="A FALE credentialing officer reviews student proof, usually within 24 hours." />
     </div> : <div className="space-y-8">
@@ -765,113 +808,297 @@ export function QuickCandidateOnboarding() {
 }
 const FACILITY_AGREEMENT_TERMS = [
   ["What The Fale does", "Connects your facility with healthcare professionals for jobs, internships, and shifts. Your team makes hiring decisions."],
-  ["Candidate credits", "Credits unlock professional contact details and resumes. They are paid in advance and are not refunded once used."],
-  ["Placement fee", "A 5% fee on first-year annual CTC applies when a professional introduced through The Fale joins your facility, plus GST."],
+  ["Welcome candidate credits", "Every new facility account receives 3 complimentary candidate contact unlocks. Additional credits are paid in advance and are not refunded once used."],
+  ["First placement", "The placement fee is waived for your first qualifying hire introduced through The Fale. Candidate compensation and any applicable shift costs remain payable."],
+  ["Subsequent placement fees", "After the first qualifying hire, a 5% fee on first-year annual CTC applies to eligible hires introduced through The Fale, plus GST."],
   ["Introductions", "The placement fee applies to a hire within 12 months of an application, shortlist, or introduction through The Fale."],
-  ["Shifts and payment", "Shift costs are charged through your wallet after hours are approved. Overdue invoices may pause new posts and introductions."],
+  ["Shifts and payment", "The Fale service fee is waived on your first completed shift. Clinician compensation and applicable taxes remain payable. Later shift costs are charged through your wallet after hours are approved."],
   ["Replacement", "A replacement is provided at no further fee if a placed professional leaves within 30 days."],
 ] as const;
 
 export function QuickFacilityOnboarding() {
   const navigate = useNavigate();
   const app = useApp();
-  const [step, setStep] = useState(0);
   const [name, setName] = useState("");
-  const [type, setType] = useState("");
-  const [area, setArea] = useState("");
-  const [beds, setBeds] = useState("");
-  const [needs, setNeeds] = useState<string[]>(["Full-time hiring"]);
-  const [hasBranches, setHasBranches] = useState(false);
-  const [group, setGroup] = useState("");
-  const [branch, setBranch] = useState("");
   const [contact, setContact] = useState("");
-  const [designation, setDesignation] = useState("HR manager");
-  const [email, setEmail] = useState("");
-  const [mobile, setMobile] = useState(app.contact.replace(/\D/g, "").slice(-10));
-  const [gst, setGst] = useState("");
+  const [facilityPassword, setFacilityPassword] = useState("");
+  const [showFacilityPassword, setShowFacilityPassword] = useState(false);
+  const [area, setArea] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [showFullTerms, setShowFullTerms] = useState(false);
-  const [codeSent, setCodeSent] = useState(false);
-  const [code, setCode] = useState("");
-  const [error, setError] = useState("");
+  const [showFacilityMediaModal, setShowFacilityMediaModal] = useState(false);
+  const [facilityLogo, setFacilityLogo] = useState<{ name: string; data: string; size: number } | null>(null);
+  const [facilityPhotos, setFacilityPhotos] = useState<{ name: string; data: string; size: number }[]>([]);
   const [pending, setPending] = useState(false);
-  const loginPhone = app.contact.replace(/\D/g, "").slice(-10);
-  const steps = [{ t: "Your facility", d: "Name, type, area" }, { t: "You & billing", d: "Contact, GSTIN" }, { t: "Agreement", d: "Plain terms" }];
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const photosInputRef = useRef<HTMLInputElement>(null);
+  const accountDigits = app.contact.replace(/\D/g, "").slice(-10);
+  const accountPhone = accountDigits ? "+91" + accountDigits : "";
+  const steps = [{ t: "Facility account", d: "Name and authorized contact" }];
 
-  const next = async () => {
+  const validateAndContinue = () => {
     if (pending) return;
-    setError("");
-    if (step === 0) {
-      if (name.trim().length < 3 || !type || !area) return setError("Enter your facility name, type, and area.");
-      if (beds && (!/^\d+$/.test(beds) || Number(beds) < 0)) return setError("Enter a valid number of beds.");
-      setStep(1); return;
+    if (name.trim().length < 3) {
+      toast.error("Hospital or clinic name required", { description: "Enter the registered name of your facility to continue." });
+      return;
     }
-    if (step === 1) {
-      if (contact.trim().length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !/^[6-9]\d{9}$/.test(mobile)) return setError("Enter your name, valid work email, and 10-digit mobile number.");
-      if (gst && !/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gst.toUpperCase())) return setError("Check the 15-character GSTIN.");
-      setStep(2); return;
+    if (contact.trim().length < 2) {
+      toast.error("Your name is required", { description: "Enter the name of the person authorized to hire for this facility." });
+      return;
     }
-    if (!accepted) return setError("Confirm that you are authorised to accept the agreement.");
-    if (!codeSent || !/^\d{6}$/.test(code)) return setError("Request and enter the 6-digit signing code.");
+    if (facilityPassword && facilityPassword.length < 8) {
+      toast.error("Password is too short", { description: "Use at least 8 characters, or leave this field blank and continue with OTP sign-in." });
+      return;
+    }
+    if (!accepted) {
+      toast.error("Authorization confirmation required", { description: "Accept the hospital terms and confirm that you can hire for this facility." });
+      return;
+    }
+    if (!/^\+91[6-9]\d{9}$/.test(accountPhone)) {
+      toast.error("Sign-in required", { description: "Your verified mobile number is missing. Please sign in again." });
+      return;
+    }
+    setShowFacilityMediaModal(true);
+  };
+
+  const createAccount = async (skipMedia = false) => {
+    if (pending) return;
     setPending(true);
     try {
-      await onboardFacility({ hospitalName: name.trim(), facilityType: type, city: area, state: "Karnataka", beds: beds ? Number(beds) : 0, contactPerson: contact.trim(), designation, contactPhone: `+91${mobile}`, contactEmail: email.trim(), ...(gst ? { gst: gst.toUpperCase() } : {}), hiringNeeds: needs, ...(group.trim() ? { groupName: group.trim() } : {}), ...(branch.trim() ? { branchName: branch.trim() } : {}), agreementAccepted: true, agreementOtp: code });
-      setState({ onboarded: true, portal: "facility", profile: { org: name.trim(), orgType: type, city: area, area, recruiter: contact.trim(), designation, email, mobile } });
-      toast.success("Facility setup complete", { description: "Your facility profile is saved. Complete the required registration details and documents from your dashboard to request verification." });
+      await onboardFacility({
+        hospitalName: name.trim(),
+        ...(area ? { area } : {}),
+        ...(area ? { city: area } : {}),
+        contactPerson: contact.trim(),
+        contactPhone: accountPhone,
+        agreementAccepted: true,
+        ...(facilityPassword ? { password: facilityPassword } : {}),
+        ...(skipMedia || !facilityLogo ? {} : { logoUrl: facilityLogo.data }),
+        ...(skipMedia || facilityPhotos.length === 0 ? {} : { facilityPhotos: facilityPhotos.map((photo) => photo.data) }),
+      });
+      setState({
+        onboarded: true,
+        portal: "facility",
+        profile: {
+          org: name.trim(), area, city: area, recruiter: contact.trim(), mobile: accountPhone,
+          ...(skipMedia || !facilityLogo ? {} : { logoUrl: facilityLogo.data }),
+        },
+      });
+      setShowFacilityMediaModal(false);
+      toast.success("Facility account created", {
+        description: "Your account is ready. Add your facility details and registration documents from your dashboard to request verification.",
+      });
       await navigate({ to: "/employer" });
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not save your facility. Please try again."); }
-    finally { setPending(false); }
+    } catch (e) {
+      const detail = e instanceof Error ? e.message.trim() : "";
+      const usefulDetail = detail && !/(internal server error|failed to fetch|network error|unexpected error|correlation.?id|status\s*[45]\d\d|\bHTTP\s*\d{3}\b)/i.test(detail)
+        ? detail
+        : "Please check your connection and try again. Your details are still on this screen.";
+      toast.error("Facility account could not be created", { description: usefulDetail });
+    } finally {
+      setPending(false);
+    }
   };
 
-  const sendSigningCode = async () => {
-    if (pending) return;
-    if (!/^[6-9]\d{9}$/.test(loginPhone)) return setError("Sign in with your mobile number to receive a signing code.");
-    setPending(true); setError("");
-    try { await sendOtp(loginPhone, "ROLE_FACILITY"); setCodeSent(true); }
-    catch (e) { setError(e instanceof Error ? e.message : "Could not send a signing code."); }
-    finally { setPending(false); }
+  const readFacilityImage = async (file: File): Promise<{ data: string; size: number }> => {
+    const bitmap = await createImageBitmap(file);
+    const maxDimension = 1440;
+    const scale = Math.min(1, maxDimension / bitmap.width, maxDimension / bitmap.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close();
+      throw new Error("Could not process this image. Please choose another file.");
+    }
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const compressed = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not compress this image.")), "image/jpeg", 0.78);
+    });
+    const data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read this image."));
+      reader.onerror = () => reject(new Error("Could not read this image."));
+      reader.readAsDataURL(compressed);
+    });
+    return { data, size: compressed.size };
   };
 
-  return <OnboardingSetupFrame
-    title="Healthcare Facility Setup"
+  const validateFacilityImage = (file: File) => {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      toast.error("Choose a JPG, PNG, or WebP image.");
+      return false;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Each image must be 2 MB or smaller.");
+      return false;
+    }
+    return true;
+  };
+
+  const handleLogoSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file || !validateFacilityImage(file)) return;
+    try {
+      const image = await readFacilityImage(file);
+      const gallerySize = facilityPhotos.reduce((sum, photo) => sum + photo.size, 0);
+      if (gallerySize + image.size > 6 * 1024 * 1024) {
+        toast.error("Keep the total logo and photo upload under 6 MB.");
+        return;
+      }
+      setFacilityLogo({ name: file.name, ...image });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not read this image.");
+    }
+  };
+
+  const handlePhotosSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files || []);
+    event.currentTarget.value = "";
+    if (files.length === 0) return;
+    const remaining = Math.max(0, 6 - facilityPhotos.length);
+    if (remaining === 0) {
+      toast.error("You can add up to six facility photos.");
+      return;
+    }
+    if (files.length > remaining) toast.info(`You can add ${remaining} more photo${remaining === 1 ? "" : "s"}.`);
+    const validFiles = files.slice(0, remaining).filter(validateFacilityImage);
+    const currentSize = facilityPhotos.reduce((sum, photo) => sum + photo.size, 0) + (facilityLogo?.size || 0);
+    try {
+      const images = await Promise.all(validFiles.map(async (file) => ({
+        name: file.name,
+        ...await readFacilityImage(file),
+      })));
+      let acceptedSize = currentSize;
+      const withinTotalLimit = images.filter((image) => {
+        if (acceptedSize + image.size > 6 * 1024 * 1024) {
+          toast.error("Keep the total logo and photo upload under 6 MB.");
+          return false;
+        }
+        acceptedSize += image.size;
+        return true;
+      });
+      setFacilityPhotos((current) => [...current, ...withinTotalLimit].slice(0, 6));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not read the selected images.");
+    }
+  };
+
+  return <>
+  <OnboardingSetupFrame
+    title="Create your facility account"
     steps={steps}
-    current={step}
-    category="Employer Verification"
-    heading={step === 0 ? "Your facility" : step === 1 ? "You & billing" : "One simple agreement"}
-    description={step === 0 ? "Name, type, area, and what you need." : step === 1 ? "Who we talk to, and where invoices go." : `Nothing to pay today. Accept once for ${name || "your facility"}.`}
-    error={error}
-    onBack={() => { setError(""); if (step > 0) setStep(step - 1); else navigate({ to: "/" }); }}
-    onNext={() => void next()}
-    nextLabel={step === 2 ? "Open my dashboard" : "Save & continue"}
+    current={0}
+    category="Facility onboarding"
+    heading="Set up your hospital"
+    description="Create your facility account to start hiring with The Fale."
+    completionProgress={Math.round(([
+      name.trim().length >= 3,
+      contact.trim().length >= 2,
+      accepted,
+    ].filter(Boolean).length / 3) * 100)}
+    onBack={() => navigate({ to: "/" })}
+    onNext={validateAndContinue}
+    nextLabel="Continue"
     pending={pending}
   >
-    {step === 0 ? <div className="space-y-8">
-      <FormSection icon={<HiOutlineBuildingOffice2 className="h-4 w-4" />} title="Your facility" subtitle="Your profile builds as you enter the basics.">
-        <Field label="Facility name" required value={name} onChange={(e) => setName(e.target.value)} placeholder="As on your registration" />
-        <SegmentedControl label="Do you have more than one branch?" options={["No, just this one", "Yes"]} value={hasBranches ? "Yes" : "No, just this one"} onChange={(v) => { const enabled = v === "Yes"; setHasBranches(enabled); if (!enabled) { setGroup(""); setBranch(""); } }} />
-        {hasBranches && <div className="grid gap-4 sm:grid-cols-2"><Field label="Group or chain name" value={group} onChange={(e) => setGroup(e.target.value)} /><Field label="This branch" value={branch} onChange={(e) => setBranch(e.target.value)} /></div>}
-        <div className="grid gap-4 sm:grid-cols-2"><SelectField label="Type" required options={["Multi-speciality hospital", "Nursing home", "Diagnostic lab", "Clinic", "Dialysis centre", "Home-care agency"]} value={type} onChange={setType} placeholder="Select type" /><SelectField label="Area" required options={QUICK_AREAS} value={area} onChange={setArea} placeholder="Select area" /><Field label="Beds (if any)" inputMode="numeric" value={beds} onChange={(e) => setBeds(e.target.value)} placeholder="e.g. 120" /></div>
-      </FormSection>
-      <FormSection icon={<HiOutlineBriefcase className="h-4 w-4" />} title="Hiring needs" subtitle="Choose all that apply."><div className="flex flex-wrap gap-2">{["Full-time hiring", "Internships", "Shifts"].map((item) => <button key={item} type="button" aria-pressed={needs.includes(item)} onClick={() => setNeeds(needs.includes(item) ? needs.filter((x) => x !== item) : [...needs, item])} className={cn("rounded-full border px-3 py-2 text-sm font-semibold transition-colors", needs.includes(item) ? "border-primary bg-primary-soft text-primary" : "border-slate-200 text-slate-600 hover:border-primary/40")}>{item}</button>)}</div></FormSection>
-    </div> : step === 1 ? <FormSection icon={<HiOutlineUser className="h-4 w-4" />} title="Authorized contact" subtitle="Who we speak to about hiring and billing.">
-      <div className="grid gap-4 sm:grid-cols-2"><Field label="Your name" required value={contact} onChange={(e) => setContact(e.target.value)} /><SelectField label="Your role" required options={["HR manager", "Nursing head", "Administrator", "Owner / director", "Group HR (all branches)"]} value={designation} onChange={setDesignation} /><Field label="Work email" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} /><Field label="Mobile" required inputMode="numeric" maxLength={10} value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))} /><Field label="GSTIN (optional)" value={gst} maxLength={15} onChange={(e) => setGst(e.target.value.toUpperCase())} /></div>
-    </FormSection> : <div className="space-y-8">
-      <FormSection icon={<HiOutlineDocumentCheck className="h-4 w-4" />} title="Service agreement" subtitle="Plain terms, accepted once for your facility.">
-        <div className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-4 sm:p-5">{FACILITY_AGREEMENT_TERMS.map(([heading, content]) => <div key={heading} className="mb-3 last:mb-0"><b className="text-sm text-slate-800">{heading}</b><p className="mt-0.5 text-sm leading-relaxed text-slate-600">{content}</p></div>)}{showFullTerms && <p className="mt-3 border-t border-slate-200 pt-3 text-sm leading-relaxed text-slate-600">You agree to provide accurate role and pay details, treat professionals fairly and safely, and protect their personal data. Either party may end the agreement with 30 days’ notice. Fees already triggered remain payable. Karnataka law applies, with courts in Bengaluru having jurisdiction.</p>}</div>
-        <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => setShowFullTerms(!showFullTerms)}>{showFullTerms ? "Show less" : "Read the full agreement"}</button>
-        <label className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary-soft/30 p-3 text-sm text-slate-700"><input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" /><span>I’m authorised to accept this for {name}.</span></label>
-        <p className="text-xs text-slate-500">
-          Signing as {contact}, {designation}. {loginPhone ? `The code is sent to your signed-in phone ending ${loginPhone.slice(-4)}.` : "A code will be sent to your signed-in phone."}
-        </p>
-        <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-end">
-          <Button type="button" variant="outline" disabled={pending} onClick={() => void sendSigningCode()} className="h-[46px] w-full rounded-xl sm:w-auto">
-            {codeSent ? "Resend signing code" : "Send signing code"}
-          </Button>
-          {codeSent && <Field className="w-full sm:w-44" label="6-digit signing code" inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />}
+    <div className="space-y-6">
+      <FormSection icon={<HiOutlineBuildingOffice2 className="h-4 w-4" />} title="Facility details" subtitle="We’ll use these details to create your hiring account.">
+        <Field label="Hospital or clinic name" required maxLength={150} value={name} onChange={(e) => setName(e.target.value)} placeholder="Hospital or clinic name" />
+        <Field label="Your name" required maxLength={100} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Full name" />
+        <SelectField label="Area / city" options={FACILITY_AREAS} value={area} onChange={setArea} placeholder="Select your area or city" />
+        <div className="block">
+          <Label optional>Create a password</Label>
+          <div className="relative">
+            <input
+              id="facility-create-password"
+              type={showFacilityPassword ? "text" : "password"}
+              autoComplete="new-password"
+              maxLength={100}
+              value={facilityPassword}
+              onChange={(e) => setFacilityPassword(e.target.value)}
+              placeholder="At least 8 characters"
+              aria-describedby="facility-password-hint"
+              className="field-input h-[46px] rounded-xl pr-12"
+            />
+            <button
+              type="button"
+              onClick={() => setShowFacilityPassword((visible) => !visible)}
+              aria-label={showFacilityPassword ? "Hide password" : "Show password"}
+              aria-pressed={showFacilityPassword}
+              className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              {showFacilityPassword ? <HiOutlineEyeSlash className="h-4 w-4" /> : <HiOutlineEye className="h-4 w-4" />}
+            </button>
+          </div>
+          <p id="facility-password-hint" className="mt-1.5 text-xs leading-5 text-slate-500">At least 8 characters. Optional—use it for faster sign-in, or continue with a one-time code.</p>
         </div>
       </FormSection>
-    </div>}
-  </OnboardingSetupFrame>;
+      <FormSection icon={<HiOutlineDocumentCheck className="h-4 w-4" />} title="Hospital terms" subtitle="Please confirm you can hire for this facility.">
+        <div className="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-4 sm:p-5">
+          {FACILITY_AGREEMENT_TERMS.map(([heading, content]) => (
+            <div key={heading} className="mb-3 last:mb-0">
+              <b className="text-sm text-slate-800">{heading}</b>
+              <p className="mt-0.5 text-sm leading-relaxed text-slate-600">{content}</p>
+            </div>
+          ))}
+          {showFullTerms && <p className="mt-3 border-t border-slate-200 pt-3 text-sm leading-relaxed text-slate-600">You agree to provide accurate role and pay details, treat professionals fairly and safely, and protect their personal data. Either party may end the agreement with 30 days’ notice. Fees already triggered remain payable.</p>}
+        </div>
+        <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => setShowFullTerms(!showFullTerms)}>
+          {showFullTerms ? "Show less" : "Read the full agreement"}
+        </button>
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-primary/20 bg-primary-soft/30 p-3 text-sm text-slate-700">
+          <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-0.5 h-4 w-4 cursor-pointer accent-primary" />
+          <span>I agree to The Fale’s hospital terms and confirm I can hire for {name || "this facility"}.</span>
+        </label>
+        <p className="text-xs text-slate-500">Your verified mobile number ending {accountPhone.slice(-4)} will be used as the account contact.</p>
+      </FormSection>
+    </div>
+  </OnboardingSetupFrame>
+  {showFacilityMediaModal && <div className="fixed inset-0 z-50 flex animate-in fade-in items-end justify-center bg-slate-900/60 p-0 backdrop-blur-sm duration-200 sm:items-center sm:p-4" role="presentation">
+    <div className="relative max-h-[92vh] w-full overflow-hidden rounded-t-3xl border border-slate-200/90 bg-white shadow-2xl sm:max-w-xl sm:rounded-3xl" role="dialog" aria-modal="true" aria-labelledby="facility-media-title">
+      <button type="button" onClick={() => setShowFacilityMediaModal(false)} disabled={pending} className="absolute right-4 top-4 z-10 cursor-pointer rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed" aria-label="Close facility photos prompt"><HiOutlineXMark className="h-5 w-5" /></button>
+      <div className="max-h-[92vh] w-full space-y-5 overflow-y-auto p-4 sm:space-y-6 sm:p-8">
+      <div className="space-y-1.5 px-1 pt-1 text-center sm:px-4">
+        <span className="mx-auto inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-soft text-primary"><HiOutlinePhoto className="h-5 w-5" /></span>
+        <h2 id="facility-media-title" className="pt-1 text-2xl font-black tracking-tight text-slate-900">Add your hospital profile</h2>
+        <p className="text-sm leading-relaxed text-slate-500">Add your logo and facility photos to help professionals recognize your workplace. You can also do this later.</p>
+      </div>
+
+      <input ref={logoInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => void handleLogoSelect(event)} />
+      <input ref={photosInputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => void handlePhotosSelect(event)} />
+
+      <div className="space-y-5">
+        <section className="min-w-0">
+          <div className="mb-2 flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div className="min-w-0"><h3 className="text-sm font-bold text-slate-900">Hospital logo <span className="font-normal text-slate-400">(optional)</span></h3><p className="mt-0.5 text-xs text-slate-500">Shown on your facility profile.</p></div>
+            <Button type="button" variant="outline" onClick={() => logoInputRef.current?.click()} disabled={pending} className="w-full shrink-0 cursor-pointer rounded-xl sm:w-auto"><HiOutlineCamera className="mr-1.5 h-4 w-4" />{facilityLogo ? "Change logo" : "Add logo"}</Button>
+          </div>
+          {facilityLogo ? <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-200 p-3"><img src={facilityLogo.data} alt="Hospital logo preview" className="h-16 w-16 shrink-0 rounded-xl border border-slate-200 object-cover" /><span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600">{facilityLogo.name}</span><button type="button" onClick={() => setFacilityLogo(null)} className="shrink-0 cursor-pointer rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Remove hospital logo"><HiOutlineXMark className="h-4 w-4" /></button></div> : <button type="button" onClick={() => logoInputRef.current?.click()} className="flex min-h-20 w-full min-w-0 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-center text-sm font-semibold text-slate-500 hover:border-primary/50 hover:text-primary sm:flex-row sm:gap-2"><HiOutlinePhoto className="h-5 w-5 shrink-0" /><span className="break-words">Choose a logo image</span></button>}
+        </section>
+
+        <section className="min-w-0">
+          <div className="mb-2 flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <div className="min-w-0"><h3 className="text-sm font-bold text-slate-900">Facility photos <span className="font-normal text-slate-400">(optional)</span></h3><p className="mt-0.5 text-xs leading-relaxed text-slate-500">Add up to 6 JPG, PNG, or WebP images, 2 MB each (6 MB combined limit).</p></div>
+            <Button type="button" variant="outline" onClick={() => photosInputRef.current?.click()} disabled={pending || facilityPhotos.length >= 6} className="w-full shrink-0 cursor-pointer rounded-xl sm:w-auto"><HiOutlinePhoto className="mr-1.5 h-4 w-4" />Add photos</Button>
+          </div>
+          {facilityPhotos.length > 0 ? <div className="grid min-w-0 grid-cols-3 gap-2 sm:grid-cols-4">{facilityPhotos.map((photo, index) => <div key={`${photo.name}-${index}`} className="group relative aspect-square min-w-0 overflow-hidden rounded-xl border border-slate-200"><img src={photo.data} alt={`Facility photo ${index + 1}`} className="h-full w-full object-cover" /><button type="button" onClick={() => setFacilityPhotos((current) => current.filter((_, photoIndex) => photoIndex !== index))} className="absolute right-1 top-1 cursor-pointer rounded-full bg-white/95 p-1.5 text-slate-700 shadow hover:text-red-600" aria-label={`Remove photo ${index + 1}`}><HiOutlineXMark className="h-3.5 w-3.5" /></button></div>)}</div> : <button type="button" onClick={() => photosInputRef.current?.click()} className="flex min-h-20 w-full min-w-0 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-center text-sm font-semibold leading-snug text-slate-500 hover:border-primary/50 hover:text-primary sm:flex-row sm:gap-2"><HiOutlinePhoto className="h-5 w-5 shrink-0" /><span className="break-words">Show candidates where they’ll work</span></button>}
+        </section>
+      </div>
+
+      <div className="space-y-2 border-t border-slate-100 pt-5">
+        <Button type="button" onClick={() => void createAccount(false)} disabled={pending} className="h-12 w-full rounded-xl bg-primary font-semibold text-white hover:bg-primary/90">{pending ? "Creating account…" : "Create account"}</Button>
+        <button type="button" onClick={() => void createAccount(true)} disabled={pending} className="w-full cursor-pointer py-2 text-xs font-semibold text-slate-500 transition-colors hover:text-slate-800 disabled:cursor-not-allowed">{pending ? "Creating account…" : "Skip for now"}</button>
+      </div>
+      </div>
+    </div>
+  </div>}
+  </>;
 }
 function Onboarding() {
   const search = Route.useSearch();
@@ -1230,7 +1457,8 @@ function LegacyOnboarding() {
 
   const handleFinishStudentOnboarding = async () => onboardingAction.run(async () => {
     const selectedCourseObj = STUDENT_COURSES.find((c) => c.label === str("course"));
-    const inferredRole = selectedCourseObj ? selectedCourseObj.role : "Student";
+    const inferredRole = selectedCourseObj ? selectedCourseObj.profession : "Student";
+    const resolvedCourse = str("course") === OTHER_STUDENT_COURSE ? str("otherCourse").trim() : str("course");
     const proof = str("proof") || "college_id";
     const proofDoc = proof === "univ_reg" ? `University registration · ${str("univReg")}` : docs["Proof of study"] || "";
     const proofLabel = proof === "college_id"
@@ -1244,7 +1472,7 @@ function LegacyOnboarding() {
       name: str("name").trim(),
       role: inferredRole,
       profession: inferredRole,
-      course: str("course"),
+      course: resolvedCourse,
       college: str("college").trim(),
       studyYear: str("studyYear"),
       grad: str("grad"),
@@ -1287,7 +1515,8 @@ function LegacyOnboarding() {
         pincode: str("pincode") || undefined,
         addressLine: str("address") || undefined,
         candidateLevel: "STUDENT",
-        course: str("course"),
+        profession: inferredRole,
+        course: resolvedCourse,
         collegeName: str("college").trim(),
         studyYear: str("studyYear"),
         universityRegNo: str("univReg") || undefined,
@@ -1318,7 +1547,7 @@ function LegacyOnboarding() {
       description: "Welcome to FALE Huddle & Clinical Mentorship. Proof under verification.",
     });
 
-    navigate({ to: "/huddle" });
+    navigate({ to: "/home" });
   });
 
   const next = (e: React.FormEvent) => {
@@ -1340,6 +1569,10 @@ function LegacyOnboarding() {
       } else if (step === 1) {
         if (!str("course")) {
           toast.error("Please select your enrolled medical or allied course.");
+          return;
+        }
+        if (str("course") === OTHER_STUDENT_COURSE && str("otherCourse").trim().length < 2) {
+          toast.error("Please enter your healthcare course name.");
           return;
         }
         if (!str("college").trim() || str("college").trim().length < 3) {
@@ -1538,7 +1771,7 @@ function LegacyOnboarding() {
       toast.success("Student profile submitted for verification!", {
         description: "Your proof of study has been sent to FALE. You can browse internships and ask mentors now.",
       });
-      navigate({ to: "/huddle" });
+      navigate({ to: "/home" });
     } else {
       toast.success("Profile submitted for verification", { description: "Review usually takes up to 48 hours." });
       navigate({ to: f ? "/employer" : "/profile" });
@@ -1902,9 +2135,9 @@ function LegacyOnboarding() {
                 placeholder="e.g. Manipal College of Nursing, Bengaluru"
               />
               <SelectField
-                label="Current study year / status"
+                label="Current study year / training stage"
                 required
-                options={["1st Year", "2nd Year", "3rd Year", "Final Year", "Compulsory Rotatory Intern"]}
+                options={["1st Year", "2nd Year", "3rd Year", "Final Year", "Internship / clinical training"]}
                 value={str("studyYear") || "Final Year"}
                 onChange={set("studyYear")}
               />
@@ -3256,6 +3489,15 @@ function LegacyOnboarding() {
           placeholder="Select your course"
           onChange={set("course")}
         />
+        {str("course") === OTHER_STUDENT_COURSE && (
+          <Field
+            label="Course name"
+            required
+            icon={<HiOutlineAcademicCap />}
+            {...input("otherCourse")}
+            placeholder="Enter your healthcare course"
+          />
+        )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -3267,7 +3509,7 @@ function LegacyOnboarding() {
           />
 
           <SelectField
-            label="Year of study"
+            label="Year of study / training stage"
             required
             icon={<HiOutlineCalendar />}
             options={STUDENT_YEARS}
@@ -3279,7 +3521,7 @@ function LegacyOnboarding() {
 
         <div className="space-y-1.5">
           <DateField
-            label="Expected to graduate"
+            label={str("studyYear") === "Internship / clinical training" ? "Expected to complete training" : "Expected to graduate"}
             required
             placeholder="Select expected graduation date"
             value={str("grad")}
@@ -3288,7 +3530,9 @@ function LegacyOnboarding() {
             max={`${new Date().getFullYear() + 10}-12-31`}
           />
           <p className="text-[11px] text-slate-400">
-            Hospitals use this to invite final years and interns to full-time interviews ahead of exam results.
+            {str("studyYear") === "Internship / clinical training"
+              ? "Choose when you expect to finish your required practical or clinical training."
+              : "Choose the month you expect to complete your course."}
           </p>
         </div>
       </FormSection>
@@ -3631,6 +3875,7 @@ function LegacyOnboarding() {
           </div>
 
           <div className="flex items-center gap-3">
+            <InterfaceLanguagePicker />
             {/* Candidate Resume Auto-fill trigger in header */}
             {!f && candidateStage === "graduate" && (
               <Button

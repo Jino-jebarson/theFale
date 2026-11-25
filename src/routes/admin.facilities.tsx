@@ -1,4 +1,5 @@
 import { AllyReviewNote } from "@/components/fale/AllyReviewNote";
+import { FacilityImage } from "@/components/fale/FacilityImage";
 import { useConfirmedAction } from "@/hooks/use-confirmed-action";
 import { usePageLoad } from "@/hooks/use-page-load";
 import { RequestError } from "@/components/fale/RequestError";
@@ -39,11 +40,10 @@ import {
   writeSessionAuditCache,
 } from "@/lib/allyAuditUtils";
 
-const ALLY_FACILITY_CACHE_KEY = "fale_ally_facility_audit_cache_v1";
+const ALLY_FACILITY_CACHE_KEY = "fale_ally_facility_audit_cache_v3";
 
 type AllyFacilityAuditResult = {
   status: AllyAuditStatus;
-  isVerified: boolean;
   confidence: number | null;
   licenseSentence: string;
   infraSentence: string;
@@ -79,7 +79,7 @@ export const Route = createFileRoute("/admin/facilities")({
   head: () => ({
     meta: [
       { title: "Hospital Verification & Accreditation — FALE RMS" },
-      { name: "description", content: "Audit hospital NABH, NABL accreditations and Clinical Establishment Act licenses." },
+      { name: "description", content: "Review hospital registration certificates and facility verification details." },
     ],
   }),
   component: FacilityKYCAdmin,
@@ -120,11 +120,26 @@ function formatFacilityDocType(type?: string) {
   }
 }
 
+function FacilityGalleryPhoto({ src, index }: { src: string; index: number }) {
+  const [failed, setFailed] = useState(false);
+  const handleImageError = useCallback(() => setFailed(true), []);
+  if (failed) return null;
+
+  return (
+    <FacilityImage
+      src={src}
+      alt={`Facility photo ${index + 1}`}
+      onError={handleImageError}
+      className="h-24 w-full rounded-xl object-cover border border-border shadow-2xs transition-opacity hover:opacity-90"
+    />
+  );
+}
+
 function FacilityKYCAdmin() {
   const pageLoad = usePageLoad();
   const pageAction = useConfirmedAction();
   const s = useApp();
-  const [filter, setFilter] = useState<"all" | "pending" | "verified" | "rejected">("pending");
+  const [filter, setFilter] = useState<"all" | "setup_required" | "pending" | "verified" | "rejected">("pending");
   const [search, setSearch] = useState("");
   const [selectedFacility, setSelectedFacility] = useState<FacilityKYCItem | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -137,9 +152,9 @@ function FacilityKYCAdmin() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
 
-  // Ally Institutional Accreditation Audit State (session-cached + concurrency-limited live checks)
+  // Ally profile pre-check state (advisory only; source verification remains a human task).
   const getFacilityAuditCacheKey = useCallback((facility: FacilityKYCItem) => {
-    return `${facility.id}:${facility.licenseNumber || ""}:${facility.accreditation || ""}:${facility.gst || ""}:${facility.name}:${facility.beds}:${facility.icuBeds}:${facility.city}:${facility.state}`;
+    return `${facility.id}:${facility.licenseNumber || ""}:${facility.accreditation || ""}:${facility.gst || ""}:${facility.name}:${facility.beds ?? "not-provided"}:${facility.icuBeds ?? "not-provided"}:${facility.city}:${facility.state}`;
   }, []);
 
   const [aiAuditResults, setAiAuditResults] = useState<Record<string, AllyFacilityAuditResult>>(() =>
@@ -157,11 +172,10 @@ function FacilityKYCAdmin() {
 
       return {
         status: "PENDING",
-        isVerified: false,
         confidence: null,
-        licenseSentence: `Ally accreditation audit queued for live statutory license review.`,
-        infraSentence: `CEA registration (${facility.licenseNumber || "Pending"}), ${facility.accreditation || "standard"} tier, and ICU capacity will be reviewed by Ally; a human must verify the source.`,
-        recSentence: `Verification summary will appear once Ally completes its review.`,
+        licenseSentence: `Ally will review the submitted profile details for gaps and inconsistencies.`,
+        infraSentence: `The uploaded certificate and official registry have not been checked by Ally.`,
+        recSentence: `A human reviewer must compare the registration certificate with the facility details.`,
         verdict: "",
       };
     },
@@ -183,7 +197,7 @@ function FacilityKYCAdmin() {
           facility.gst,
           {
             beds: facility.beds,
-            icuBeds: facility.icuBeds ?? 0,
+            icuBeds: facility.icuBeds,
             city: facility.city,
             state: facility.state,
           }
@@ -208,13 +222,9 @@ function FacilityKYCAdmin() {
                   ? ""
                   : rawText
         );
-        const lower = plainProse.toLowerCase();
-
         if (!plainProse.trim()) throw new Error("Ally returned no facility assessment.");
         const isFlagged = /FLAG|INVALID|DISCREPANCY/.test(rawStatus);
-        const isVerified = false;
-
-        const confidence = formatConfidencePercent(sData["confidence"], !isVerified);
+        const confidence = formatConfidencePercent(sData["confidence"], true);
         const sentences = plainProse
           .split(/(?<=[.?!])\s+/)
           .map((s) => cleanMarkdownAndJsonNoise(s))
@@ -223,25 +233,20 @@ function FacilityKYCAdmin() {
         const licenseSentence =
           cleanMarkdownAndJsonNoise(typeof sData["licenseAssessment"] === "string" ? sData["licenseAssessment"] : "") ||
           sentences[0] ||
-          (isVerified
-            ? `The supplied license still requires an official source check.`
-            : `CEA License #${facility.licenseNumber || "Missing"} requires statutory compliance verification.`);
+          `Submitted licence number: ${facility.licenseNumber || "Not provided"}. Compare it with the uploaded certificate and verify it with the issuing authority.`;
 
         const infraSentence =
           cleanMarkdownAndJsonNoise(typeof sData["infraAssessment"] === "string" ? sData["infraAssessment"] : "") ||
           sentences[1] ||
-          `Capacity and accreditation have not been independently checked.`;
+          `Capacity and accreditation are profile details only; Ally has not independently checked them.`;
 
         const recSentence =
           cleanMarkdownAndJsonNoise(typeof sData["recommendation"] === "string" ? sData["recommendation"] : "") ||
           sentences[2] ||
-          (isVerified
-            ? `A human must verify hospital credentials before approval.`
-            : `Manual inspection of CEA license and statutory certificates recommended before approval.`);
+          `Use this pre-check as guidance. A human administrator must inspect the uploaded registration certificate before making a decision.`;
 
         const nextEntry: AllyFacilityAuditResult = {
           status: isFlagged ? "FLAGGED" : "REVIEW",
-          isVerified,
           confidence,
           licenseSentence,
           infraSentence,
@@ -256,22 +261,21 @@ function FacilityKYCAdmin() {
         });
 
         if (!options?.silent) {
-          toast.success(`Ally accreditation audit completed for ${facility.name}`);
+          toast.success(`Ally profile pre-check completed for ${facility.name}`);
         }
       } catch (err: any) {
         console.warn("Ally audit failed:", err);
         const errorEntry: AllyFacilityAuditResult = {
           status: "ERROR",
-          isVerified: false,
           confidence: null,
-          licenseSentence: `Ally could not reach the statutory audit service right now.`,
-          infraSentence: `Manual inspection of uploaded CEA license and accreditation documents is available below.`,
-          recSentence: `Click Re-audit with Ally to retry automated statutory verification.`,
+          licenseSentence: `Ally could not complete the profile pre-check right now.`,
+          infraSentence: `The uploaded certificate and official registry still require human review.`,
+          recSentence: `Retry the Ally pre-check or continue with manual document review.`,
           verdict: "",
         };
         setAiAuditResults((prev) => ({ ...prev, [cacheKey]: errorEntry }));
         if (!options?.silent) {
-          toast.error("Failed to run Ally accreditation audit");
+          toast.error("Failed to run Ally profile pre-check");
         }
       } finally {
         inFlightAuditKeysRef.current.delete(cacheKey);
@@ -288,14 +292,14 @@ function FacilityKYCAdmin() {
   const renderAllyQueueBadge = (facility: FacilityKYCItem) => {
     const audit = getFacilityAiAudit(facility);
     const isAuditing = Boolean(runningAuditIds[facility.id]);
-    const isVerified = audit.status === "REVIEW";
+    const isPrecheckComplete = audit.status === "REVIEW";
     const isFlagged = audit.status === "FLAGGED" || audit.status === "ERROR";
 
     return (
       <span
         className={cn(
           "inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border leading-none whitespace-nowrap",
-          isAuditing || isVerified
+          isAuditing || isPrecheckComplete
             ? "bg-primary/10 text-primary border-primary/25"
             : isFlagged
               ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
@@ -308,14 +312,14 @@ function FacilityKYCAdmin() {
           <BotMessageSquare className="h-2.5 w-2.5 shrink-0" />
         )}
         {isAuditing
-          ? "Ally Auditing..."
-          : isVerified
-            ? "Ally Review Ready"
+          ? "Ally Pre-check Running"
+          : isPrecheckComplete
+            ? "Ally Pre-check Complete"
             : audit.status === "ERROR"
-              ? "Ally Audit Retry"
+              ? "Ally Pre-check Retry"
               : isFlagged
-                ? "Ally Flagged"
-                : "Ally Audit Queued"}
+                ? "Potential Issue"
+                : "Ally Pre-check Queued"}
       </span>
     );
   };
@@ -452,41 +456,49 @@ function FacilityKYCAdmin() {
       setLoading(true);
       const res = await getPendingFacilityKyc("all");
       const mapped: FacilityKYCItem[] = res.map((dto: any) => {
-        let status: "pending" | "verified" | "rejected" = "pending";
+        const documents = Array.isArray(dto.documents) ? dto.documents : [];
+        const hasRegistrationDocument = documents.some((document: any) =>
+          String(document.documentType || "").toUpperCase() === "FACILITY_REGISTRATION" &&
+          String(document.reviewStatus || (document.verified ? "VERIFIED" : "PENDING")).toUpperCase() !== "REJECTED"
+        );
+        // Registration certificate is the only required item to enter verification review.
+        // Other facility profile details can be completed independently.
+        let status: FacilityKYCItem["status"] = hasRegistrationDocument ? "pending" : "setup_required";
         if (dto.kycStatus === "VERIFIED") status = "verified";
         else if (dto.kycStatus === "REJECTED") status = "rejected";
         return {
           id: dto.id,
           userId: dto.userId,
           name: dto.hospitalName || dto.facilityName || "Hospital Facility",
-          type: dto.facilityType || "Multispecialty Hospital",
+          type: dto.facilityType || "Not provided",
           size: dto.size,
           about: dto.about,
           website: dto.website,
-          city: dto.city || "Pan-India",
-          state: dto.state || "State",
+          area: dto.area,
+          city: dto.city || dto.area || "Not provided",
+          state: dto.state || "Not provided",
           pincode: dto.pincode,
           addressLine: dto.addressLine,
-          beds: dto.beds ?? dto.bedCapacity ?? 0,
-          icuBeds: dto.icuBeds ?? 0,
-          licenseNumber: dto.licenseNumber || "CEA-REG-PENDING",
+          beds: (dto.beds ?? dto.bedCapacity) > 0 ? (dto.beds ?? dto.bedCapacity) : undefined,
+          icuBeds: dto.icuBeds > 0 ? dto.icuBeds : undefined,
+          licenseNumber: dto.licenseNumber || "Not provided",
           gst: dto.gst,
           nabhNumber: dto.nabhNumber || "",
-          accreditation: dto.accreditationLevel || (dto.nabhNumber ? "NABH Accredited" : "State Registered"),
+          accreditation: dto.accreditationLevel || "Not provided",
           accreditationLevel: dto.accreditationLevel,
-          contactPerson: dto.contactPerson || "Facility Director",
-          designation: dto.designation || "Authorized Representative",
-          contactPhone: dto.contactPhone || dto.phone || "+91 ••••• •••••",
+          contactPerson: dto.contactPerson || "Not provided",
+          designation: dto.designation || "Not provided",
+          contactPhone: dto.contactPhone || dto.phone || "Not provided",
           contactEmail: dto.contactEmail,
           departments: Array.isArray(dto.departments) ? dto.departments : [],
           hiringNeeds: Array.isArray(dto.hiringNeeds) ? dto.hiringNeeds : [],
           logoUrl: dto.logoUrl,
           facilityPhotos: Array.isArray(dto.facilityPhotos) ? dto.facilityPhotos : [],
-          docName: dto.licenseNumber ? `CEA_License_${dto.licenseNumber}.pdf` : "Establishment_License_NABH.pdf",
+          docName: documents.find((document: any) => String(document.documentType || "").toUpperCase() === "FACILITY_REGISTRATION")?.originalFileName || "No registration document uploaded",
           status,
           submittedDate: dto.createdAt ? new Date(dto.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Recent",
           notes: dto.kycNotes,
-          documents: dto.documents || [],
+          documents,
           verifiedAt: dto.verifiedAt ? new Date(dto.verifiedAt).toLocaleString('en-IN') : undefined,
           createdAt: dto.createdAt ? new Date(dto.createdAt).toLocaleString('en-IN') : undefined,
           updatedAt: dto.updatedAt ? new Date(dto.updatedAt).toLocaleString('en-IN') : undefined,
@@ -515,7 +527,7 @@ function FacilityKYCAdmin() {
 
   const facilities = apiFacilities;
 
-  // Performance-safe background Ally verification: process pending facilities with bounded concurrency (MAX_CONCURRENT = 2)
+  // Run advisory profile pre-checks for pending facilities with bounded concurrency.
   useEffect(() => {
     const queue = facilities.filter((f) => {
       if (f.status !== "pending") return false;
@@ -546,7 +558,7 @@ function FacilityKYCAdmin() {
     };
   }, [facilities, aiAuditResults, getFacilityAuditCacheKey, handleRunAiAudit, pageLoad.retryKey]);
 
-  // Prioritize Ally verification immediately when an admin opens Inspect for a facility
+  // Start the advisory pre-check when an admin opens a facility dossier.
   useEffect(() => {
     if (!sheetOpen || !selectedFacility) return;
     const key = getFacilityAuditCacheKey(selectedFacility);
@@ -623,6 +635,7 @@ function FacilityKYCAdmin() {
   };
 
   const pendingCount = facilities.filter((f) => f.status === "pending").length;
+  const setupRequiredCount = facilities.filter((f) => f.status === "setup_required").length;
   const verifiedCount = facilities.filter((f) => f.status === "verified").length;
   const rejectedCount = facilities.filter((f) => f.status === "rejected").length;
   const hasRegistrationDocument = Boolean(selectedFacility?.documents?.some((doc: any) =>
@@ -632,8 +645,8 @@ function FacilityKYCAdmin() {
 
   return (
     <AdminLayout
-      title="Hospital & Facility Accreditation Verification"
-      subtitle="Strict Admin gatekeeping: verify healthcare institutions against NABH / NABL standards and Clinical Establishment Act registrations."
+      title="Hospital & Facility Verification"
+      subtitle="Review each hospital registration certificate. Ally can flag profile gaps, while an admin makes the verification decision."
       badge={
         <span className="rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs font-bold text-primary">
           {pendingCount} Pending · {verifiedCount} Verified
@@ -700,6 +713,7 @@ function FacilityKYCAdmin() {
           {/* Segmented Filter Pills */}
           <div className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-xl bg-muted/50 border border-border/40 w-full md:w-fit overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {[
+              { id: "setup_required" as const, label: "Setup Required", count: setupRequiredCount },
               { id: "pending" as const, label: "Pending Review", count: pendingCount },
               { id: "verified" as const, label: "Verified", count: verifiedCount },
               { id: "rejected" as const, label: "Rejected", count: rejectedCount },
@@ -805,7 +819,7 @@ function FacilityKYCAdmin() {
                         <span>{item.city}, {item.state}</span>
                       </div>
                       <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
-                        {item.beds} Inpatient Beds
+                        {item.beds ? `${item.beds} Inpatient Beds` : "Capacity not provided"}
                       </div>
                     </TableCell>
 
@@ -859,7 +873,9 @@ function FacilityKYCAdmin() {
                             ? "Verified"
                             : item.status === "rejected"
                             ? "Rejected"
-                            : "Pending"}
+                            : item.status === "setup_required"
+                            ? "Setup Required"
+                            : "Pending Review"}
                         </span>
                         {renderAllyQueueBadge(item)}
                       </div>
@@ -944,6 +960,10 @@ function FacilityKYCAdmin() {
                       <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2.5 py-1 text-[10px] font-bold text-rose-700 dark:text-rose-400 border border-rose-500/20 whitespace-nowrap">
                         <HiOutlineXMark className="h-3.5 w-3.5" /> Rejected
                       </span>
+                    ) : item.status === "setup_required" ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-50 px-2.5 py-1 text-[10px] font-bold text-orange-700 border border-orange-200 dark:bg-orange-950/30 dark:text-orange-300 dark:border-orange-800 whitespace-nowrap">
+                        Setup Required
+                      </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary border border-primary/20 whitespace-nowrap">
                         Pending Verification
@@ -978,7 +998,7 @@ function FacilityKYCAdmin() {
                         {item.city}, {item.state}
                       </span>
                       <span className="h-1 w-1 rounded-full bg-border" />
-                      <span className="font-mono text-muted-foreground whitespace-nowrap">{item.beds} Inpatient Beds</span>
+                      <span className="font-mono text-muted-foreground whitespace-nowrap">{item.beds ? `${item.beds} Inpatient Beds` : "Capacity not provided"}</span>
                     </div>
                   </div>
                 </div>
@@ -1092,10 +1112,12 @@ function FacilityKYCAdmin() {
                 </span>
                 <div className="min-w-0">
                   <SheetTitle className="text-sm sm:text-base font-extrabold text-foreground leading-snug">
-                    Hospital Accreditation Dossier
+                    {selectedFacility?.status === "setup_required" ? "Facility Setup" : "Hospital Accreditation Dossier"}
                   </SheetTitle>
                   <SheetDescription className="text-[11px] sm:text-xs text-muted-foreground mt-0.5">
-                    Statutory healthcare establishment audit, clinical licensing, and facility profile
+                    {selectedFacility?.status === "setup_required"
+                      ? "Review the facility details and documents provided so far. Setup is not complete yet."
+                      : "Statutory healthcare establishment audit, clinical licensing, and facility profile"}
                   </SheetDescription>
                 </div>
               </div>
@@ -1107,6 +1129,8 @@ function FacilityKYCAdmin() {
                       ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                       : selectedFacility.status === "rejected"
                       ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                      : selectedFacility.status === "setup_required"
+                      ? "bg-orange-500/10 text-orange-700 border-orange-500/20"
                       : "bg-primary/10 text-primary border-primary/20"
                   )}
                 >
@@ -1117,6 +1141,8 @@ function FacilityKYCAdmin() {
                     ? "Verified Seal Active"
                     : selectedFacility.status === "rejected"
                     ? "Accreditation Rejected"
+                    : selectedFacility.status === "setup_required"
+                    ? "Registration Certificate Required"
                     : "Pending Verification"}
                 </span>
               )}
@@ -1125,6 +1151,16 @@ function FacilityKYCAdmin() {
 
           {selectedFacility && (() => {
             const facilityDocs = getFacilityDocuments(selectedFacility);
+            const setupMissingItems = hasRegistrationDocument ? [] : ["Hospital registration certificate"];
+            const galleryPhotos = Array.from(new Set(
+              (selectedFacility.facilityPhotos || [])
+                .map((photo) => photo?.trim())
+                .filter((photo): photo is string => Boolean(photo))
+            ));
+            const locationParts = Array.from(new Set(
+              [selectedFacility.area, selectedFacility.city, selectedFacility.state]
+                .filter((part): part is string => Boolean(part && part !== "Not provided"))
+            ));
             return (
               <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 sm:p-6 space-y-4 sm:space-y-5">
 
@@ -1132,7 +1168,7 @@ function FacilityKYCAdmin() {
                 <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-4 shadow-xs">
                   <div className="flex flex-col xs:flex-row sm:flex-row items-start gap-3 sm:gap-4">
                     {selectedFacility.logoUrl ? (
-                      <img
+                      <FacilityImage
                         src={selectedFacility.logoUrl}
                         alt={selectedFacility.name}
                         className="h-14 w-14 sm:h-16 sm:w-16 rounded-2xl object-cover border border-border shadow-xs shrink-0"
@@ -1146,9 +1182,9 @@ function FacilityKYCAdmin() {
                     <div className="flex-1 min-w-0 w-full">
                       <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                         <h3 className="font-black text-foreground text-base sm:text-lg leading-snug break-words">{selectedFacility.name}</h3>
-                        <span className="rounded-md bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide border border-primary/20">
-                          {selectedFacility.type}
-                        </span>
+                        {selectedFacility.type && selectedFacility.type !== "Not provided"
+                          ? <span className="rounded-md bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide border border-primary/20">{selectedFacility.type}</span>
+                          : <span className="rounded-md bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-bold border border-border">Facility type not provided</span>}
                         {selectedFacility.size && (
                           <span className="rounded-md bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border border-border">
                             {selectedFacility.size}
@@ -1168,9 +1204,9 @@ function FacilityKYCAdmin() {
                             {selectedFacility.website}
                           </a>
                         </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground mt-0.5">Healthcare Institution • FALE Registered Provider</p>
-                      )}
+                      ) : selectedFacility.status !== "setup_required" ? (
+                        <p className="text-xs text-muted-foreground mt-0.5">Facility profile information provided by the hospital</p>
+                      ) : null}
 
                       {/* About Facility */}
                       {selectedFacility.about && (
@@ -1188,46 +1224,44 @@ function FacilityKYCAdmin() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-2.5 pt-2 border-t border-border/60 text-xs">
                     <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">Inpatient Beds</span>
-                      <strong className="text-foreground text-xs font-bold">{selectedFacility.beds} Beds</strong>
+                      <strong className={cn("text-xs font-bold", selectedFacility.beds ? "text-foreground" : "text-muted-foreground")}>{selectedFacility.beds ? `${selectedFacility.beds} Beds` : "Not provided"}</strong>
                     </div>
                     <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">ICU Beds</span>
-                      <strong className="text-foreground text-xs font-bold text-primary">{selectedFacility.icuBeds || 0} Critical Beds</strong>
+                      <strong className={cn("text-xs font-bold", selectedFacility.icuBeds ? "text-primary" : "text-muted-foreground")}>{selectedFacility.icuBeds ? `${selectedFacility.icuBeds} Critical Beds` : "Not provided"}</strong>
                     </div>
                     <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
-                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Location</span>
-                      <strong className="text-foreground text-xs font-bold truncate block">{selectedFacility.city}, {selectedFacility.state}</strong>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Area / Location</span>
+                      <strong className="text-foreground text-xs font-bold block break-words">{locationParts.length ? locationParts.join(", ") : <span className="font-medium text-muted-foreground">Not provided</span>}</strong>
                     </div>
                     <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">Postal PIN</span>
-                      <strong className="text-foreground text-xs font-bold">{selectedFacility.pincode || "600113"}</strong>
+                      <strong className="text-foreground text-xs font-bold">{selectedFacility.pincode || <span className="font-medium text-muted-foreground">Not provided</span>}</strong>
                     </div>
                   </div>
 
                   {/* Physical Location Address */}
-                  {selectedFacility.addressLine && (
-                    <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50 text-xs flex items-start gap-2">
-                      <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-                      <div>
-                        <span className="text-[10px] uppercase font-bold text-muted-foreground block">Hospital Physical Address</span>
-                        <p className="text-foreground font-medium">{selectedFacility.addressLine}</p>
-                      </div>
+                  <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50 text-xs flex items-start gap-2">
+                    <HiOutlineMapPin className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Hospital Physical Address</span>
+                      <p className="text-foreground font-medium break-words">{selectedFacility.addressLine || <span className="text-muted-foreground">Not provided</span>}</p>
                     </div>
-                  )}
+                  </div>
                 </div>
 
-                {/* Ally Institutional Accreditation & CEA Pre-Check Card */}
-                {(() => {
+                {/* Ally advisory facility profile pre-check */}
+                {selectedFacility.status !== "setup_required" && (() => {
                   const audit = getFacilityAiAudit(selectedFacility);
                   const isAuditing = Boolean(runningAuditIds[selectedFacility.id]);
-                  const isVerified = audit.status === "REVIEW";
+                  const isPrecheckComplete = audit.status === "REVIEW";
                   const isFlagged = audit.status === "FLAGGED";
                   const isError = audit.status === "ERROR";
 
                   return (
                     <div className="rounded-2xl border border-primary/25 bg-primary/5 p-3.5 sm:p-5 space-y-3 transition-all shadow-2xs">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                        <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div className="flex min-w-0 flex-1 items-start gap-2.5">
                           <div className="grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary border border-primary/20 shrink-0">
                             {isAuditing ? (
                               <ButtonSpinner className="h-4 w-4 animate-spin" />
@@ -1237,30 +1271,29 @@ function FacilityKYCAdmin() {
                           </div>
                           <div className="min-w-0">
                             <h5 className="font-extrabold text-xs uppercase tracking-wider text-primary leading-snug">
-                              Ally Institutional Pre-Check
+                              Ally Facility Pre-check
                             </h5>
-                            <p className="text-[11px] text-muted-foreground truncate">
+                            <p className="text-[11px] leading-4 text-muted-foreground">
                               {isAuditing
-                                ? "Running statutory CEA & accreditation checks..."
-                                : isVerified
-                                  ? "Institutional Grade · Verified Active"
+                                ? "Reviewing submitted profile details..."
+                                : isPrecheckComplete
+                                  ? "Profile pre-check complete. Human review is still required."
                                   : isFlagged
-                                    ? "Accreditation Discrepancy Flagged"
+                                    ? "A potential inconsistency needs human review."
                                     : isError
-                                      ? "Audit unavailable · Retry recommended"
-                                      : "Queued for automated Ally review"}{" "}
-                              · {selectedFacility.city}
+                                      ? "Pre-check unavailable · retry recommended"
+                                      : "Queued to review submitted profile details"}
                             </p>
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <div className="flex w-full flex-wrap items-center gap-2 pl-10 md:w-auto md:shrink-0 md:justify-end md:pl-0">
                           <span
                             className={cn(
                               "text-[10px] font-black px-2 py-0.5 rounded-full border inline-flex items-center gap-1 whitespace-nowrap",
                               isAuditing
                                 ? "bg-primary/10 text-primary border-primary/25"
-                                : isVerified
+                                : isPrecheckComplete
                                   ? "bg-primary/10 text-primary border-primary/25"
                                   : isFlagged
                                     ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25"
@@ -1271,13 +1304,13 @@ function FacilityKYCAdmin() {
                           >
                             {isAuditing
                               ? "Ally Auditing..."
-                              : isVerified
-                                ? "AI review - human verification required"
+                              : isPrecheckComplete
+                                ? "Admin review required"
                                 : isFlagged
-                                  ? "AI flagged - human review required"
+                                  ? "Potential issue flagged"
                                   : isError
-                                    ? "Ally Audit Retry"
-                                    : "Ally Audit Queued"}
+                                    ? "Pre-check failed"
+                                    : "Pre-check queued"}
                           </span>
                           <Button
                             size="sm"
@@ -1291,10 +1324,12 @@ function FacilityKYCAdmin() {
                             ) : (
                               <BotMessageSquare className="h-3.5 w-3.5 shrink-0" />
                             )}
-                            <span>{isAuditing ? "Auditing with Ally..." : "Re-audit with Ally"}</span>
+                            <span>{isAuditing ? "Checking profile..." : isPrecheckComplete || isFlagged ? "Re-run pre-check" : "Run Ally pre-check"}</span>
                           </Button>
                         </div>
                       </div>
+
+                      <p className="text-[10px] leading-4 text-muted-foreground">Advisory only: Ally does not read the uploaded certificate or check official registries. Only an admin can verify and approve this facility.</p>
 
                       <div className="max-h-36 sm:max-h-44 overflow-y-auto pr-1.5 [scrollbar-width:thin] text-xs text-foreground/90 leading-relaxed space-y-2 pt-2 border-t border-primary/15">
                         <p className="flex items-start gap-2">
@@ -1329,12 +1364,12 @@ function FacilityKYCAdmin() {
                   );
                 })()}
 
-                {/* 2. Statutory Accreditation & Licensing Audit */}
-                <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3.5 shadow-xs">
+                {/* 2. Registration details and optional credentials */}
+                {selectedFacility.status !== "setup_required" && <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3.5 shadow-xs">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                       <HiOutlineShieldCheck className="h-4 w-4 text-primary" />
-                      <span>Statutory Accreditations & Licenses</span>
+                      <span>Registration &amp; Optional Credentials</span>
                     </h4>
                     <span className="text-[11px] font-bold text-primary px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20">
                       {selectedFacility.accreditation}
@@ -1343,46 +1378,59 @@ function FacilityKYCAdmin() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                     <div className="p-3 rounded-xl bg-muted/30 border border-border/50 space-y-1">
-                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Clinical Establishment Act (CEA)</span>
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground block">Facility registration / licence number</span>
                       <div className="font-mono text-xs font-bold text-foreground break-all">
-                        {selectedFacility.licenseNumber}
+                        {selectedFacility.licenseNumber !== "Not provided" ? selectedFacility.licenseNumber : <span className="font-sans font-medium text-muted-foreground">Not provided</span>}
                       </div>
-                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium block">
-                        State Health Directorate Verified
+                      <span className="text-[10px] text-muted-foreground font-medium block">
+                        Profile detail; the uploaded certificate is reviewed separately
                       </span>
                     </div>
 
                     <div className="p-3 rounded-xl bg-muted/30 border border-border/50 space-y-1">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">NABH / NABL Accreditation</span>
                       <div className="font-mono text-xs font-bold text-primary break-all">
-                        {selectedFacility.nabhNumber || "NABH-STATE-REGISTERED"}
+                        {selectedFacility.nabhNumber || <span className="font-sans font-medium text-muted-foreground">Not provided</span>}
                       </div>
                       <span className="text-[10px] text-muted-foreground block">
-                        Quality Council of India National Registry
+                        Optional accreditation reference
                       </span>
                     </div>
 
                     <div className="p-3 rounded-xl bg-muted/30 border border-border/50 space-y-1">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">GSTIN Tax Registration</span>
                       <div className="font-mono text-xs font-bold text-foreground break-all">
-                        {selectedFacility.gst || "GST Exempt / Unregistered"}
+                        {selectedFacility.gst || <span className="font-sans font-medium text-muted-foreground">Not provided</span>}
                       </div>
                       <span className="text-[10px] text-muted-foreground block">
-                        Ministry of Finance Corporate Seal
+                        Optional tax registration
                       </span>
                     </div>
 
                     <div className="p-3 rounded-xl bg-muted/30 border border-border/50 space-y-1">
                       <span className="text-[10px] uppercase font-bold text-muted-foreground block">Accreditation Tier</span>
                       <div className="font-bold text-xs text-foreground">
-                        {selectedFacility.accreditationLevel || selectedFacility.accreditation}
+                        {selectedFacility.accreditationLevel || <span className="font-medium text-muted-foreground">Not provided</span>}
                       </div>
                       <span className="text-[10px] text-muted-foreground block">
-                        Certified Hospital Establishment
+                        Optional facility accreditation
                       </span>
                     </div>
                   </div>
-                </div>
+                </div>}
+
+                {selectedFacility.status === "setup_required" && (
+                  <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4 sm:p-5 space-y-2.5">
+                    <h4 className="text-sm font-bold text-foreground">Still needed before review</h4>
+                    {setupMissingItems.length > 0 ? (
+                      <ul className="list-inside list-disc space-y-1 text-xs leading-relaxed text-muted-foreground">
+                        {setupMissingItems.map((item) => <li key={item}>{item}</li>)}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Refresh the facility list to update its setup status.</p>
+                    )}
+                  </div>
+                )}
 
                 {/* 3. UPLOADED VERIFICATION DOCUMENTS (Dossier) */}
                 <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-4 shadow-xs">
@@ -1395,16 +1443,14 @@ function FacilityKYCAdmin() {
                         Uploaded Verification Documents ({facilityDocs.length})
                       </span>
                     </div>
-                    <span className="text-[11px] text-muted-foreground font-semibold">
-                      Cryptographically Secured
-                    </span>
+                    {selectedFacility.status !== "setup_required" && <span className="text-[11px] text-muted-foreground font-semibold">Documents submitted for review</span>}
                   </div>
 
                   {/* List of uploaded dynamic documents */}
                   <div className="space-y-2.5">
                     {facilityDocs.length === 0 ? (
                       <div className="p-4 text-center text-xs text-muted-foreground border border-dashed rounded-xl">
-                        No verification documents uploaded.
+                        {selectedFacility.status === "setup_required" ? "No verification documents uploaded yet." : "No verification documents uploaded."}
                       </div>
                     ) : (
                       facilityDocs.map((doc, idx) => {
@@ -1501,11 +1547,9 @@ function FacilityKYCAdmin() {
                   <div className="flex flex-wrap sm:flex-nowrap items-start justify-between gap-2.5 sm:gap-4 p-3 sm:p-3.5 rounded-xl bg-muted/30 border border-border/50">
                     <div className="space-y-1 min-w-0">
                       <div className="font-bold text-foreground text-sm">{selectedFacility.contactPerson}</div>
-                      <p className="text-xs text-muted-foreground font-medium">{selectedFacility.designation || "Hospital Superintendent / Administrator"}</p>
+                      {selectedFacility.designation && selectedFacility.designation !== "Not provided" && <p className="text-xs text-muted-foreground font-medium">{selectedFacility.designation}</p>}
                     </div>
-                    <span className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20 text-xs font-bold shrink-0">
-                      Verified Signatory
-                    </span>
+                    {selectedFacility.status === "verified" && <span className="px-2.5 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20 text-xs font-bold shrink-0">Verified Signatory</span>}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1513,9 +1557,7 @@ function FacilityKYCAdmin() {
                       <HiOutlinePhone className="h-4 w-4 text-primary shrink-0" />
                       <div className="min-w-0">
                         <span className="text-[10px] uppercase font-bold text-muted-foreground block">Direct Contact Line</span>
-                        <a href={`tel:${selectedFacility.contactPhone}`} className="font-bold text-foreground hover:text-primary transition-colors">
-                          {selectedFacility.contactPhone}
-                        </a>
+                        {selectedFacility.contactPhone && selectedFacility.contactPhone !== "Not provided" ? <a href={`tel:${selectedFacility.contactPhone}`} className="font-bold text-foreground hover:text-primary transition-colors">{selectedFacility.contactPhone}</a> : <span className="font-medium text-muted-foreground">Not provided</span>}
                       </div>
                     </div>
 
@@ -1523,15 +1565,14 @@ function FacilityKYCAdmin() {
                       <HiOutlineEnvelope className="h-4 w-4 text-primary shrink-0" />
                       <div className="min-w-0">
                         <span className="text-[10px] uppercase font-bold text-muted-foreground block">Official Email</span>
-                        <a href={`mailto:${selectedFacility.contactEmail || "admin@hospital.org"}`} className="font-bold text-foreground hover:text-primary transition-colors truncate block">
-                          {selectedFacility.contactEmail || "admin@hospital.org"}
-                        </a>
+                        {selectedFacility.contactEmail ? <a href={`mailto:${selectedFacility.contactEmail}`} className="font-bold text-foreground hover:text-primary transition-colors truncate block">{selectedFacility.contactEmail}</a> : <span className="font-medium text-muted-foreground">Not provided</span>}
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {/* 5. Clinical Departments */}
+                {Boolean(selectedFacility.departments?.length) && (
                 <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3 shadow-xs">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
@@ -1565,8 +1606,10 @@ function FacilityKYCAdmin() {
                     )}
                   </div>
                 </div>
+                )}
 
                 {/* 6. Active Recruitment & Hiring Needs */}
+                {Boolean(selectedFacility.hiringNeeds?.length) && (
                 <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3 shadow-xs">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
@@ -1600,27 +1643,24 @@ function FacilityKYCAdmin() {
                     )}
                   </div>
                 </div>
+                )}
 
                 {/* 7. Facility Photos (if present) */}
-                {selectedFacility.facilityPhotos && selectedFacility.facilityPhotos.length > 0 && (
+                {galleryPhotos.length > 0 && (
                   <div className="rounded-2xl border border-border bg-card p-3.5 sm:p-5 space-y-3 shadow-xs">
                     <h4 className="font-bold text-foreground text-xs uppercase tracking-wider">
                       Infrastructure & Facility Gallery
                     </h4>
                     <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-2.5">
-                      {selectedFacility.facilityPhotos.map((photo, idx) => (
-                        <img
-                          key={idx}
-                          src={photo}
-                          alt={`Facility ${idx + 1}`}
-                          className="h-24 w-full rounded-xl object-cover border border-border shadow-2xs hover:opacity-90 transition-opacity"
-                        />
+                      {galleryPhotos.map((photo, idx) => (
+                        <FacilityGalleryPhoto key={photo} src={photo} index={idx} />
                       ))}
                     </div>
                   </div>
                 )}
 
                 {/* 8. Regulatory Compliance & Audit Trail */}
+                {selectedFacility.status !== "setup_required" && (
                 <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3.5 shadow-xs">
                   <h4 className="font-bold text-foreground text-xs uppercase tracking-wider flex items-center gap-1.5">
                     <HiOutlineClock className="h-4 w-4 text-primary" />
@@ -1660,6 +1700,7 @@ function FacilityKYCAdmin() {
                     </div>
                   </div>
                 </div>
+                )}
 
               </div>
             );
@@ -1730,7 +1771,7 @@ function FacilityKYCAdmin() {
       {/* Full Document Viewer Modal (Inline PDF Preview with Download & Full Tab, Exactly like Candidate) */}
       <Dialog open={Boolean(previewDoc)} onOpenChange={(open) => !open && setPreviewDoc(null)}>
         <DialogContent
-          className="w-full sm:w-[94vw] max-w-4xl h-[90dvh] sm:h-[88vh] max-h-[92dvh] sm:max-h-[88vh] p-0 flex flex-col gap-0 overflow-hidden rounded-t-3xl rounded-b-none sm:rounded-2xl border-border bg-card"
+          className="inset-x-0 bottom-0 top-auto h-[88dvh] max-h-[88dvh] w-full max-w-none rounded-t-3xl rounded-b-none border-x-0 border-b-0 p-0 flex flex-col gap-0 overflow-hidden bg-card data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom sm:inset-x-auto sm:left-[50%] sm:top-[50%] sm:bottom-auto sm:h-[88vh] sm:max-h-[88vh] sm:w-[94vw] sm:max-w-4xl sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-2xl sm:border sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=closed]:slide-out-to-bottom-0"
           aria-describedby="facility-dialog-desc"
         >
           <span id="facility-dialog-desc" className="sr-only">

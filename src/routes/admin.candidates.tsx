@@ -130,6 +130,19 @@ function displayOrMissing(value?: string | number | null) {
   return String(value);
 }
 
+function formatExpectedCompletion(month?: string | null, year?: number | string | null) {
+  const match = month?.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
+  if (match) {
+    const monthNumber = Number(match[2]);
+    if (monthNumber >= 1 && monthNumber <= 12) {
+      return new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(
+        new Date(Number(match[1]), monthNumber - 1, 1),
+      );
+    }
+  }
+  return displayOrMissing(year);
+}
+
 function extractIndianPincode(address?: string | null) {
   return address?.match(/(?:^|\D)([1-9]\d{5})(?=\D|$)/)?.[1] || "";
 }
@@ -544,6 +557,7 @@ function CandidateKYCAdmin() {
           studyYear: dto.studyYear,
           universityRegNo: dto.universityRegNo,
           expectedGraduationYear: dto.expectedGraduationYear,
+          expectedGraduationMonth: dto.expectedGraduationMonth,
           profession: dto.profession || dto.specialty || "",
           specialty: dto.specialty,
           subSpecialties: dto.subSpecialties,
@@ -1548,7 +1562,7 @@ function CandidateKYCAdmin() {
                     <span className="text-[10px] font-bold uppercase text-muted-foreground block">Degree / Course</span>
                     <strong className="text-foreground text-xs font-bold block">{displayOrMissing(selectedCandidate.course || selectedCandidate.qualification)}</strong>
                     <span className="text-[10px] text-muted-foreground block">
-                      Expected graduation: {displayOrMissing(selectedCandidate.expectedGraduationYear)}
+                      {selectedCandidate.studyYear?.toLowerCase().includes("internship") || selectedCandidate.studyYear?.toLowerCase().includes("clinical training") ? "Expected completion" : "Expected graduation"}: {formatExpectedCompletion(selectedCandidate.expectedGraduationMonth, selectedCandidate.expectedGraduationYear)}
                     </span>
                   </div>
                 </div>
@@ -1645,66 +1659,52 @@ function CandidateKYCAdmin() {
                 )}
               </div>
 
-              {/* 5. Work Preferences, Availability & Compensation */}
+              {/* 5. Student study details or graduate work preferences */}
               <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-3.5 shadow-xs">
                 <div className="flex items-center gap-2">
                   <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary">
-                    <HiOutlineClock className="h-4 w-4" />
+                    {selectedCandidate.isStudent ? <HiOutlineAcademicCap className="h-4 w-4" /> : <HiOutlineClock className="h-4 w-4" />}
                   </span>
                   <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                    Work Preferences & Compensation
+                    {selectedCandidate.isStudent ? "Study & Internship Preferences" : "Work Preferences & Compensation"}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
-                  <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Availability</span>
-                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.availability)}</strong>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Notice Period</span>
-                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.noticePeriod)}</strong>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Employment Type</span>
-                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.employmentType)}</strong>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Open to Work</span>
-                    <strong className={selectedCandidate.openToWork ? "text-emerald-600 font-bold" : "text-muted-foreground font-bold"}>
-                      {selectedCandidate.openToWork === undefined || selectedCandidate.openToWork === null ? "Not provided" : selectedCandidate.openToWork ? "Yes" : "No"}
-                    </strong>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Willing to Relocate</span>
-                    <strong className="text-foreground font-bold">{selectedCandidate.relocate ? "Yes" : "Not specified"}</strong>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">Current Compensation</span>
-                    <strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.currentSalary)}</strong>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 col-span-1 sm:col-span-2">
-                    <span className="text-[10px] uppercase font-bold text-primary block">Expected Salary</span>
-                    <strong className="text-primary font-black text-sm block tracking-wide">
-                      {getExpectedSalaryText(selectedCandidate.expectedSalaryMinPaise, selectedCandidate.expectedSalaryMaxPaise)}
-                    </strong>
-                  </div>
-                </div>
-
-                {/* Preferred Cities */}
-                {Boolean(selectedCandidate.preferredCities?.length) && (
-                  <div className="pt-1 space-y-1.5 text-xs">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
-                      Preferred Duty Cities
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedCandidate.preferredCities.map((city, idx) => (
-                        <span key={idx} className="px-2 py-0.5 rounded-md bg-muted text-foreground text-[11px] font-semibold border border-border">
-                          {city}
-                        </span>
-                      ))}
+                {selectedCandidate.isStudent ? (
+                  <>
+                    <div className="grid grid-cols-1 gap-2.5 text-xs sm:grid-cols-2 md:grid-cols-4">
+                      <div className="rounded-xl border border-border/50 bg-muted/30 p-2.5"><span className="block text-[10px] font-bold uppercase text-muted-foreground">Course</span><strong className="font-bold text-foreground">{displayOrMissing(selectedCandidate.course || selectedCandidate.qualification)}</strong></div>
+                      <div className="rounded-xl border border-border/50 bg-muted/30 p-2.5"><span className="block text-[10px] font-bold uppercase text-muted-foreground">College / institution</span><strong className="font-bold text-foreground">{displayOrMissing(selectedCandidate.college)}</strong></div>
+                      <div className="rounded-xl border border-border/50 bg-muted/30 p-2.5"><span className="block text-[10px] font-bold uppercase text-muted-foreground">Year of study / training</span><strong className="font-bold text-foreground">{displayOrMissing(selectedCandidate.studyYear)}</strong></div>
+                      <div className="rounded-xl border border-border/50 bg-muted/30 p-2.5"><span className="block text-[10px] font-bold uppercase text-muted-foreground">{selectedCandidate.studyYear?.toLowerCase().includes("internship") || selectedCandidate.studyYear?.toLowerCase().includes("training") ? "Expected completion" : "Expected graduation"}</span><strong className="font-bold text-foreground">{formatExpectedCompletion(selectedCandidate.expectedGraduationMonth, selectedCandidate.expectedGraduationYear)}</strong></div>
+                      {selectedCandidate.universityRegNo?.trim() && <div className="rounded-xl border border-border/50 bg-muted/30 p-2.5 sm:col-span-2"><span className="block text-[10px] font-bold uppercase text-muted-foreground">University registration number</span><strong className="break-all font-bold text-foreground">{selectedCandidate.universityRegNo}</strong></div>}
                     </div>
-                  </div>
+
+                    <div className="border-t border-border/70 pt-3">
+                      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Internship preferences</p>
+                      <div className="grid grid-cols-1 gap-2.5 text-xs sm:grid-cols-2 md:grid-cols-4">
+                        {selectedCandidate.openToWork !== undefined && selectedCandidate.openToWork !== null && <div className="rounded-xl border border-border/50 bg-muted/30 p-2.5"><span className="block text-[10px] font-bold uppercase text-muted-foreground">Open to internships</span><strong className={selectedCandidate.openToWork ? "font-bold text-emerald-600" : "font-bold text-muted-foreground"}>{selectedCandidate.openToWork ? "Yes" : "Paused"}</strong></div>}
+                        {selectedCandidate.availability?.trim() && <div className="rounded-xl border border-border/50 bg-muted/30 p-2.5"><span className="block text-[10px] font-bold uppercase text-muted-foreground">Availability</span><strong className="font-bold text-foreground">{selectedCandidate.availability}</strong></div>}
+                        {selectedCandidate.employmentType?.trim() && <div className="rounded-xl border border-border/50 bg-muted/30 p-2.5"><span className="block text-[10px] font-bold uppercase text-muted-foreground">Opportunity type</span><strong className="font-bold text-foreground">{selectedCandidate.employmentType}</strong></div>}
+                        {(selectedCandidate.expectedSalaryMinPaise || selectedCandidate.expectedSalaryMaxPaise) && <div className="rounded-xl border border-primary/20 bg-primary/5 p-2.5"><span className="block text-[10px] font-bold uppercase text-primary">Expected monthly stipend</span><strong className="block text-sm font-black tracking-wide text-primary">{getExpectedSalaryText(selectedCandidate.expectedSalaryMinPaise, selectedCandidate.expectedSalaryMaxPaise)}</strong></div>}
+                      </div>
+                      {Boolean(selectedCandidate.preferredCities?.length) && <div className="mt-3 space-y-1.5 text-xs"><span className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Preferred internship locations</span><div className="flex flex-wrap gap-1.5">{selectedCandidate.preferredCities!.map((city, idx) => <span key={`${city}-${idx}`} className="rounded-md border border-border bg-muted px-2 py-0.5 text-[11px] font-semibold text-foreground">{city}</span>)}</div></div>}
+                      {!selectedCandidate.availability?.trim() && !selectedCandidate.employmentType?.trim() && !selectedCandidate.preferredCities?.length && !selectedCandidate.expectedSalaryMinPaise && !selectedCandidate.expectedSalaryMaxPaise && <p className="text-xs text-muted-foreground">No additional internship preferences provided.</p>}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 gap-2.5 text-xs sm:grid-cols-2 md:grid-cols-4">
+                      <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50"><span className="text-[10px] uppercase font-bold text-muted-foreground block">Availability</span><strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.availability)}</strong></div>
+                      <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50"><span className="text-[10px] uppercase font-bold text-muted-foreground block">Notice Period</span><strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.noticePeriod)}</strong></div>
+                      <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50"><span className="text-[10px] uppercase font-bold text-muted-foreground block">Employment Type</span><strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.employmentType)}</strong></div>
+                      <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50"><span className="text-[10px] uppercase font-bold text-muted-foreground block">Open to Work</span><strong className={selectedCandidate.openToWork ? "text-emerald-600 font-bold" : "text-muted-foreground font-bold"}>{selectedCandidate.openToWork === undefined || selectedCandidate.openToWork === null ? "Not provided" : selectedCandidate.openToWork ? "Yes" : "No"}</strong></div>
+                      <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50"><span className="text-[10px] uppercase font-bold text-muted-foreground block">Willing to Relocate</span><strong className="text-foreground font-bold">{selectedCandidate.relocate ? "Yes" : "Not specified"}</strong></div>
+                      <div className="p-2.5 rounded-xl bg-muted/30 border border-border/50"><span className="text-[10px] uppercase font-bold text-muted-foreground block">Current Compensation</span><strong className="text-foreground font-bold">{displayOrMissing(selectedCandidate.currentSalary)}</strong></div>
+                      <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 col-span-1 sm:col-span-2"><span className="text-[10px] uppercase font-bold text-primary block">Expected Salary</span><strong className="text-primary font-black text-sm block tracking-wide">{getExpectedSalaryText(selectedCandidate.expectedSalaryMinPaise, selectedCandidate.expectedSalaryMaxPaise)}</strong></div>
+                    </div>
+                    {Boolean(selectedCandidate.preferredCities?.length) && <div className="pt-1 space-y-1.5 text-xs"><span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">Preferred Duty Cities</span><div className="flex flex-wrap gap-1.5">{selectedCandidate.preferredCities!.map((city, idx) => <span key={`${city}-${idx}`} className="px-2 py-0.5 rounded-md bg-muted text-foreground text-[11px] font-semibold border border-border">{city}</span>)}</div></div>}
+                  </>
                 )}
               </div>
 

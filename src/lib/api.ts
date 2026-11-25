@@ -18,6 +18,20 @@ export function getAccessToken(): string | null {
   return inMemoryAccessToken;
 }
 
+function isAccessTokenExpiringSoon(token: string | null, leewayMs = 60_000): boolean {
+  if (!token) return false;
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return false;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const claims = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="))) as { exp?: unknown };
+    const expiresAt = typeof claims.exp === "number" ? claims.exp * 1000 : NaN;
+    return Number.isFinite(expiresAt) && expiresAt <= Date.now() + leewayMs;
+  } catch {
+    return false;
+  }
+}
+
 export function setAccessToken(token: string | null): void {
   if (token === null || token !== inMemoryAccessToken) clearReadCache();
   inMemoryAccessToken = token;
@@ -225,6 +239,9 @@ async function apiFetchNetwork<T = unknown>(endpoint: string, options: RequestOp
   const { skipAuth = false, skipRefresh = false, timeoutMs = 15000, retry = true, validate, ...init } = options;
   const cleanEndpoint = endpoint.replace(/^\/api\/v1(?=\/)/, "");
   const url = /^https?:\/\//.test(cleanEndpoint) ? cleanEndpoint : API_BASE_URL + (cleanEndpoint.startsWith("/") ? "" : "/") + cleanEndpoint;
+  if (!skipAuth && !skipRefresh && !cleanEndpoint.startsWith("/auth/") && isAccessTokenExpiringSoon(getAccessToken())) {
+    await refreshSessionData(limit);
+  }
   const headers = new Headers(init.headers);
   if (!skipAuth && getAccessToken()) headers.set("Authorization", "Bearer " + getAccessToken());
   if (shouldAttachIdempotencyKey(cleanEndpoint, init.method) && !headers.has("Idempotency-Key")) headers.set("Idempotency-Key", generateIdempotencyKey());

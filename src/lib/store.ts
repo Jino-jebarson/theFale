@@ -85,11 +85,12 @@ export interface FacilityKYCItem {
   size?: string;
   about?: string;
   website?: string;
+  area?: string;
   city: string;
   state: string;
   pincode?: string;
   addressLine?: string;
-  beds: number;
+  beds?: number;
   icuBeds?: number;
   licenseNumber: string;
   gst?: string;
@@ -105,7 +106,7 @@ export interface FacilityKYCItem {
   logoUrl?: string;
   facilityPhotos?: string[];
   docName: string;
-  status: "pending" | "verified" | "rejected";
+  status: "setup_required" | "pending" | "verified" | "rejected";
   submittedDate: string;
   notes?: string;
   documents?: any[];

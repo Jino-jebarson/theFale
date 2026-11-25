@@ -902,10 +902,13 @@ function LandingPage() {
             <div className="hosp-copy">
               <p className="label">For hospitals and clinics</p>
               <h2>
-                Hire verified healthcare professionals. <em>Pay only when you hire.</em>
+                Hire verified healthcare professionals. <em>Your first placement fee is free.</em>
               </h2>
               <p>
                 Hiring nurses, technicians and therapists takes weeks of screening calls. Tell us who you need and we do the checking, so you only meet people who fit.
+              </p>
+              <p>
+                Every new facility also receives 3 complimentary candidate contact unlocks, and the placement fee is waived for its first qualifying Fale-assisted hire. Candidate compensation remains payable.
               </p>
               <div className="row">
                 <button
@@ -960,8 +963,8 @@ function LandingPage() {
                   </svg>
                 </span>
                 <div>
-                  <h3>No upfront fee</h3>
-                  <p>You pay a placement fee only when a candidate joins. Nothing before that.</p>
+                  <h3>First placement fee waived</h3>
+                  <p>Every hospital gets its first qualifying Fale-assisted hire with no placement fee. Candidate compensation still applies.</p>
                 </div>
               </li>
               <li>

@@ -1,5 +1,6 @@
 import { usePageLoad } from "@/hooks/use-page-load";
 import { RequestError } from "@/components/fale/RequestError";
+import { FacilityImage } from "@/components/fale/FacilityImage";
 import { useState, useEffect, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
@@ -22,6 +23,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { FlowAIFloatingButton } from "./FlowAIFloatingButton";
 import { useApp, setState, Portal, setUnreadNotificationCount } from "@/lib/store";
 import { useTheme } from "@/lib/theme";
+import { useLanguage, type InterfaceLanguage } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { calculateCandidateProfileStrength } from "@/lib/profileStrength";
 import {
@@ -131,8 +133,7 @@ export function UserAvatar({
   size?: "sm" | "md" | "lg";
   className?: string;
 }) {
-  const [imgError, setImgError] = useState(false);
-  const showImg = Boolean(avatarUrl && !imgError);
+  const showImg = Boolean(avatarUrl);
 
   const sizeClasses = {
     sm: "h-8 w-8 text-[11px]",
@@ -144,16 +145,11 @@ export function UserAvatar({
 
   if (showImg) {
     return (
-      <img
+      <FacilityImage
         src={avatarUrl}
         alt={name || "User Avatar"}
-        onError={() => setImgError(true)}
-        className={cn(
-          sizeClasses,
-          roundedClasses,
-          "object-cover border border-border/70 shadow-2xs shrink-0 ring-1 ring-border/40 bg-card",
-          className
-        )}
+        fallback={<span className={cn("grid place-items-center font-bold text-primary-foreground shadow-2xs shrink-0 bg-primary", sizeClasses, roundedClasses, className)}>{initials(name)}</span>}
+        className={cn(sizeClasses, roundedClasses, "object-cover border border-border/70 shadow-2xs shrink-0 ring-1 ring-border/40 bg-card", className)}
       />
     );
   }
@@ -183,6 +179,9 @@ function AccountMenuContent({
   profile,
   theme,
   setTheme,
+  language,
+  onLanguageChange,
+  t,
   switchPortal,
   onNavigate,
   onSignOut,
@@ -192,11 +191,15 @@ function AccountMenuContent({
   profile: Record<string, any>;
   theme: string;
   setTheme: (t: "light" | "dark" | "system") => void;
+  language: InterfaceLanguage;
+  onLanguageChange: (language: InterfaceLanguage) => void;
+  t: (text: string) => string;
   switchPortal: (p: Portal) => void;
   onNavigate: (path: string) => void;
   onSignOut: () => void;
 }) {
   const s = useApp();
+  const { languages } = useLanguage();
   const avatarUrl = profile["avatar"] || profile["logoUrl"] || profile["photoUrl"];
   return (
     <div className="w-full space-y-2">
@@ -248,8 +251,8 @@ function AccountMenuContent({
               <HiOutlineBuildingOffice2 className="h-4 w-4" />
             </span>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-foreground">Hospital Profile & Verification</p>
-              <p className="text-[10px] text-muted-foreground">Manage accreditation & campus info</p>
+              <p className="text-xs font-bold text-foreground">{t("Hospital Profile & Verification")}</p>
+              <p className="text-[10px] text-muted-foreground">{t("Manage accreditation & campus info")}</p>
             </div>
           </button>
         )}
@@ -266,12 +269,12 @@ function AccountMenuContent({
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold text-foreground">
-                  {profile["level"] === "student" ? "Profile" : "Profile & Verified CV"}
+                  {t(profile["level"] === "student" ? "Profile" : "Profile & Verified CV")}
                 </p>
                 <p className="text-[10px] text-muted-foreground">
                   {profile["level"] === "student"
-                    ? "College affiliation & verification"
-                    : "Council registrations & DigiLocker KYC"}
+                    ? t("College affiliation & verification")
+                    : t("Council registrations & DigiLocker KYC")}
                 </p>
               </div>
             </button>
@@ -356,11 +359,24 @@ function AccountMenuContent({
 
       <div className="h-px bg-border/60 my-1" />
 
+      <div className="px-1.5 py-1">
+        <label htmlFor="interface-language" className="mb-1.5 block px-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground">{t("Language")}</label>
+        <select
+          id="interface-language"
+          value={language}
+          onChange={(event) => onLanguageChange(event.target.value as InterfaceLanguage)}
+          className="h-10 w-full cursor-pointer rounded-xl border border-border bg-card px-3 text-xs font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+          aria-label={t("Interface language")}
+        >
+          {languages.map((option) => <option key={option.code} value={option.code}>{option.nativeName}</option>)}
+        </select>
+      </div>
+
       {/* Appearance / Theme Segmented Selector */}
       <div className="px-1.5 py-1">
         <div className="flex items-center justify-between px-1 mb-1.5">
           <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
-            Appearance
+            {t("Appearance")}
           </span>
         </div>
         <div className="grid grid-cols-3 gap-1 rounded-2xl bg-muted/50 p-1 border border-border/40">
@@ -375,7 +391,7 @@ function AccountMenuContent({
             )}
           >
             <HiOutlineSun className="h-3.5 w-3.5 text-amber-500" />
-            <span>Light</span>
+            <span>{t("Light")}</span>
           </button>
           <button
             type="button"
@@ -388,7 +404,7 @@ function AccountMenuContent({
             )}
           >
             <HiOutlineMoon className="h-3.5 w-3.5 text-sky-400" />
-            <span>Dark</span>
+            <span>{t("Dark")}</span>
           </button>
           <button
             type="button"
@@ -401,7 +417,7 @@ function AccountMenuContent({
             )}
           >
             <HiOutlineComputerDesktop className="h-3.5 w-3.5" />
-            <span>System</span>
+            <span>{t("System")}</span>
           </button>
         </div>
       </div>
@@ -417,7 +433,7 @@ function AccountMenuContent({
         <span className="grid h-8 w-8 place-items-center rounded-xl bg-destructive/10 text-destructive shrink-0">
           <HiOutlineArrowRightOnRectangle className="h-4 w-4" />
         </span>
-        <span>Sign out of session</span>
+        <span>{t("Sign out of session")}</span>
       </button>
     </div>
   );
@@ -427,6 +443,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const profileLoad = usePageLoad();
   const s = useApp();
   const { theme, setTheme } = useTheme();
+  const { language, setLanguage, t } = useLanguage();
   const path = useRouterState({ select: (r) => r.location.pathname });
   const navigate = useNavigate();
 
@@ -675,7 +692,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             profession: profileData.profession || (profileData.isStudent ? profileData.course : ""),
             specialty: profileData.specialty,
             qualification: profileData.qualification,
+            course: profileData.course,
             college: profileData.college,
+            studyYear: profileData.studyYear,
+            expectedGraduationMonth: profileData.expectedGraduationMonth,
             skills: profileData.skills,
             languages: profileData.languages,
             experienceHistory: profileData.experienceHistory,
@@ -861,8 +881,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                       </span>
                     )}
                   </div>
-                  <span className="leading-none hidden xl:inline">{n.label}</span>
-                  <span className="leading-none inline xl:hidden">{shortLabel}</span>
+                  <span className="leading-none hidden xl:inline">{t(n.label)}</span>
+                  <span className="leading-none inline xl:hidden">{t(shortLabel)}</span>
                   {on && <span className="absolute bottom-0 inset-x-2 h-0.5 rounded-t-full bg-primary" />}
                 </Link>
               );
@@ -911,6 +931,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                     profile={s.profile}
                     theme={theme}
                     setTheme={setTheme}
+                    language={language}
+                    onLanguageChange={setLanguage}
+                    t={t}
                     switchPortal={handleSwitchPortal}
                     onNavigate={handleNavigate}
                     onSignOut={handleSignOut}
@@ -952,6 +975,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                     profile={s.profile}
                     theme={theme}
                     setTheme={setTheme}
+                    language={language}
+                    onLanguageChange={setLanguage}
+                    t={t}
                     switchPortal={handleSwitchPortal}
                     onNavigate={handleNavigate}
                     onSignOut={handleSignOut}
@@ -987,7 +1013,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </span>
                 )}
               </div>
-              <span className="truncate max-w-full text-center">{shortLabel}</span>
+              <span className="truncate max-w-full text-center">{t(shortLabel)}</span>
             </Link>
           );
         })}
@@ -1018,11 +1044,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 export function PageHead({ title, sub, action }: { title: string; sub?: string; action?: ReactNode }) {
+  const { t } = useLanguage();
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight sm:text-[28px]">{title}</h1>
-        {sub && <p className="mt-1 text-sm text-muted-foreground">{sub}</p>}
+        <h1 className="text-2xl font-extrabold tracking-tight sm:text-[28px]">{t(title)}</h1>
+        {sub && <p className="mt-1 text-sm text-muted-foreground">{t(sub)}</p>}
       </div>
       {action}
     </div>

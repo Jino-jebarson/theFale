@@ -63,6 +63,7 @@ import {
   getCvPreparingToastText,
 } from "@/lib/clinicalDocumentPdf";
 import { calculateClinicalMatch, type MatchCandidateInput } from "@/lib/clinicalMatchingEngine";
+import { useLanguage } from "@/lib/i18n";
 
 export const Route = createFileRoute("/home")({
   head: () => ({
@@ -81,9 +82,16 @@ export const Route = createFileRoute("/home")({
 type FilterTab = "All" | "Top match" | "Urgent" | "Day shift" | "Internships" | "Other openings";
 
 function Home() {
+  const { t } = useLanguage();
   const pageLoad = usePageLoad();
   const jobAction = useConfirmedAction();
   const s = useApp();
+  const candidateLevel =
+    s.candidateLevel ||
+    (s.profile["level"] as any) ||
+    (s.profile["cadreLevel"] as any) ||
+    (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
+  const isStudent = candidateLevel === "student";
   const [filter, setFilter] = useState<FilterTab>("All");
   const [selectedWeekDay, setSelectedWeekDay] = useState(0);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -145,9 +153,9 @@ function Home() {
     setApplicationsLoadState("loading");
     Promise.allSettled([
       getJobs(),
-      getOpenShifts(),
+      isStudent ? Promise.resolve([] as UiShiftItem[]) : getOpenShifts(),
       getMyApplications(),
-      getMyClaims(),
+      isStudent ? Promise.resolve([] as ShiftClaimDto[]) : getMyClaims(),
       getCandidateProfile(),
       getCandidateViewStats(),
     ])
@@ -207,13 +215,11 @@ function Home() {
               : prev.docs,
           }));
         }
-        const firstFailure = results.find((result) => result.status === "rejected");
-        if (firstFailure?.status === "rejected") pageLoad.fail(firstFailure.reason);
       }).catch(pageLoad.fail)
       .finally(() => {
         setLoading(false);
       });
-  }, [pageLoad.retryKey]);
+  }, [pageLoad.retryKey, isStudent]);
 
   useEffect(() => {
     let active = true;
@@ -232,12 +238,6 @@ function Home() {
     return () => { active = false; };
   }, [huddleRetryKey]);
 
-  const candidateLevel =
-    s.candidateLevel ||
-    (s.profile["level"] as any) ||
-    (s.profile["cadreLevel"] as any) ||
-    (s.profile["exp"] === "Fresher" ? "fresher" : "professional");
-  const isStudent = candidateLevel === "student";
   const candidateKycStatus = String(liveCandidateProfile?.kycStatus || s.profile["kycStatus"] || "PENDING").toUpperCase();
   const isCandidateVerified = candidateKycStatus === "VERIFIED";
   const isCandidateRejected = candidateKycStatus === "REJECTED";
@@ -251,9 +251,9 @@ function Home() {
     : requiredGraduateDocumentTypes.every((type) => candidateVerificationDocs.some((doc) => doc.documentType === type));
   const isCandidateReviewInProgress = candidateKycStatus === "PENDING" && hasRequiredVerificationDocuments;
 
-  const courseName = String(s.profile["course"] || "Allied Health Sciences");
-  const collegeName = String(s.profile["college"] || "Healthcare Academy");
-  const studyYear = String(s.profile["studyYear"] || "Final Year");
+  const courseName = String(liveCandidateProfile?.course || s.profile["course"] || "").trim();
+  const collegeName = String(liveCandidateProfile?.college || s.profile["college"] || "").trim();
+  const studyYear = String(liveCandidateProfile?.studyYear || s.profile["studyYear"] || "").trim();
   const candidateLocation = [s.profile["city"], s.profile["state"]]
     .map((value) => String(value || "").trim())
     .filter((value, index, values) => value && values.indexOf(value) === index)
@@ -261,9 +261,9 @@ function Home() {
 
   const fullName = String(s.profile["name"] || (isStudent ? "Healthcare Student" : "Healthcare Professional")).trim();
   const firstName = fullName.split(" ")[0]?.replace(",", "") || "there";
-  const roleName = isStudent ? `Student (${courseName})` : String(s.profile["role"] || "Doctor");
-  const specialty = isStudent ? `${courseName} · ${collegeName}` : String(s.profile["specialty"] || "General medicine");
-  const roleIllustration = getRoleIllustration(isStudent ? courseName : roleName);
+  const roleName = isStudent ? `Student${courseName ? ` (${courseName})` : ""}` : String(s.profile["role"] || "Doctor");
+  const specialty = isStudent ? [courseName, collegeName].filter(Boolean).join(" · ") || "Student" : String(s.profile["specialty"] || "General medicine");
+  const roleIllustration = getRoleIllustration(isStudent ? courseName || "Student" : roleName);
 
   // Keep dashboard completeness in sync with the candidate profile page.
   const completeness = useMemo(() => {
@@ -271,31 +271,34 @@ function Home() {
     const profileValue = (key: string) => String(s.profile[key] || "");
     const experienceLevel = candidate?.experienceYears || profileValue("exp");
     const candidateLevelValue = String(candidate?.candidateLevel?.toLowerCase() || s.profile["level"] || s.profile["cadreLevel"] || (experienceLevel.toLowerCase() === "fresher" ? "fresher" : "professional"));
-    const skills = candidate?.skills || (Array.isArray(s.profile["skills"]) ? s.profile["skills"] as string[] : []);
-    const languages = candidate?.languages || (Array.isArray(s.profile["languages"]) ? s.profile["languages"] as string[] : []);
-    const preferredCities = candidate?.preferredCities || (Array.isArray(s.profile["preferredCities"])
+    const skills = candidate ? candidate.skills || [] : (Array.isArray(s.profile["skills"]) ? s.profile["skills"] as string[] : []);
+    const languages = candidate ? candidate.languages || [] : (Array.isArray(s.profile["languages"]) ? s.profile["languages"] as string[] : []);
+    const preferredCities = candidate ? candidate.preferredCities || [] : (Array.isArray(s.profile["preferredCities"])
       ? s.profile["preferredCities"] as string[]
       : Array.isArray(s.profile["preferredCity"])
         ? s.profile["preferredCity"] as string[]
         : typeof s.profile["preferredCity"] === "string" ? s.profile["preferredCity"].split(",").map((city) => city.trim()).filter(Boolean) : []);
 
     return calculateCandidateProfileStrength({
-      name: candidate?.name || profileValue("name"),
-      city: candidate?.city || profileValue("city"),
-      email: candidate?.email || profileValue("email"),
-      profession: candidate?.profession || (candidate?.isStudent ? candidate.course : "") || profileValue("role") || profileValue("profession"),
-      specialty: candidate?.specialty || profileValue("specialty"),
-      qualification: candidate?.qualification || profileValue("qual") || profileValue("qualification"),
-      college: candidate?.college || profileValue("college") || profileValue("institution"),
+      name: candidate ? candidate.name || "Clinician" : profileValue("name"),
+      city: candidate ? candidate.city || "" : profileValue("city"),
+      email: candidate ? candidate.email || "" : profileValue("email"),
+      profession: candidate ? candidate.profession || (candidate.isStudent ? candidate.course : "") || "" : profileValue("role") || profileValue("profession"),
+      specialty: candidate ? candidate.specialty || "" : profileValue("specialty"),
+      qualification: candidate ? candidate.qualification || "" : profileValue("qual") || profileValue("qualification"),
+      course: candidate?.course || profileValue("course"),
+      college: candidate ? candidate.college || "" : profileValue("college") || profileValue("institution"),
+      studyYear: candidate?.studyYear || profileValue("studyYear"),
+      expectedGraduationMonth: candidate?.expectedGraduationMonth || profileValue("expectedGraduationMonth"),
       skills,
       languages,
-      experienceHistory: candidate?.experienceHistory || (Array.isArray(s.profile["exps"]) ? s.profile["exps"] : []),
+      experienceHistory: candidate ? candidate.experienceHistory || [] : (Array.isArray(s.profile["exps"]) ? s.profile["exps"] : []),
       preferredCities,
-      employmentType: candidate?.employmentType || profileValue("employmentType"),
-      availability: candidate?.availability || profileValue("availability") || profileValue("notice"),
-      bio: candidate?.bio || profileValue("bio") || profileValue("about"),
+      employmentType: candidate ? candidate.employmentType || "" : profileValue("employmentType"),
+      availability: candidate ? candidate.availability || "" : profileValue("availability") || profileValue("notice"),
+      bio: candidate ? candidate.bio || "" : profileValue("bio") || profileValue("about"),
       isStudent: candidate?.isStudent ?? isStudent,
-      isFresher: candidateLevelValue === "fresher" || experienceLevel.toLowerCase().includes("fresher"),
+      isFresher: candidate ? candidate.candidateLevel?.toUpperCase() === "FRESHER" || experienceLevel.toLowerCase().includes("fresher") : candidateLevelValue === "fresher" || experienceLevel.toLowerCase().includes("fresher"),
     });
   }, [liveCandidateProfile, s.profile, isStudent]);
 
@@ -413,14 +416,15 @@ const tabCounts = useMemo(() => {
 }, [effectiveJobs, isStudent]);
 
 const curatedRolesCount = tabCounts.All;
+const matchableJobs = isStudent ? studentInternships : effectiveJobs;
 const topMatchScore = useMemo(() => {
-  const recommended = effectiveJobs.filter((j) => (j.match ?? 0) >= 70);
-  if (!recommended.length) return effectiveJobs.length ? Math.max(...effectiveJobs.map((j) => j.match ?? 0)) : 90;
+  const recommended = matchableJobs.filter((j) => (j.match ?? 0) >= 70);
+  if (!recommended.length) return matchableJobs.length ? Math.max(...matchableJobs.map((j) => j.match ?? 0)) : 0;
   return Math.max(...recommended.map((j) => Number(j.match) || 90));
-}, [effectiveJobs]);
+}, [matchableJobs]);
 const urgentRolesCount = useMemo(() => {
-  return effectiveJobs.filter((j) => (j.match ?? 0) >= 70 && j.urgent).length;
-}, [effectiveJobs]);
+  return matchableJobs.filter((j) => (j.match ?? 0) >= 70 && j.urgent).length;
+}, [matchableJobs]);
 
 const instantShiftsCount = effectiveShifts.length;
 const minHourlyRate = useMemo(() => {
@@ -498,9 +502,9 @@ const nextStep = isCandidateRejected
       : !isCandidateVerified
         ? { title: isCandidateReviewInProgress ? "Track your credential review" : "Submit documents for verification", detail: isCandidateReviewInProgress ? "Your required documents are with our credentialing team." : "Complete verification to unlock the full candidate experience.", label: isCandidateReviewInProgress ? "View verification" : "Upload documents", to: "/profile" as const }
         : completeness < 80
-          ? { title: "Strengthen your profile", detail: "Add skills, experience and work preferences to improve your matches.", label: "Complete profile", to: "/profile" as const }
+          ? { title: isStudent ? "Strengthen your student profile" : "Strengthen your profile", detail: isStudent ? "Add skills, languages and internship preferences to improve your matches." : "Add skills, experience and work preferences to improve your matches.", label: isStudent ? "Complete student profile" : "Complete profile", to: "/profile" as const }
           : !hasUploadedResume
-            ? { title: "Add your resume", detail: "Upload your latest CV so hospitals can review your experience.", label: "Add resume", to: "/profile" as const }
+            ? { title: isStudent ? "Add your academic CV" : "Add your resume", detail: isStudent ? "Add your latest CV so hospitals can review your education and clinical experience." : "Upload your latest CV so hospitals can review your experience.", label: isStudent ? "Add academic CV" : "Add resume", to: "/profile" as const }
             : activeApplicationsCount > 0
               ? { title: "Stay on top of your applications", detail: "Review the latest updates from hospitals and follow your application progress.", label: "View applications", to: "/applications" as const }
               : { title: isStudent ? "Find an internship" : "Explore your matches", detail: "See opportunities matched to your clinical profile and preferences.", label: isStudent ? "Explore internships" : "Explore matches", to: "/jobs" as const };
@@ -719,12 +723,12 @@ return (
             <div className="flex flex-col justify-center space-y-2 min-w-0 flex-1">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-base sm:text-2xl font-black tracking-tight text-foreground leading-tight sm:leading-none">
-                  Welcome back, {firstName}
+                  {t("Welcome back")}, {firstName}
                 </h1>
                 {isCandidateVerified && (
                   <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
                     {isStudent ? <HiOutlineAcademicCap className="h-3.5 w-3.5 shrink-0" /> : <HiCheckBadge className="h-3.5 w-3.5 shrink-0" />}
-                    <span>{isStudent ? `Verified Student · ${studyYear}` : `Verified ${roleName}`}</span>
+                    <span>{isStudent ? `${t("Verified Student")}${studyYear ? ` · ${studyYear}` : ""}` : `${t("Verified")} ${roleName}`}</span>
                   </span>
                 )}
               </div>
@@ -752,7 +756,7 @@ return (
                           : "border-amber-500/25 bg-amber-500/5 text-amber-700 dark:text-amber-300",
                     )}>
                       <HiOutlineClock className="h-3.5 w-3.5 shrink-0" />
-                      <span>{isCandidateRejected ? "Update needed" : isCandidateReviewInProgress ? "Under review" : isStudent ? "Proof required" : "Documents required"}</span>
+                      <span>{t(isCandidateRejected ? "Update needed" : isCandidateReviewInProgress ? "Under review" : isStudent ? "Proof required" : "Documents required")}</span>
                     </span>
                   </>
                 )}
@@ -797,14 +801,14 @@ return (
                 className="h-10 px-5 rounded-xl font-bold text-xs bg-primary hover:bg-primary-hover text-primary-foreground shadow-none gap-2 justify-center cursor-pointer transition-all w-full sm:w-auto"
               >
                 <Link to="/jobs" search={{ q: undefined }}>
-                  <span>{isStudent ? "Explore Internships" : "Explore Matches"}</span>
+                  <span>{t(isStudent ? "Explore Internships" : "Explore Matches")}</span>
                   <HiArrowRight className="h-3.5 w-3.5" />
                 </Link>
               </Button>
             </div>
 
-            {/* Candidate Earnings Capsule Placed Below */}
-            <div className="flex items-center justify-between sm:justify-end gap-2.5 h-8.5 px-3 rounded-lg bg-primary-soft/70 hover:bg-primary-soft border border-primary/20 text-xs transition-all shadow-2xs w-full sm:w-auto">
+            {/* Shift earnings are not part of the student experience. */}
+            {!isStudent && <div className="flex items-center justify-between sm:justify-end gap-2.5 h-8.5 px-3 rounded-lg bg-primary-soft/70 hover:bg-primary-soft border border-primary/20 text-xs transition-all shadow-2xs w-full sm:w-auto">
               <div className="flex items-center gap-2 min-w-0">
                 <HiOutlineCurrencyRupee className="h-4 w-4 text-primary shrink-0" />
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground whitespace-nowrap">
@@ -838,7 +842,7 @@ return (
                   <HiArrowRight className="h-3 w-3" />
                 </Link>
               </div>
-            </div>
+            </div>}
           </div>
         </div>
       </section>
@@ -856,11 +860,11 @@ return (
           </span>
           <div className="min-w-0">
             <h2 className="text-sm font-bold text-foreground">
-              {isCandidateRejected
+              {t(isCandidateRejected
                 ? "Action needed to complete verification"
                 : isCandidateReviewInProgress
                   ? "Verification in progress"
-                  : isStudent ? "Submit proof of study for review" : "Submit your credentials for verification"}
+                  : isStudent ? "Submit proof of study for review" : "Submit your credentials for verification")}
             </h2>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {isCandidateRejected
@@ -874,7 +878,7 @@ return (
                       : "Upload a government-issued photo ID, your current council registration certificate, and your degree or provisional certificate. We’ll begin reviewing your profile once all three documents are submitted."}
             </p>
             <Link to="/profile" className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3.5 text-xs font-bold text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
-              <span>{isCandidateRejected ? "Review requested changes" : isCandidateReviewInProgress ? "Track verification status" : isStudent ? "Submit proof of study" : "Upload required documents"}</span>
+              <span>{t(isCandidateRejected ? "Review requested changes" : isCandidateReviewInProgress ? "Track verification status" : isStudent ? "Submit proof of study" : "Upload required documents")}</span>
               <HiArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
@@ -884,7 +888,7 @@ return (
       {/* ========================================================================= */}
       {/* 2. FOUR KEY CLINICAL METRIC TILES                                         */}
       {/* ========================================================================= */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <section className={cn("grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4", isStudent ? "lg:grid-cols-3" : "lg:grid-cols-4")}>
         {/* Card 1: Profile Views */}
         <Link
           to="/profile"
@@ -896,7 +900,7 @@ return (
                 <HiOutlineEye className="h-4 w-4" />
               </span>
               <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
-                PROFILE VIEWS
+                {t("PROFILE VIEWS")}
               </span>
             </div>
             <span className="shrink-0 rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
@@ -910,7 +914,7 @@ return (
               {viewStats.totalViews}
             </div>
             <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-              institutional views
+              {t("institutional views")}
             </p>
           </div>
           <div className="pt-2.5 border-t border-neutral-200 dark:border-neutral-800 text-[11px] font-semibold text-primary">
@@ -933,29 +937,29 @@ return (
                 <HiOutlineBriefcase className="h-4 w-4" />
               </span>
               <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
-                CURATED ROLES
+                {t(isStudent ? "MATCHED INTERNSHIPS" : "CURATED ROLES")}
               </span>
             </div>
             <span className="shrink-0 rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
-              Top {topMatchScore}% Match
+              {isStudent ? "Course matches" : `Top ${topMatchScore}% match`}
             </span>
           </div>
           <div>
             <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-foreground">
-              {curatedRolesCount}
+              {isStudent ? studentInternships.length : curatedRolesCount}
             </div>
             <p className="text-xs font-semibold text-muted-foreground mt-1 truncate">
-              {curatedRolesCount === 1 ? "verified vacancy" : "verified vacancies"}
+              {t(isStudent ? "internships available" : curatedRolesCount === 1 ? "verified vacancy" : "verified vacancies")}
             </p>
           </div>
           <div className="pt-2.5 border-t border-neutral-200 dark:border-neutral-800 text-[11px] font-semibold text-primary flex items-center justify-between">
-            <span>{urgentRolesCount > 0 ? `${urgentRolesCount} Urgent Openings` : "Immediate Joining"}</span>
+            <span>{isStudent ? "Browse internships" : urgentRolesCount > 0 ? `${urgentRolesCount} Urgent Openings` : "Immediate Joining"}</span>
             <HiArrowRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
           </div>
         </Link>
 
-        {/* Card 3: Instant Shifts */}
-        <Link
+        {/* Shift availability is not relevant while the candidate is a student. */}
+        {!isStudent && <Link
           to="/shifts"
           className="group rounded-2xl border border-border/80 bg-card p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-3 hover:border-primary/40 transition-colors"
         >
@@ -965,7 +969,7 @@ return (
                 <HiOutlineBolt className="h-4 w-4" />
               </span>
               <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
-                INSTANT SHIFTS
+                {t("INSTANT SHIFTS")}
               </span>
             </div>
             <span className="shrink-0 rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
@@ -984,7 +988,7 @@ return (
             <span>From ₹{minHourlyRate.toLocaleString("en-IN")}/hr</span>
             <HiArrowRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
           </div>
-        </Link>
+        </Link>}
 
         {/* Card 4: Applications Tracker */}
         <Link
@@ -997,7 +1001,7 @@ return (
                 <HiOutlineDocumentCheck className="h-4 w-4" />
               </span>
               <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-muted-foreground truncate">
-                APPLICATIONS
+                {t("APPLICATIONS")}
               </span>
             </div>
             <span className="shrink-0 rounded-full bg-primary-soft text-primary border border-primary/20 text-[10px] font-extrabold px-2 py-0.5">
@@ -1013,7 +1017,7 @@ return (
             </p>
           </div>
           <div className="pt-2.5 border-t border-neutral-200 dark:border-neutral-800 text-[11px] font-semibold text-primary flex items-center justify-between">
-            <span>Track Pipeline</span>
+            <span>{t("Track Pipeline")}</span>
             <HiArrowRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
           </div>
         </Link>
@@ -1022,19 +1026,19 @@ return (
       {/* ========================================================================= */}
       {/* 3. BALANCED 2-COLUMN COCKPIT (EXPANSIVE FEED + SMART RIGHT RAIL)          */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start w-full min-w-0">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-stretch w-full min-w-0">
 
         {/* ======================================================================= */}
         {/* PRIMARY FEED (8 COLUMNS ON DESKTOP ~67% BREATHING ROOM)                 */}
         {/* ======================================================================= */}
-        <section className="lg:col-span-8 w-full min-w-0 space-y-5">
+        <section className="flex min-w-0 flex-col space-y-5 lg:col-span-8">
           {/* Feed Filter Header & Controls */}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
             <div className="space-y-1.5 sm:space-y-2 min-w-0">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight text-foreground leading-snug">
                   {filter === "Other openings"
-                    ? "Other Healthcare Openings"
+                    ? isStudent ? "More internships to explore" : "Other Healthcare Openings"
                     : isStudent
                       ? "Recommended for You (Internships)"
                       : "Recommended Roles"}
@@ -1045,9 +1049,9 @@ return (
               </div>
               <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-xl">
                 {filter === "Other openings"
-                  ? "Explore additional hospital roles across different specialties, cities, or clinical cadres"
+                  ? isStudent ? "These internships are outside your top matches. Review them to find more options." : "Explore additional hospital roles across different specialties, cities, or clinical cadres"
                   : isStudent
-                    ? `Ranked on your verified ${courseName} course, skills, and academic profile. Full-time jobs unlock when you graduate.`
+                    ? courseName ? `Matched to your ${courseName} course, skills, and study profile. Full-time jobs become available after graduation.` : "Add your course and skills to improve internship matches. Full-time jobs become available after graduation."
                     : "Curated clinical opportunities matched to your verified credentials"}
               </p>
             </div>
@@ -1076,7 +1080,7 @@ return (
                       ? "All Internships"
                       : "All Roles"
                     : tab === "Other openings"
-                      ? "Other Openings"
+                      ? isStudent ? "More Internships" : "Other Openings"
                       : tab;
                 const isActive = filter === tab;
 
@@ -1143,7 +1147,7 @@ return (
 
           {/* Job Listings Feed */}
           {filteredJobs.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-border/80 bg-card/80 backdrop-blur-xs p-6 sm:p-10 text-center animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden shadow-xs">
+            <div className={cn("rounded-3xl border border-dashed border-border/80 bg-card/80 backdrop-blur-xs p-6 sm:p-10 text-center animate-in fade-in zoom-in-95 duration-300 relative overflow-hidden shadow-xs", isStudent && "flex flex-1 flex-col justify-center lg:min-h-[320px]")}>
               {/* Saffron ambient brand glow */}
               <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#FF5A1F]/10 dark:bg-[#FF5A1F]/15 rounded-full blur-3xl pointer-events-none" />
               <div className="absolute -bottom-16 right-10 w-48 h-48 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
@@ -1155,18 +1159,18 @@ return (
                 {/* Headline */}
                 <h3 className="text-lg sm:text-xl font-bold text-foreground tracking-tight">
                   {filter === "Other openings"
-                    ? "No other openings available"
+                    ? isStudent ? "No more internships found" : "No other openings available"
                     : filter !== "All"
-                      ? `No ${filter.toLowerCase()} roles found`
+                      ? `No ${filter.toLowerCase()} ${isStudent ? "internships" : "roles"} found`
                       : tabCounts["Other openings"] > 0
                         ? "No Direct Matches Found"
-                        : "No Clinical Openings Found"}
+                        : isStudent ? "No internships available right now" : "No Clinical Openings Found"}
                 </h3>
 
                 {/* Clean, proper message */}
                 <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-md mx-auto">
                   {filter === "Other openings"
-                    ? "All current hospital openings match your verified clinical profile."
+                    ? isStudent ? "There are no additional internships right now. Check back as hospitals post new opportunities." : "All current hospital openings match your verified clinical profile."
                     : filter !== "All"
                       ? `We couldn't find any roles matching the "${filter}" filter. Try checking all roles or exploring other hospital openings.`
                       : tabCounts["Other openings"] > 0
@@ -1175,7 +1179,7 @@ return (
                           : `${tabCounts["Other openings"]} hospital openings in other departments`
                         }. You can explore them in the Other Openings tab.`
                         : isStudent
-                          ? "There are currently no clinical internships available for your course. Check back soon as teaching hospitals update their slots regularly."
+                          ? "There are currently no clinical internships available for your course. Check back as hospitals post new opportunities."
                           : "There are no openings matching your clinical specialty right now. You can explore locum duty shifts or check back as verified hospitals post new roles."}
                 </p>
 
@@ -1188,7 +1192,7 @@ return (
                       className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary-hover text-white gap-2 shadow-none cursor-pointer"
                     >
                       <HiOutlineBriefcase className="h-4 w-4" />
-                      <span>Explore Other Openings ({tabCounts["Other openings"]})</span>
+                      <span>{isStudent ? "Explore more internships" : `Explore Other Openings (${tabCounts["Other openings"]})`}</span>
                     </Button>
                   ) : filter !== "All" ? (
                     <Button
@@ -1197,7 +1201,7 @@ return (
                       className="rounded-xl font-bold text-xs h-9 px-4 bg-primary hover:bg-primary-hover text-white gap-2 shadow-none cursor-pointer"
                     >
                       <HiOutlineArrowPath className="h-4 w-4" />
-                      <span>View Recommended Roles</span>
+                      <span>{isStudent ? "View all internships" : "View Recommended Roles"}</span>
                     </Button>
                   ) : (
                     <Button
@@ -1207,12 +1211,12 @@ return (
                     >
                       <Link to="/jobs" search={{ q: undefined }}>
                         <HiOutlineBriefcase className="h-4 w-4" />
-                        <span>Browse Job Directory</span>
+                        <span>{isStudent ? "Browse internship directory" : "Browse Job Directory"}</span>
                       </Link>
                     </Button>
                   )}
 
-                  <Button
+                  {!isStudent && <Button
                     variant="outline"
                     size="sm"
                     asChild
@@ -1222,7 +1226,7 @@ return (
                       <HiOutlineClock className="h-4 w-4 text-primary" />
                       <span>Explore Locum Shifts</span>
                     </Link>
-                  </Button>
+                  </Button>}
                 </div>
               </div>
             </div>
@@ -1431,14 +1435,14 @@ return (
             </div>
           )}
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 items-stretch gap-5 pt-1">
-            <section className="h-full rounded-3xl border border-border/80 bg-card p-5 shadow-xs xl:min-h-[330px]">
+          {!isStudent && <div className="grid grid-cols-1 xl:grid-cols-2 items-stretch gap-5 pt-1">
+            {(!isStudent || upcomingItems.length > 0) && <section className="h-full rounded-3xl border border-border/80 bg-card p-5 shadow-xs xl:min-h-[330px]">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2"><HiOutlineCalendarDays className="h-4 w-4 text-primary" /><h2 className="text-sm font-extrabold text-foreground">Your week</h2></div>
                 <Link to={isStudent ? "/applications" : "/shifts"} className="inline-flex shrink-0 items-center gap-1 text-xs font-bold text-primary transition-colors hover:text-primary-hover">View all<HiArrowRight className="h-3.5 w-3.5" /></Link>
               </div>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">Scheduled interviews and confirmed shifts</p>
+                <p className="text-xs text-muted-foreground">{isStudent ? "Upcoming internship interviews" : "Scheduled interviews and confirmed shifts"}</p>
                 <div className="inline-flex items-center rounded-full border border-border/80 bg-muted/30 p-0.5">
                   <button type="button" aria-label="Previous 7 days" title="Previous 7 days" onClick={() => { setWeekOffset((offset) => offset - 1); setSelectedWeekDay(0); }} className="grid h-7 w-7 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-card hover:text-foreground"><HiArrowLeft className="h-3.5 w-3.5" /></button>
                   <div className="min-w-[96px] px-1 text-center leading-tight"><span className="block text-[10px] font-bold text-foreground">{weekNavLabel}</span><span className="mt-0.5 block text-[9px] font-medium text-muted-foreground">{weekRangeLabel}</span></div>
@@ -1452,9 +1456,9 @@ return (
                 <h3 className="text-xs font-bold text-foreground">{weekOffset === 0 && selectedWeekDay === 0 ? "Today" : selectedDay.date.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}{selectedDay.events.length > 0 && <span className="ml-2 font-medium text-muted-foreground">{selectedDay.events.length} item{selectedDay.events.length === 1 ? "" : "s"}</span>}</h3>
                 {selectedDay.events.length ? <div className="mt-2 space-y-2">{selectedDay.events.map((item) => <Link key={item.id} to={item.kind === "Interview" ? "/applications" : "/shifts"} className="flex items-start gap-3 rounded-xl bg-muted/40 p-3 transition-colors hover:bg-muted/70"><span className={cn("mt-0.5 rounded-lg px-2 py-1 text-[10px] font-bold", item.kind === "Interview" ? "bg-sky-500/10 text-sky-700" : "bg-emerald-500/10 text-emerald-700")}>{item.kind}</span><div className="min-w-0"><p className="truncate text-xs font-bold text-foreground">{item.title}</p><p className="truncate text-[11px] text-muted-foreground">{item.subtitle}</p><p className="mt-1 text-[11px] font-semibold text-foreground">{new Date(item.when).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}<span className="ml-2 font-medium text-primary">View details →</span></p></div></Link>)}</div> : <div className="mt-3 rounded-xl bg-muted/30 px-4 py-3 text-xs leading-relaxed text-muted-foreground">You’re clear for this day. Scheduled events will appear here.</div>}
               </div>
-            </section>
+            </section>}
 
-            <section className="flex h-full flex-col rounded-3xl border border-border/80 bg-card p-5 shadow-xs xl:min-h-[330px]">
+            <section className={cn("flex h-full flex-col rounded-3xl border border-border/80 bg-card p-5 shadow-xs xl:min-h-[330px]", isStudent && upcomingItems.length === 0 && "xl:col-span-2")}>
               <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-2"><HiOutlineDocumentText className="h-4 w-4 shrink-0 text-primary" /><h2 className="text-sm font-extrabold leading-5 text-foreground">Applications</h2></div><Link to="/applications" className="shrink-0 whitespace-nowrap text-xs font-bold leading-5 text-primary hover:underline">View all</Link></div>
               <p className="mt-1 text-xs text-muted-foreground">Recent status updates from hospitals.</p>
               {applicationsLoadState === "loading" ? <div className="mt-3 flex flex-1 items-center justify-center rounded-2xl bg-muted/20 p-5 text-xs text-muted-foreground">Loading your applications…</div> : applicationsLoadState === "error" ? <div className="mt-3 flex flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-border/80 bg-muted/15 px-5 py-6 text-center"><p className="text-sm font-bold text-foreground">Applications couldn’t be loaded</p><p className="mt-1 text-xs text-muted-foreground">Your saved applications are unchanged. Try again.</p><Button type="button" variant="outline" size="sm" onClick={pageLoad.retry} className="mt-3 h-9 rounded-xl px-3.5 text-xs font-bold">Retry</Button></div> : recentApplications.length ? <div className="mt-3 flex-1 divide-y divide-border/70">{recentApplications.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 py-3 first:pt-1 last:pb-1"><div className="min-w-0"><p className="truncate text-xs font-bold text-foreground">{item.title}</p><p className="truncate text-[11px] text-muted-foreground">{item.org} · {item.updatedAt ? `Updated ${new Date(item.updatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : `Applied ${item.date}`}</p></div><span className="shrink-0 rounded-full bg-primary-soft px-2 py-1 text-[10px] font-bold text-primary">{item.status}</span></div>)}</div> : <div className="mt-3 flex flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-border/80 bg-muted/15 px-5 py-6 text-center"><span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary"><HiOutlineDocumentCheck className="h-5 w-5" /></span><p className="mt-3 text-sm font-bold text-foreground">Your applications will show here</p><p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">Apply to a matched role to follow its status and hospital updates in one place.</p><Button asChild variant="outline" size="sm" className="mt-4 h-9 rounded-xl px-3.5 text-xs font-bold"><Link to="/jobs">Explore matched roles<HiArrowRight className="ml-1.5 h-3.5 w-3.5" /></Link></Button></div>}
@@ -1469,7 +1473,7 @@ return (
                 return <Link to="/huddle" key={post.id} className="block rounded-xl bg-muted/40 p-3 transition-colors hover:bg-muted/70"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-bold uppercase tracking-wide text-primary">{post.type} · {post.field}</span><span className="shrink-0 text-[10px] text-muted-foreground">{postedAt}</span></div><p className="mt-1 line-clamp-2 text-xs font-semibold text-foreground">{isGenericVoiceNote ? `Voice note${duration ? ` · ${duration}` : ""}` : post.title || post.body}</p><p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{isGenericVoiceNote ? `Audio discussion shared by ${post.anon || post.isAnonymous ? "an anonymous member" : post.authorName || "a Huddle member"}.` : post.body}</p></Link>;
               })}</div> : <p className="mt-3 rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground">No recent discussions to show. Visit Huddle to explore the community.</p>}
             </section>
-          </div>
+          </div>}
         </section>
 
         {/* ======================================================================= */}
@@ -1492,6 +1496,28 @@ return (
               </div>
             </div>
           </section>
+
+          {isStudent && (
+            <section className="rounded-3xl border border-border/80 bg-card p-5 shadow-xs">
+              <div className="flex items-start gap-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <HiOutlineAcademicCap className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-primary">Learning</p>
+                  <h2 className="mt-1 text-sm font-extrabold text-foreground">Grow your clinical knowledge</h2>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    Explore clinical foundation modules, emergency simulations, and learning for your course.
+                  </p>
+                  <Button asChild size="sm" variant="outline" className="mt-3 h-9 rounded-xl px-3.5 text-xs font-bold shadow-none">
+                    <Link to="/learning">
+                      Explore learning<HiArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                </div>
+              </div>
+            </section>
+          )}
 
           {!isStudent && (
             <section className="rounded-3xl border border-border/80 bg-card p-5 shadow-xs">
@@ -1563,6 +1589,19 @@ return (
 
             {/* Verified Clinical Credentials Checklist */}
             <div className="space-y-2 pt-2 border-t border-border/60">
+              {isStudent ? (
+                <>
+                  <div className="flex items-center justify-between gap-3 py-1 text-xs">
+                    <span className="text-muted-foreground">Course</span>
+                    <span className="max-w-[65%] truncate text-right font-semibold text-foreground">{courseName || "Not added"}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 py-1 text-xs">
+                    <span className="text-muted-foreground">College</span>
+                    <span className="max-w-[65%] truncate text-right font-semibold text-foreground">{collegeName || "Not added"}</span>
+                  </div>
+                </>
+              ) : (
+                <>
               <div className="flex items-center justify-between text-xs py-1">
                 <span className="text-muted-foreground flex items-center gap-1.5">
                   <HiOutlineShieldCheck className={cn("h-4 w-4", isCandidateVerified ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")} />
@@ -1592,10 +1631,12 @@ return (
                   {String(s.profile["notice"] || s.profile["availability"] || "Immediate")}
                 </span>
               </div>
+                </>
+              )}
             </div>
 
             {/* Interactive Open-to-Work Toggle */}
-            <div className="pt-3 border-t border-border/60 flex items-center justify-between">
+            {!isStudent && <div className="pt-3 border-t border-border/60 flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-1.5">
                   <span
@@ -1621,11 +1662,11 @@ return (
                   className="scale-90"
                 />
               </div>
-            </div>
+            </div>}
           </div>
 
-          {/* 2. Instant Locum Shifts Widget / Student Clinical Roadmap */}
-          <div className="rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs space-y-4">
+          {/* 2. Instant locum shifts are shown to eligible professional candidates. */}
+          {!isStudent && <div className="rounded-3xl border border-border/80 bg-card p-5 sm:p-6 shadow-xs space-y-4">
             {isStudent ? (
               <>
                 <div className="flex items-center gap-2">
@@ -1768,9 +1809,80 @@ return (
                 </div>
               </>
             )}
-          </div>
+          </div>}
         </aside>
       </div>
+
+      {isStudent && (
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          <section className="rounded-3xl border border-border/80 bg-card p-5 shadow-xs">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2"><HiOutlineDocumentText className="h-4 w-4 text-primary" /><h2 className="text-sm font-extrabold text-foreground">Internship applications</h2></div>
+                <p className="mt-1 text-xs text-muted-foreground">Follow replies and interview updates from hospitals.</p>
+              </div>
+              <Link to="/applications" className="shrink-0 text-xs font-bold text-primary hover:underline">View all<HiArrowRight className="ml-1 inline h-3.5 w-3.5" /></Link>
+            </div>
+            {applicationsLoadState === "loading" ? (
+              <div className="mt-4 rounded-xl bg-muted/30 p-4 text-xs text-muted-foreground">Loading your applications...</div>
+            ) : applicationsLoadState === "error" ? (
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-dashed border-border p-4">
+                <p className="text-xs text-muted-foreground">Your applications could not be loaded.</p>
+                <Button type="button" variant="outline" size="sm" onClick={pageLoad.retry} className="h-8 rounded-lg px-3 text-xs">Retry</Button>
+              </div>
+            ) : recentApplications.length ? (
+              <div className="mt-3 divide-y divide-border/70">
+                {recentApplications.map((item) => (
+                  <Link key={item.id} to="/applications" className="flex items-center justify-between gap-3 py-3 first:pt-1 last:pb-1">
+                    <div className="min-w-0"><p className="truncate text-xs font-bold text-foreground">{item.title}</p><p className="truncate text-[11px] text-muted-foreground">{item.org} · {item.updatedAt ? `Updated ${new Date(item.updatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : `Applied ${item.date}`}</p></div>
+                    <span className="shrink-0 rounded-full bg-primary-soft px-2 py-1 text-[10px] font-bold text-primary">{item.status}</span>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-dashed border-border/80 bg-muted/15 p-5 text-center">
+                <p className="text-sm font-bold text-foreground">No internship applications yet</p>
+                <p className="mt-1 text-xs text-muted-foreground">Apply to an internship to track its status here.</p>
+                <Button asChild variant="outline" size="sm" className="mt-3 h-9 rounded-xl px-3.5 text-xs font-bold"><Link to="/jobs">Explore internships<HiArrowRight className="ml-1.5 h-3.5 w-3.5" /></Link></Button>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-3xl border border-border/80 bg-card p-5 shadow-xs">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2"><HiOutlineChatBubbleLeftRight className="h-4 w-4 text-primary" /><h2 className="text-sm font-extrabold text-foreground">From Huddle</h2></div>
+              <Link to="/huddle" className="shrink-0 text-xs font-bold text-primary hover:underline">Open Huddle<HiOutlineArrowUpRight className="ml-1 inline h-3.5 w-3.5" /></Link>
+            </div>
+            {huddleLoadState === "loading" ? (
+              <div className="mt-4 rounded-xl bg-muted/30 p-4 text-xs text-muted-foreground">Loading recent discussions...</div>
+            ) : huddleLoadState === "error" ? (
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-dashed border-border p-4">
+                <p className="text-xs text-muted-foreground">Huddle discussions could not be loaded.</p>
+                <Button type="button" variant="outline" size="sm" onClick={() => setHuddleRetryKey((key) => key + 1)} className="h-8 rounded-lg px-3 text-xs">Retry</Button>
+              </div>
+            ) : huddlePosts.length ? (
+              <div className="mt-3 divide-y divide-border/70">
+                {huddlePosts.map((post) => (
+                  <Link key={post.id} to="/huddle" className="block py-3 first:pt-1 last:pb-1">
+                    <div className="flex items-center justify-between gap-2"><span className="text-[10px] font-bold uppercase tracking-wide text-primary">{post.type} · {post.field}</span><span className="shrink-0 text-[10px] text-muted-foreground">{post.createdAt ? new Date(post.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : post.timeAgo || "Recent"}</span></div>
+                    <p className="mt-1 truncate text-xs font-semibold text-foreground">{post.title || post.body || "Huddle discussion"}</p>
+                    <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{post.body}</p>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-xl bg-muted/30 p-4 text-xs text-muted-foreground">No recent discussions. Visit Huddle to explore the student community.</p>
+            )}
+          </section>
+
+          {upcomingItems.length > 0 && (
+            <section className="rounded-3xl border border-border/80 bg-card p-5 shadow-xs xl:col-span-2">
+              <div className="mb-3 flex items-center justify-between gap-3"><div className="flex items-center gap-2"><HiOutlineCalendarDays className="h-4 w-4 text-primary" /><h2 className="text-sm font-extrabold text-foreground">Upcoming internship interviews</h2></div><Link to="/applications" className="text-xs font-bold text-primary hover:underline">View applications</Link></div>
+              <div className="grid gap-2 sm:grid-cols-2">{upcomingItems.filter((item) => item.kind === "Interview").slice(0, 4).map((item) => <Link key={item.id} to="/applications" className="rounded-xl bg-muted/30 p-3"><p className="truncate text-xs font-bold text-foreground">{item.title}</p><p className="mt-1 truncate text-[11px] text-muted-foreground">{item.subtitle} · {new Date(item.when).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</p></Link>)}</div>
+            </section>
+          )}
+        </div>
+      )}
     </div>
   </AppShell>
 );

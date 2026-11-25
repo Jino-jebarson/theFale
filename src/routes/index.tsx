@@ -5,7 +5,8 @@ import { FaLinkedin } from "react-icons/fa6";
 import { openCookieSettings } from "@/components/fale/CookieConsent";
 import { setState, useApp, type Portal } from "@/lib/store";
 import { isApiEnabled } from "@/lib/api";
-import { sendOtp, verifyOtp } from "@/lib/adapters/authAdapter";
+import { facilityPasswordLogin, sendOtp, verifyOtp } from "@/lib/adapters/authAdapter";
+import { InterfaceLanguagePicker } from "@/lib/i18n";
 import heroHandsVideo from "@/assets/hero-hands.mp4";
 import "@/styles/fale-signin.css";
 
@@ -63,7 +64,7 @@ function SignInPage() {
   });
 
   // Views: "choices" | "phone" | "otp" | "email" | "done"
-  const [view, setView] = useState<"choices" | "phone" | "otp" | "email" | "done">("choices");
+  const [view, setView] = useState<"choices" | "phone" | "otp" | "password" | "email" | "done">("choices");
   const [isSignUp, setIsSignUp] = useState(false);
   const [phone, setPhone] = useState("");
   const [phoneErr, setPhoneErr] = useState("");
@@ -75,6 +76,8 @@ function SignInPage() {
   const [shakeField, setShakeField] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [otpErr, setOtpErr] = useState("");
+  const [facilityPassword, setFacilityPassword] = useState("");
+  const [passwordErr, setPasswordErr] = useState("");
 
   const otpInputs = useRef<(HTMLInputElement | null)[]>([]);
   const cursorGlowRef = useRef<HTMLDivElement | null>(null);
@@ -253,6 +256,41 @@ function SignInPage() {
     }
   };
 
+  const handleFacilityPasswordLogin = async () => {
+    const digits = phone.replace(/\D/g, "");
+    if (!/^[6-9]\d{9}$/.test(digits)) {
+      setPasswordErr("Enter the verified 10-digit mobile number for your facility account.");
+      return;
+    }
+    if (!facilityPassword) {
+      setPasswordErr("Enter your password, or choose OTP sign-in.");
+      return;
+    }
+    setPasswordErr("");
+    setIsSubmitting(true);
+    try {
+      const authData = await facilityPasswordLogin(digits, facilityPassword);
+      const isOnboarded = Boolean(authData.onboarded ?? authData.user?.onboarded);
+      setDoneTitle("You're in.");
+      setDoneText(isOnboarded ? "Welcome back to The Fale." : "Sign-in successful. Redirecting to facility setup…");
+      setView("done");
+      setState({
+        signedIn: true,
+        portal: "facility",
+        contact: `+91 ${digits}`,
+        onboarded: isOnboarded,
+      });
+      window.setTimeout(() => {
+        if (isOnboarded) navigate({ to: "/employer" });
+        else navigate({ to: "/onboarding", search: { role: "employer" } });
+      }, 650);
+    } catch (err: any) {
+      setPasswordErr(err.message || "We couldn't sign you in. Check your details or use OTP instead.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Phone flow
   const handleSendOtp = async () => {
     const digits = phone.replace(/\D/g, "");
@@ -416,6 +454,10 @@ function SignInPage() {
             <span className="fale">fale</span>
           </span>
         </Link>
+
+        <div className="flex justify-end -mt-2 mb-2">
+          <InterfaceLanguagePicker />
+        </div>
 
         {/* Role Toggle Switch */}
         <div>
@@ -600,6 +642,47 @@ function SignInPage() {
                 disabled={isSubmitting}
               >
                 {isSubmitting ? "Sending OTP…" : isSignUp ? "Send Verification OTP" : "Send OTP"}
+              </button>
+              {mode === "hire" && !isSignUp && (
+                <button type="button" className="linkb" onClick={() => { setPasswordErr(""); setView("password"); }}>
+                  Sign in with password
+                </button>
+              )}
+            </div>
+          )}
+
+          {view === "password" && mode === "hire" && (
+            <div className="flow">
+              <p className="note">Sign in to your facility account with your verified mobile number and password.</p>
+              <label className={`input-row ${shakeField ? "shake" : ""}`}>
+                <span className="pre">+91</span>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={11}
+                  placeholder="98765 43210"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  autoComplete="tel-national"
+                />
+              </label>
+              <label className="input-row">
+                <span className="pre">Password</span>
+                <input
+                  type="password"
+                  value={facilityPassword}
+                  onChange={(e) => setFacilityPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && void handleFacilityPasswordLogin()}
+                  autoComplete="current-password"
+                  placeholder="Your password"
+                />
+              </label>
+              {passwordErr && <div className="err">{passwordErr}</div>}
+              <button type="button" className="s-btn primary" onClick={() => void handleFacilityPasswordLogin()} disabled={isSubmitting}>
+                {isSubmitting ? "Signing in…" : "Sign in"}
+              </button>
+              <button type="button" className="linkb" onClick={() => { setPasswordErr(""); setFacilityPassword(""); setView("phone"); }}>
+                Use a one-time code instead
               </button>
             </div>
           )}

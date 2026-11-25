@@ -13,6 +13,10 @@ export interface StudentLockCardProps {
   title: string;
   description: string;
   badgeText?: string;
+  item1Title?: string;
+  item1Desc?: string;
+  item2Title?: string;
+  item2Desc?: string;
   item3Title?: string;
   item3Desc?: string;
   item3Icon?: ElementType;
@@ -25,13 +29,17 @@ export interface StudentLockCardProps {
 export function StudentLockCard({
   title,
   description,
-  badgeText = "Post-Graduation Access",
-  item3Title = "Instant Locum Shifts",
-  item3Desc = "Access flexible 24/7 on-call duty passes & guaranteed payouts.",
+  badgeText = "For after graduation",
+  item1Title = "While you study",
+  item1Desc = "Build supervised experience through relevant internships.",
+  item2Title = "Before shifts unlock",
+  item2Desc = "Graduate, complete professional registration, and verify your profile.",
+  item3Title = "Shift payout history",
+  item3Desc = "Your completed shift payouts will be recorded here.",
   item3Icon: Item3Icon = HiOutlineBolt,
   primaryCtaText = "Explore Internships",
   primaryCtaLink = "/jobs",
-  secondaryCtaText = "Earn Student CME Points",
+  secondaryCtaText = "Explore learning",
   secondaryCtaLink = "/learning",
 }: StudentLockCardProps) {
   return (
@@ -62,9 +70,9 @@ export function StudentLockCard({
             <HiOutlineAcademicCap className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-xs font-bold text-foreground">Academic Training</p>
+            <p className="text-xs font-bold text-foreground">{item1Title}</p>
             <p className="text-[11px] text-muted-foreground leading-relaxed mt-0.5">
-              Complete supervised hospital postings & college logbook.
+              {item1Desc}
             </p>
           </div>
         </div>
@@ -74,9 +82,9 @@ export function StudentLockCard({
             <HiOutlineShieldCheck className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-xs font-bold text-foreground">Council License</p>
+            <p className="text-xs font-bold text-foreground">{item2Title}</p>
             <p className="text-[11px] text-muted-foreground leading-relaxed mt-0.5">
-              Register with your Medical or Nursing Council upon graduation.
+              {item2Desc}
             </p>
           </div>
         </div>

@@ -236,11 +236,11 @@ function CandidateEarningsPage() {
         <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-2xl font-extrabold tracking-tight sm:text-[28px] text-foreground">
-              {isStudent ? "Earnings & Clinical Stipends" : "Earnings & Payouts"}
+              {isStudent ? "Earnings" : "Earnings & Payouts"}
             </h1>
             <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed max-w-3xl">
               {isStudent
-                ? "Professional clinical earnings, locum shift payouts, and disbursement accounts."
+                ? "Clinical shift payouts become available after graduation, professional registration, and FALE verification."
                 : `Track saved shift remuneration, recorded bank payments and deductions for ${candidateName}.`}
             </p>
           </div>
@@ -295,10 +295,17 @@ function CandidateEarningsPage() {
 
         {isStudent ? (
           <StudentLockCard
-            title="Clinical Earnings Unlock After Graduation"
-            description="Shift earnings, automated bank disbursements, and tax certificates will unlock once you complete your graduation and verify your Council Registration."
-            item3Title="Recorded Payouts"
-            item3Desc="Access recorded bank payments and payout advice."
+            badgeText="After graduation and verification"
+            title="Shift earnings become available after graduation"
+            description="After graduating, add your professional council registration and complete FALE verification. Eligible clinical shift payouts and payment records will appear here once you begin working shifts."
+            item1Title="Available now: internships"
+            item1Desc="Explore course-relevant placements and track your applications from your student dashboard."
+            item2Title="To unlock shifts"
+            item2Desc="Graduate, add your professional registration, and complete profile verification."
+            item3Title="Payout history"
+            item3Desc="Records appear here after you complete eligible clinical shifts."
+            primaryCtaText="Browse internships"
+            secondaryCtaText="Explore learning"
           />
         ) : (
           <>

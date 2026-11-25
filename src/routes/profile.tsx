@@ -185,6 +185,9 @@ function Profile() {
     regNumber: "",
     college: "",
     qualification: "",
+    studyYear: "",
+    expectedGraduationMonth: "",
+    universityRegNo: "",
     addressLine: "",
     city: "",
     state: "",
@@ -221,6 +224,11 @@ function Profile() {
             qual: data.qualification || "",
             college: data.college,
             institution: data.college,
+            course: data.course,
+            studyYear: data.studyYear,
+            expectedGraduationMonth: data.expectedGraduationMonth,
+            expectedGraduationYear: data.expectedGraduationYear,
+            universityRegNo: data.universityRegNo,
             council: data.council,
             regNo: data.regNumber,
             regYear: data.regYear,
@@ -300,6 +308,11 @@ function Profile() {
 
   const candidateLevel = String(candidateData?.candidateLevel?.toLowerCase() || p["level"] || p["cadreLevel"] || (exp === "Fresher" ? "fresher" : "professional"));
   const isStudent = Boolean(candidateData ? candidateData.isStudent : candidateLevel === "student");
+  const courseName = candidateData?.course || (isStudent ? String(p["course"] || role) : "");
+  const studyYear = candidateData?.studyYear || String(p["studyYear"] || "");
+  const expectedGraduationMonth = candidateData?.expectedGraduationMonth || String(p["expectedGraduationMonth"] || "");
+  const expectedGraduationYear = candidateData?.expectedGraduationYear || (expectedGraduationMonth ? Number(expectedGraduationMonth.slice(0, 4)) : undefined);
+  const universityRegNo = candidateData?.universityRegNo || String(p["universityRegNo"] || "");
   const isFresher = Boolean(p["fresher"] || exp.toLowerCase().includes("fresher") || candidateLevel === "fresher");
 
   const openToWork = candidateData
@@ -430,14 +443,15 @@ function Profile() {
   const profileStrengthItems: Array<{ label: string; complete: boolean; section: Exclude<EditSectionType, null> | "certifications"; countsTowardStrength: boolean; optional?: boolean }> = [
     { label: "Name and location", complete: Boolean(name && name !== "Clinician" && city), section: "address", countsTowardStrength: true },
     { label: "Contact email", complete: Boolean(email), section: "personal" as const, countsTowardStrength: true },
-    { label: "Professional details", complete: Boolean(role && role !== "Clinician" && hasSpecialty), section: "personal" as const, countsTowardStrength: true },
-    { label: isStudent ? "Education details" : "Qualification", complete: Boolean(qual && collegeName), section: "licensure" as const, countsTowardStrength: true },
+    ...(!isStudent ? [{ label: "Professional details", complete: Boolean(role && role !== "Clinician" && hasSpecialty), section: "personal" as const, countsTowardStrength: true }] : []),
+    { label: isStudent ? "Course and college" : "Qualification", complete: Boolean((isStudent ? courseName : qual) && collegeName), section: "licensure" as const, countsTowardStrength: true },
+    ...(isStudent ? [{ label: "Study timeline", complete: Boolean(studyYear && expectedGraduationMonth), section: "licensure" as const, countsTowardStrength: true }] : []),
     { label: "Skills", complete: skills.length > 0, section: "skills" as const, countsTowardStrength: true },
     { label: "Languages", complete: languages.length > 0, section: "personal" as const, countsTowardStrength: true },
-    { label: isStudent || isFresher ? "Clinical exposure" : "Work experience", complete: exps.length > 0, section: "work" as const, countsTowardStrength: !isStudent && !isFresher, optional: isStudent || isFresher },
-    { label: "Job preferences", complete: Boolean(preferredCities.length && employmentType && availability), section: "openToWork" as const, countsTowardStrength: true },
-    { label: "Professional summary", complete: Boolean(bio.trim()), section: "summary" as const, countsTowardStrength: true },
-    { label: "Expected salary", complete: hasExpectedSalary, section: "openToWork" as const, countsTowardStrength: false, optional: true },
+    ...(!isStudent ? [{ label: isFresher ? "Clinical exposure" : "Work experience", complete: exps.length > 0, section: "work" as const, countsTowardStrength: !isFresher, optional: isFresher }] : [{ label: "Clinical exposure", complete: exps.length > 0, section: "work" as const, countsTowardStrength: false, optional: true }]),
+    { label: isStudent ? "Internship preferences" : "Job preferences", complete: Boolean(preferredCities.length && employmentType && availability), section: "openToWork" as const, countsTowardStrength: true },
+    { label: isStudent ? "Student introduction" : "Professional summary", complete: Boolean(bio.trim()), section: "summary" as const, countsTowardStrength: true },
+    { label: isStudent ? "Expected stipend" : "Expected salary", complete: hasExpectedSalary, section: "openToWork" as const, countsTowardStrength: false, optional: true },
     { label: "Certifications", complete: Boolean(candidateData?.certifications?.length), section: "certifications" as const, countsTowardStrength: false },
   ];
   const profileCompletion = calculateCandidateProfileStrength({
@@ -448,6 +462,9 @@ function Profile() {
     specialty,
     qualification: qual,
     college: collegeName,
+    course: courseName,
+    studyYear,
+    expectedGraduationMonth,
     skills,
     languages,
     experienceHistory: exps,
@@ -777,7 +794,10 @@ function Profile() {
       council,
       regNumber: regNo,
       college: collegeName,
-      qualification: qual,
+      qualification: isStudent ? courseName : qual,
+      studyYear,
+      expectedGraduationMonth,
+      universityRegNo,
       addressLine,
       city,
       state: stateName,
@@ -823,7 +843,14 @@ function Profile() {
         changes = { bio: editForm.bio };
       } else if (activeEditSection === "licensure") {
         changes = isStudent
-          ? { course: editForm.qualification, collegeName: editForm.college }
+          ? {
+              course: editForm.qualification.trim(),
+              collegeName: editForm.college.trim(),
+              studyYear: editForm.studyYear,
+              expectedGraduationMonth: editForm.expectedGraduationMonth || undefined,
+              expectedGraduationYear: editForm.expectedGraduationMonth ? Number(editForm.expectedGraduationMonth.slice(0, 4)) : undefined,
+              universityRegNo: editForm.universityRegNo.trim() || undefined,
+            }
           : { council: editForm.council, councilRegistrationNumber: editForm.regNumber, qualification: editForm.qualification, collegeName: editForm.college };
       } else if (activeEditSection === "address") {
         changes = {
@@ -883,6 +910,11 @@ function Profile() {
           qualification: updated.qualification || "",
           college: updated.college || "",
           institution: updated.college || "",
+          course: updated.course || "",
+          studyYear: updated.studyYear || "",
+          expectedGraduationMonth: updated.expectedGraduationMonth || "",
+          expectedGraduationYear: updated.expectedGraduationYear,
+          universityRegNo: updated.universityRegNo || "",
           council: updated.council || "",
           regNo: updated.regNumber || "",
           city: updated.city || "",
@@ -1061,7 +1093,7 @@ function Profile() {
                       {effectiveKycStatus === "VERIFIED" ? "Verified" : effectiveKycStatus === "REJECTED" ? "Needs an update" : effectiveKycStatus === "DOCUMENTS_REQUIRED" ? "Documents required" : "Verification pending"}
                     </Badge>
                   </div>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{isStudent ? qual || role : role}{specialty && specialty !== "Not provided" ? ` | ${specialty}` : ""}</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">{isStudent ? [courseName, studyYear].filter(Boolean).join(" · ") || "Student profile" : role}{specialty && specialty !== "Not provided" ? ` | ${specialty}` : ""}</p>
                   <p className="mt-1 flex items-center justify-center gap-1.5 text-xs text-muted-foreground sm:justify-start"><HiOutlineMapPin className="h-4 w-4 shrink-0 text-primary" /><span>{[city, stateName].filter(Boolean).join(", ") || "Add your location"}</span></p>
                 </div>
               </div>
@@ -1081,7 +1113,7 @@ function Profile() {
 
         <section className="rounded-3xl border border-border bg-card p-4 shadow-sm sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div><h2 className="text-base font-extrabold text-foreground">Build your profile strength</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Add the details that help hospitals understand your experience. Optional items won’t hold back your completion score.</p></div>
+            <div><h2 className="text-base font-extrabold text-foreground">{isStudent ? "Build your student profile" : "Build your profile strength"}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{isStudent ? "Add your study details and preferences so hospitals can find internship matches." : "Add the details that help hospitals understand your experience. Optional items won’t hold back your completion score."}</p></div>
             <div className="flex w-full min-w-0 flex-col gap-2 lg:w-auto lg:flex-row lg:items-center lg:gap-3">
               <div className="w-full min-w-0 lg:min-w-32"><div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] font-semibold text-muted-foreground"><span>{completedStrengthCount} of {strengthSignals.length} essentials</span><span>{profileCompletion}%</span></div><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${profileCompletion}%` }} /></div></div>
               {incompleteStrengthItems[0] && <Button type="button" size="sm" onClick={() => handleProfileStrengthAction(incompleteStrengthItems[0])} className="h-9 w-full min-w-0 shrink-0 whitespace-nowrap text-xs font-bold lg:w-auto lg:px-3">Continue profile <HiOutlineArrowRight className="ml-1.5 h-4 w-4" /></Button>}
@@ -1101,7 +1133,7 @@ function Profile() {
             <button type="button" aria-expanded={showCompletedStrength} onClick={() => setShowCompletedStrength((visible) => !visible)} className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg py-1 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground">{showCompletedStrength ? "Hide completed" : `Show completed (${completedProfileItems.length})`}<HiOutlineChevronDown className={cn("h-4 w-4 transition-transform", showCompletedStrength && "rotate-180")} /></button>
             {showCompletedStrength && <div className="mt-2 grid gap-2 sm:grid-cols-2">{completedProfileItems.map((item) => <button key={item.label} type="button" onClick={() => handleProfileStrengthAction(item)} aria-label={`Edit ${item.label}`} className="group flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-border/70 bg-muted/20 px-3.5 py-2 text-left transition-colors hover:border-primary/35 hover:bg-primary-soft/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"><HiCheckCircle className="h-4 w-4 shrink-0 text-emerald-600" /><span className="min-w-0 flex-1 text-xs font-medium text-muted-foreground">{item.label}</span><HiOutlinePencilSquare className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" aria-hidden="true" /></button>)}</div>}
           </div>}
-          <div className="mt-5 rounded-2xl border border-primary/20 bg-primary-soft/15 p-3.5 sm:p-4">
+          {!isStudent && <div className="mt-5 rounded-2xl border border-primary/20 bg-primary-soft/15 p-3.5 sm:p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-start gap-3">
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><HiOutlineCheckBadge className="h-5 w-5" /></span>
@@ -1109,7 +1141,7 @@ function Profile() {
               </div>
               <Button type="button" size="sm" variant="outline" onClick={openCertificateEligibility} className="w-full shrink-0 rounded-xl border-primary/30 bg-card text-primary hover:bg-primary/5 sm:w-auto">{certificationStrengthItem.complete ? "View certificates" : "Add certificates"}<HiOutlineArrowRight className="ml-1.5 h-4 w-4" /></Button>
             </div>
-          </div>
+          </div>}
           {optionalProfileItems.length > 0 && <div className="mt-5 border-t border-border pt-4">
             <div className="mb-2.5 flex items-center gap-2"><HiOutlineSparkles className="h-4 w-4 text-primary" /><h3 className="text-xs font-bold text-foreground">Optional profile boosts</h3><span className="text-[10px] text-muted-foreground">Help hospitals learn more about you</span></div>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{optionalProfileItems.map((item) => <button key={item.label} type="button" onClick={() => handleProfileStrengthAction(item)} aria-label={`${item.complete ? item.section === "certifications" ? "Add another certificate" : "Edit" : "Add"} ${item.label}`} className="group flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-dashed border-border bg-background px-3.5 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary-soft/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"><span className="min-w-0 flex-1 text-xs font-medium text-foreground">{item.label}</span>{item.complete ? <HiOutlinePencilSquare className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" aria-hidden="true" /> : <HiOutlinePlus className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}</button>)}</div>
@@ -1120,27 +1152,28 @@ function Profile() {
             <section className="rounded-3xl border border-border bg-card p-5 shadow-sm sm:p-6">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">Professional profile</p>
-                  <h2 className="mt-1 text-base font-extrabold text-foreground">Your clinical focus</h2>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">Help hospitals understand your role and the work you're interested in.</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">{isStudent ? "Student profile" : "Professional profile"}</p>
+                  <h2 className="mt-1 text-base font-extrabold text-foreground">{isStudent ? "Your course and interests" : "Your clinical focus"}</h2>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{isStudent ? "Help teaching hospitals understand what you’re studying and where you want to grow." : "Help hospitals understand your role and the work you're interested in."}</p>
                 </div>
-                <ProfileFieldAction label="professional details" hasValue={Boolean(role && role !== "Clinician" && hasSpecialty)} onClick={() => openEditSection("personal")} />
+                <ProfileFieldAction label={isStudent ? "study details" : "professional details"} hasValue={isStudent ? Boolean(courseName && collegeName) : Boolean(role && role !== "Clinician" && hasSpecialty)} onClick={() => openEditSection(isStudent ? "licensure" : "personal")} />
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-border bg-muted/20 p-4">
-                  <span className="text-[11px] font-semibold text-muted-foreground">Profession</span>
-                  <p className="mt-1 text-sm font-bold text-foreground">{role && role !== "Clinician" ? role : "Add your profession"}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Your broad healthcare role.</p>
+                  <span className="text-[11px] font-semibold text-muted-foreground">{isStudent ? "Course" : "Profession"}</span>
+                  <p className="mt-1 text-sm font-bold text-foreground">{(isStudent ? courseName : role) || (isStudent ? "Add your course" : "Add your profession")}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{isStudent ? collegeName || "Add your college or institution." : "Your broad healthcare role."}</p>
                 </div>
                 <div className={cn("rounded-2xl border p-4", hasSpecialty ? "border-border bg-muted/20" : "border-primary/25 bg-primary-soft/20")}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <span className="text-[11px] font-semibold text-muted-foreground">{isStudent ? "Area of interest" : "Specialization"} <span className="font-normal">· Optional</span></span>
                       <p className="mt-1 text-sm font-bold text-foreground">{hasSpecialty ? specialty : "Not added yet"}</p>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{hasSpecialty ? "You can update this whenever your focus changes." : "Add a clinical area to help improve job matches."}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{hasSpecialty ? "You can update this whenever your focus changes." : isStudent ? "Add an area you’re interested in learning more about." : "Add a clinical area to help improve job matches."}</p>
                     </div>
                     {!hasSpecialty && <HiOutlineSparkles className="mt-1 h-5 w-5 shrink-0 text-primary" />}
                   </div>
+                    {isStudent && <ProfileFieldAction label="area of interest" hasValue={hasSpecialty} onClick={() => openEditSection("personal")} />}
                 </div>
               </div>
             </section>
@@ -1148,10 +1181,10 @@ function Profile() {
             <div className="grid gap-5 sm:grid-cols-2">
               <section className="rounded-3xl border border-border bg-card p-5 shadow-sm sm:p-6">
                 <div className="flex items-start justify-between gap-3">
-                  <div><h2 className="text-base font-extrabold text-foreground">About you</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">A short introduction for hospitals.</p></div>
-                  <ProfileFieldAction label="professional summary" hasValue={Boolean(bio.trim())} onClick={() => openEditSection("summary")} />
+                  <div><h2 className="text-base font-extrabold text-foreground">{isStudent ? "About your studies" : "About you"}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{isStudent ? "Introduce yourself to teaching hospitals offering internships." : "A short introduction for hospitals."}</p></div>
+                  <ProfileFieldAction label={isStudent ? "student introduction" : "professional summary"} hasValue={Boolean(bio.trim())} onClick={() => openEditSection("summary")} />
                 </div>
-                <p className="mt-4 whitespace-pre-line text-sm leading-6 text-muted-foreground">{bio || "Add a short summary about your field, experience, and clinical strengths."}</p>
+                <p className="mt-4 whitespace-pre-line text-sm leading-6 text-muted-foreground">{bio || (isStudent ? "Share what you’re studying, what interests you, and what you hope to learn during an internship." : "Add a short summary about your field, experience, and clinical strengths.")}</p>
                 <div className="mt-5 border-t border-border pt-4">
                   <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-bold text-foreground">Skills</h3><ProfileFieldAction label="skills" hasValue={skills.length > 0} onClick={() => openEditSection("skills")} /></div>
                   {skills.length ? <div className="mt-3 flex flex-wrap gap-2">{skills.map((skill) => <Badge key={skill} variant="outline" className="rounded-lg border-primary/20 bg-primary-soft/30 px-2.5 py-1 text-primary">{skill}</Badge>)}</div> : <p className="mt-2 text-xs text-muted-foreground">No skills added yet.</p>}
@@ -1165,11 +1198,15 @@ function Profile() {
                 </div>
                 {exps.length ? <div className="mt-4 space-y-3">{exps.map((item, idx) => <div key={item.id || idx} className="rounded-2xl border border-border p-3"><p className="text-sm font-bold text-foreground">{item.title}</p><p className="mt-1 text-xs text-muted-foreground">{item.organization}{item.startDate ? ` · ${item.startDate}` : ""}{item.current ? " · Current" : item.endDate ? ` – ${item.endDate}` : ""}</p>{item.description && <p className="mt-2 whitespace-pre-line text-xs leading-5 text-muted-foreground">{item.description}</p>}</div>)}</div> : <p className="mt-4 rounded-2xl bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">No experience added yet.</p>}
                 <div className="mt-5 border-t border-border pt-4">
-                  <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-bold text-foreground">Education and registration</h3><ProfileFieldAction label="education and registration" hasValue={Boolean(qual || collegeName || council || regNo)} onClick={() => openEditSection("licensure")} /></div>
+                  <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-bold text-foreground">{isStudent ? "Education and study" : "Education and registration"}</h3><ProfileFieldAction label={isStudent ? "study details" : "education and registration"} hasValue={isStudent ? Boolean(courseName && collegeName && studyYear && expectedGraduationMonth) : Boolean(qual || collegeName || council || regNo)} onClick={() => openEditSection("licensure")} /></div>
                   <dl className="mt-3 space-y-3 text-xs">
-                    <div className="flex items-start justify-between gap-3"><dt className="text-muted-foreground">Qualification</dt><dd className="text-right font-semibold text-foreground">{qual || (isStudent ? role : "Not added")}</dd></div>
+                    <div className="flex items-start justify-between gap-3"><dt className="text-muted-foreground">{isStudent ? "Course" : "Qualification"}</dt><dd className="max-w-[65%] text-right font-semibold text-foreground">{(isStudent ? courseName : qual) || "Not added"}</dd></div>
                     <div className="flex items-start justify-between gap-3"><dt className="text-muted-foreground">College / institution</dt><dd className="text-right font-semibold text-foreground">{collegeName || "Not added"}</dd></div>
-                    {!isStudent && <div className="flex items-start justify-between gap-3"><dt className="text-muted-foreground">Council registration</dt><dd className="text-right font-semibold text-foreground">{regNo || "Not added"}</dd></div>}
+                    {isStudent ? <>
+                      <div className="flex items-start justify-between gap-3"><dt className="text-muted-foreground">Year of study / training</dt><dd className="max-w-[65%] text-right font-semibold text-foreground">{studyYear || "Not added"}</dd></div>
+                      <div className="flex items-start justify-between gap-3"><dt className="text-muted-foreground">{studyYear.toLowerCase().includes("internship") || studyYear.toLowerCase().includes("training") ? "Expected completion" : "Expected graduation"}</dt><dd className="text-right font-semibold text-foreground">{expectedGraduationMonth ? new Date(`${expectedGraduationMonth}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" }) : expectedGraduationYear || "Not added"}</dd></div>
+                      {universityRegNo && <div className="flex items-start justify-between gap-3"><dt className="text-muted-foreground">University registration</dt><dd className="max-w-[65%] break-all text-right font-semibold text-foreground">{universityRegNo}</dd></div>}
+                    </> : <div className="flex items-start justify-between gap-3"><dt className="text-muted-foreground">Council registration</dt><dd className="text-right font-semibold text-foreground">{regNo || "Not added"}</dd></div>}
                   </dl>
                 </div>
               </section>
@@ -1314,16 +1351,16 @@ function Profile() {
 
             <section className="flex h-full flex-col rounded-3xl border border-border bg-card p-5 shadow-sm sm:p-6">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0"><h2 className="text-base font-extrabold text-foreground">Work preferences</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Choose where and how you’d like to hear about healthcare opportunities.</p></div>
-                <ProfileFieldAction label="work preferences" hasValue={Boolean(preferredCities.length || employmentType || availability || hasExpectedSalary)} onClick={() => openEditSection("openToWork")} />
+                <div className="min-w-0"><h2 className="text-base font-extrabold text-foreground">{isStudent ? "Internship preferences" : "Work preferences"}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{isStudent ? "Choose where and when you’re available for internships and clinical placements." : "Choose where and how you’d like to hear about healthcare opportunities."}</p></div>
+                <ProfileFieldAction label={isStudent ? "internship preferences" : "work preferences"} hasValue={Boolean(preferredCities.length || employmentType || availability || hasExpectedSalary)} onClick={() => openEditSection("openToWork")} />
               </div>
-              <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs font-semibold text-foreground">Open to work</span><Switch checked={openToWork} disabled={availabilityAction.isPending || loading || Boolean(profileError)} onCheckedChange={handleToggleOpenToWork} aria-label="Open to work" className="data-[state=checked]:bg-primary" /></div>
-              <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{openToWork ? "On · You’re letting hospitals know you’re open to relevant opportunities." : "Paused · Turn this on when you’re ready to be considered for new opportunities."}</p>
+              <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs font-semibold text-foreground">{isStudent ? "Open to internship opportunities" : "Open to work"}</span><Switch checked={openToWork} disabled={availabilityAction.isPending || loading || Boolean(profileError)} onCheckedChange={handleToggleOpenToWork} aria-label={isStudent ? "Open to internship opportunities" : "Open to work"} className="data-[state=checked]:bg-primary" /></div>
+              <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{openToWork ? isStudent ? "On · Hospitals can consider you for suitable internships and placements." : "On · You’re letting hospitals know you’re open to relevant opportunities." : isStudent ? "Paused · Turn this on when you’re ready to be considered for internships." : "Paused · Turn this on when you’re ready to be considered for new opportunities."}</p>
               <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <div className="flex min-h-[88px] min-w-0 flex-col rounded-2xl bg-muted/40 p-3"><span className="min-h-8 text-[11px] font-semibold leading-4 text-muted-foreground">Preferred locations</span><p className="mt-auto break-words pt-1 text-sm font-bold text-foreground">{preferredCities.join(", ") || "Add locations"}</p></div>
-                <div className="flex min-h-[88px] min-w-0 flex-col rounded-2xl bg-muted/40 p-3"><span className="min-h-8 text-[11px] font-semibold leading-4 text-muted-foreground">Employment type</span><p className="mt-auto break-words pt-1 text-sm font-bold text-foreground">{employmentType || "Choose a type"}</p></div>
-                <div className="flex min-h-[88px] min-w-0 flex-col rounded-2xl bg-muted/40 p-3"><span className="min-h-8 text-[11px] font-semibold leading-4 text-muted-foreground">Available from</span><p className="mt-auto break-words pt-1 text-sm font-bold text-foreground">{availability || "Set availability"}</p></div>
-                <div className="flex min-h-[88px] min-w-0 flex-col rounded-2xl bg-muted/40 p-3"><span className="min-h-8 text-[11px] font-semibold leading-4 text-muted-foreground">Expected monthly salary <span className="font-normal">(optional)</span></span><p className="mt-auto break-words pt-1 text-sm font-bold text-foreground">{salary || "Not provided"}</p></div>
+                <div className="flex min-h-[88px] min-w-0 flex-col rounded-2xl bg-muted/40 p-3"><span className="min-h-8 text-[11px] font-semibold leading-4 text-muted-foreground">{isStudent ? "Preferred internship locations" : "Preferred locations"}</span><p className="mt-auto break-words pt-1 text-sm font-bold text-foreground">{preferredCities.join(", ") || "Add locations"}</p></div>
+                <div className="flex min-h-[88px] min-w-0 flex-col rounded-2xl bg-muted/40 p-3"><span className="min-h-8 text-[11px] font-semibold leading-4 text-muted-foreground">{isStudent ? "Opportunity type" : "Employment type"}</span><p className="mt-auto break-words pt-1 text-sm font-bold text-foreground">{employmentType || (isStudent ? "Choose an option" : "Choose a type")}</p></div>
+                <div className="flex min-h-[88px] min-w-0 flex-col rounded-2xl bg-muted/40 p-3"><span className="min-h-8 text-[11px] font-semibold leading-4 text-muted-foreground">{isStudent ? "Available for placement" : "Available from"}</span><p className="mt-auto break-words pt-1 text-sm font-bold text-foreground">{availability || "Set availability"}</p></div>
+                <div className="flex min-h-[88px] min-w-0 flex-col rounded-2xl bg-muted/40 p-3"><span className="min-h-8 text-[11px] font-semibold leading-4 text-muted-foreground">{isStudent ? "Expected monthly stipend" : "Expected monthly salary"} <span className="font-normal">(optional)</span></span><p className="mt-auto break-words pt-1 text-sm font-bold text-foreground">{salary || "Not provided"}</p></div>
               </div>
             </section>
 
@@ -1352,9 +1389,9 @@ function Profile() {
                           <div className="min-w-0">
                             <h3 className="text-sm sm:text-base font-extrabold text-foreground truncate">
                               {activeEditSection === "personal" && "Edit Personal Details"}
-                              {activeEditSection === "openToWork" && "Edit Placement Preferences"}
-                              {activeEditSection === "summary" && "Edit Clinical Summary"}
-                              {activeEditSection === "licensure" && "Edit Licensure & Degree"}
+                              {activeEditSection === "openToWork" && (isStudent ? "Edit Internship Preferences" : "Edit Placement Preferences")}
+                              {activeEditSection === "summary" && (isStudent ? "Edit Student Introduction" : "Edit Clinical Summary")}
+                              {activeEditSection === "licensure" && (isStudent ? "Edit Education & Study" : "Edit Licensure & Degree")}
                               {activeEditSection === "address" && "Edit Name & Location"}
                               {activeEditSection === "work" && "Edit Clinical Work History"}
                               {activeEditSection === "skills" && "Edit Clinical Competencies"}
@@ -1459,29 +1496,29 @@ function Profile() {
                         {activeEditSection === "openToWork" && (
                           <>
                             <MultiSelectField
-                              label="Preferred work locations"
+                              label={isStudent ? "Preferred internship locations" : "Preferred work locations"}
                               options={indianCities}
                               value={editForm.preferredCitiesText}
                               onChange={(preferredCitiesText) => setEditForm({ ...editForm, preferredCitiesText })}
                               placeholder="Choose one or more cities"
-                              hint="Select the cities where you’re open to work."
+                              hint={isStudent ? "Select the cities where you can attend internships or clinical placements." : "Select the cities where you’re open to work."}
                             />
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
-                              <SelectField label="Employment type" options={["Full-time", "Part-time", "Contract", "Internship", "Per-shift"]} value={normalizeEmploymentType(editForm.employmentType)} onChange={(employmentType) => setEditForm({ ...editForm, employmentType })} placeholder="Select employment type" />
-                              <SelectField label="Availability" options={["Immediately", "Within 15 days", "Within 30 days", "Within 60 days", "Within 90 days"]} value={normalizeAvailability(editForm.availability)} onChange={(availability) => setEditForm({ ...editForm, availability })} placeholder="Select availability" />
+                              <SelectField label={isStudent ? "Opportunity type" : "Employment type"} options={isStudent ? ["Internship", "Part-time", "Per-shift"] : ["Full-time", "Part-time", "Contract", "Internship", "Per-shift"]} value={normalizeEmploymentType(editForm.employmentType)} onChange={(employmentType) => setEditForm({ ...editForm, employmentType })} placeholder={isStudent ? "Select opportunity type" : "Select employment type"} />
+                              <SelectField label={isStudent ? "Available for placement" : "Availability"} options={["Immediately", "Within 15 days", "Within 30 days", "Within 60 days", "Within 90 days"]} value={normalizeAvailability(editForm.availability)} onChange={(availability) => setEditForm({ ...editForm, availability })} placeholder="Select availability" />
                             </div>
                             <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 sm:gap-4">
-                              <Field label="Minimum monthly salary" optional prefix="₹" type="number" min="1" value={editForm.salaryMinRupees} onChange={(event) => setEditForm({ ...editForm, salaryMinRupees: event.target.value })} placeholder="Leave blank" />
-                              <Field label="Maximum monthly salary" optional prefix="₹" type="number" min="1" value={editForm.salaryMaxRupees} onChange={(event) => setEditForm({ ...editForm, salaryMaxRupees: event.target.value })} placeholder="Leave blank" />
+                              <Field label={`Minimum monthly ${isStudent ? "stipend" : "salary"}`} optional prefix="₹" type="number" min="1" value={editForm.salaryMinRupees} onChange={(event) => setEditForm({ ...editForm, salaryMinRupees: event.target.value })} placeholder="Leave blank" />
+                              <Field label={`Maximum monthly ${isStudent ? "stipend" : "salary"}`} optional prefix="₹" type="number" min="1" value={editForm.salaryMaxRupees} onChange={(event) => setEditForm({ ...editForm, salaryMaxRupees: event.target.value })} placeholder="Leave blank" />
                             </div>
-                            <p className="text-[10px] leading-4 text-muted-foreground">Expected salary is optional. You can leave both amounts blank.</p>
+                            <p className="text-[10px] leading-4 text-muted-foreground">{isStudent ? "Expected stipend is optional. You can leave both amounts blank." : "Expected salary is optional. You can leave both amounts blank."}</p>
                           </>
                         )}
 
                         {activeEditSection === "summary" && (
                           <div className="space-y-2.5">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <label className="block text-xs font-bold text-foreground">Scope of Practice &amp; Clinical Summary</label>
+                              <label className="block text-xs font-bold text-foreground">{isStudent ? "Introduction for teaching hospitals" : "Scope of Practice &amp; Clinical Summary"}</label>
                               <button
                                 type="button"
                                 disabled={isEnhancingBio}
@@ -1526,7 +1563,7 @@ function Profile() {
                               rows={5}
                               value={editForm.bio}
                               onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
-                              placeholder="Write your clinical experience, specialties, procedures performed, or residency details..."
+                              placeholder={isStudent ? "Share what you’re studying, your interests, and what you hope to learn..." : "Write your clinical experience, specialties, procedures performed, or residency details..."}
                               className="box-border block w-full min-w-0 max-w-full resize-y rounded-xl border border-border bg-muted/40 p-3 text-xs font-medium text-foreground focus:outline-none focus:border-primary leading-relaxed"
                             />
                           </div>
@@ -1546,7 +1583,7 @@ function Profile() {
                             </>}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                               <div className="space-y-1.5">
-                                <label className="block text-xs font-bold text-foreground">{isStudent ? "Course / qualification" : "Primary degree / qualification"}</label>
+                                <label className="block text-xs font-bold text-foreground">{isStudent ? "Course" : "Primary degree / qualification"}</label>
                                 <input
                                   type="text"
                                   value={editForm.qualification}
@@ -1555,7 +1592,7 @@ function Profile() {
                                 />
                               </div>
                               <div className="space-y-1.5">
-                                <label className="block text-xs font-bold text-foreground">College / institution</label>
+                                <label className="block text-xs font-bold text-foreground">{isStudent ? "College / institution" : "College / institution"}</label>
                                 <input
                                   type="text"
                                   value={editForm.college}
@@ -1564,6 +1601,14 @@ function Profile() {
                                 />
                               </div>
                             </div>
+                            {isStudent && <>
+                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+                                <SelectField label="Year of study / training stage" options={["1st year", "2nd year", "3rd year", "4th year", "Internship / clinical training"]} value={editForm.studyYear} onChange={(studyYear) => setEditForm((form) => ({ ...form, studyYear }))} placeholder="Select your current stage" />
+                                <DateField label={editForm.studyYear.toLowerCase().includes("internship") || editForm.studyYear.toLowerCase().includes("training") ? "Expected completion month" : "Expected graduation month"} monthOnly value={editForm.expectedGraduationMonth} onChange={(expectedGraduationMonth) => setEditForm((form) => ({ ...form, expectedGraduationMonth }))} placeholder="Select month and year" />
+                              </div>
+                              {(editForm.studyYear.toLowerCase().includes("internship") || editForm.studyYear.toLowerCase().includes("training")) && <p className="-mt-2 text-[11px] leading-4 text-muted-foreground">Choose this stage if you’re completing your course’s internship or supervised clinical training.</p>}
+                              <Field label="University registration number" optional value={editForm.universityRegNo} onChange={(event) => setEditForm((form) => ({ ...form, universityRegNo: event.target.value }))} placeholder="Enter the number shown on your student record" />
+                            </>}
                           </>
                         )}
 
